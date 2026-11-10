@@ -1,25 +1,26 @@
 # AIS Branch & Asset Operations
 
-A responsive web application for coordinating scanner replacement work across
-branches. The application includes an asset register, replacement rounds,
-scheduling, technician work orders, evidence capture, and office acceptance.
+A responsive web application for recording and tracking scanner replacement work across branches. The public repository contains the application, database schema changes, synthetic tests, and operating notes; it does not contain the workbook's branch/team data, production records, credentials, or database backups.
+
+## Workflow in this version
+
+- Admin opens a branch work order for one or more scanners already listed in the verified asset register. No duplicate confirmation, team assignment, or appointment date is required.
+- Admin and onsite technicians can work on every open order. A work item represents one scanner.
+- Technicians record the observed result, old/new serial numbers, device details, up to six evidence photos, and signatures from the onsite technician and scanner user.
+- If the listed scanner is missing or a different one is found, the item is sent for Admin review. The application does not silently create or move an asset. Admin review and a separate acceptance signature are required before delivery is complete.
+- The work order shows status, scanner details, evidence, signatures, and the recorded work history. Branch lists can be filtered by province.
+
+Scanner stock issuance and stock balance tracking are outside this version.
 
 ## Technology
 
 - React, TypeScript, and Vite
-- Supabase Auth and Postgres, with authorization enforced by database RPCs and
-  Row Level Security
-- Cloudflare Workers static asset delivery
-
-This repository contains application code, database migrations, and synthetic
-tests only. It does not include production records, credentials, or database
-backup archives. Configure your own Supabase and Cloudflare projects before
-connecting or deploying it.
+- Supabase Auth and Postgres, with authorization enforced by database functions and Row Level Security
+- Cloudflare Workers for static asset delivery
 
 ## Local development
 
-Requirements: Node.js 22 or newer, npm, and Docker Desktop for local database
-tests.
+Requirements: Node.js 22 or newer, npm, Docker Desktop, and the Supabase CLI for database tests.
 
 ```powershell
 cd web
@@ -28,31 +29,21 @@ Copy-Item .env.example .env.local
 Copy-Item wrangler.example.jsonc wrangler.jsonc
 ```
 
-Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local` to
-your own Supabase project. Set the same project's URL as `SUPABASE_URL` in
-`wrangler.jsonc`. Use a publishable key only; never place a service-role or
-secret key in browser configuration.
-
-Start the app with `npm run dev`. Build it with `npm run build`.
-
-## Database and tests
-
-Ordered schema changes are in `web/supabase/migrations/`; database tests are in
-`web/supabase/tests/`. Use a separate local Supabase instance for development:
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `.env.local` to a project you control. Set the matching URL in `wrangler.jsonc`. Use only the publishable key in the browser; never put a service-role or secret key in client configuration.
 
 ```powershell
-npx supabase start
+npm run dev
+npm run typecheck
+npm run build
 npm run test:all
-npx supabase stop
 ```
 
-Do not run development migrations against a production project. Review database
-changes and authorization rules before deploying them.
+`npm run test:all` starts application-flow tests and the local Supabase database tests. The local database tests require Docker Desktop to be running.
 
-## Deployment
+## Database and deployment
 
-The app can be deployed to Cloudflare Workers after configuring your own
-Cloudflare account and Supabase environment. The committed configuration is a
-starting point; review resource names, environment variables, security headers,
-and migrations for your environment before deployment.
+Database migrations are in `web/supabase/migrations/`; SQL tests are in `web/supabase/tests/`. The two workbook data-seed migrations are intentionally empty in this public edition. Import your own branch and asset data through the app after setting up a separate project. Test fixtures use synthetic data.
 
+Review every migration and authorization rule before applying changes to any shared or production database. Configure your own Supabase and Cloudflare projects and review `web/wrangler.example.jsonc` before deployment. Build with `npm run build`, then deploy with `npx wrangler deploy` from `web/`.
+
+The examples are starting points, not a production security review or a guarantee about provider pricing or free-tier limits.
