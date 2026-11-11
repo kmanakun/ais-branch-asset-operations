@@ -1,4 +1,5 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 
 select plan(21);
@@ -15,8 +16,12 @@ select ok(not has_function_privilege('anon', 'app_private.ais_purge_expired_impo
 select ok(not has_function_privilege('authenticated', 'app_private.ais_purge_expired_import_staging()', 'EXECUTE'), 'authenticated cannot invoke cleanup');
 select is((select count(*)::int from cron.job where jobname = 'ais-purge-expired-import-staging'), 1, 'one hourly cleanup job is scheduled');
 
-insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
-values ('f9000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'cleanup-local@test.invalid', '', now(), now(), now());
+select pg_temp.create_test_google_user(
+  'f9000000-0000-4000-8000-000000000001',
+  'cleanup-local@test.invalid',
+  'admin',
+  'Cleanup Test Admin'
+);
 
 insert into app_private.import_batches (id, source_name, uploaded_by, status, row_count, issue_count, expires_at) values
   ('f9100000-0000-4000-8000-000000000001', 'expired-test.xlsx', 'f9000000-0000-4000-8000-000000000001', 'staged', 1, 1, now() - interval '1 hour'),

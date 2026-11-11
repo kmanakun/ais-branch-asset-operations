@@ -151,144 +151,4 @@ begin
     where batch_id = v_batch_id
     group by normalized_data->>'location_code', lower(regexp_replace(btrim(normalized_data->>'loc_bld'), '[[:space:]]+', ' ', 'g'))
     having count(distinct nullif(lower(regexp_replace(btrim(normalized_data->>'address'), '[[:space:]]+', ' ', 'g')), '')) > 1
-       or count(distinct nullif(lower(btrim(normalized_data->>'province')), '')) > 1
-       or count(distinct nullif(lower(btrim(normalized_data->>'district')), '')) > 1
-       or count(distinct nullif(lower(btrim(normalized_data->>'subdistrict')), '')) > 1
-       or count(distinct nullif(btrim(normalized_data->>'postal_code'), '')) > 1
-       or count(distinct nullif(lower(regexp_replace(btrim(normalized_data->>'subs_zn'), '[[:space:]]+', ' ', 'g')), '')) > 1
-       or count(distinct nullif(lower(regexp_replace(btrim(normalized_data->>'ro'), '[[:space:]]+', ' ', 'g')), '')) > 1
-       or count(distinct nullif(lower(regexp_replace(btrim(normalized_data->>'high_level_location'), '[[:space:]]+', ' ', 'g')), '')) > 1
-  ) conflicts on conflicts.location_code = staged.normalized_data->>'location_code'
-      and conflicts.branch_name = lower(regexp_replace(btrim(staged.normalized_data->>'loc_bld'), '[[:space:]]+', ' ', 'g'))
-  where staged.batch_id = v_batch_id;
-
-  update app_private.import_batches batch
-  set issue_count = (select count(*) from app_private.import_row_issues issue where issue.batch_id = batch.id)
-  where batch.id = v_batch_id
-  returning issue_count into issues_count;
-  select coalesce(jsonb_agg(jsonb_build_object(
-    'row_number', issue.row_number, 'field', issue.field_name,
-    'code', issue.issue_code, 'message', issue.message
-  ) order by issue.row_number, issue.field_name), '[]'::jsonb)
-  into issues
-  from (select * from app_private.import_row_issues where batch_id = v_batch_id
-    order by row_number, field_name limit 100) issue;
-  select count(*) into rows_count from app_private.import_staging_rows where batch_id = v_batch_id;
-  select count(*) into branches_count from (
-    select distinct normalized_data->>'location_code',
-      lower(regexp_replace(btrim(normalized_data->>'loc_bld'), '[[:space:]]+', ' ', 'g'))
-    from app_private.import_staging_rows where batch_id = v_batch_id
-  ) distinct_branches;
-  return jsonb_build_object(
-    'batch_id', v_batch_id, 'status', 'staged', 'row_count', rows_count, 'branch_count', branches_count,
-    'issue_count', issues_count, 'issues_truncated', issues_count > 100, 'issues', issues
-  );
-end
-$$;
-
-create function public.ais_incremental_import_stage(p_rows jsonb)
-returns jsonb language plpgsql security definer set search_path = '' as $$
-declare result jsonb; batch uuid; v_issue_count integer; issues jsonb; actor_role app_private.app_role;
-begin
-  select role into actor_role from app_private.user_access where user_id=auth.uid() and is_active;
-  if auth.uid() is null or actor_role is distinct from 'data_manager' then
-    raise exception 'Data Manager access required' using errcode='42501';
-  end if;
-  if p_rows is null or jsonb_typeof(p_rows) is distinct from 'array' then
-    raise exception 'Import must contain between 1 and 5000 rows' using errcode='22023';
-  end if;
-  if jsonb_array_length(p_rows) not between 1 and 5000 or octet_length(p_rows::text) > 8388608 then
-    raise exception 'Import payload is empty or exceeds limits' using errcode='22023';
-  end if;
-  if jsonb_typeof(p_rows) = 'array' then
-    select coalesce(jsonb_agg(case when jsonb_typeof(item) = 'object' and item ? 'com_sn'
-      then jsonb_set(item, '{com_sn}', coalesce(to_jsonb(regexp_replace(item->>'com_sn', '^[[:space:]]+|[[:space:]]+$', '', 'g')), 'null'::jsonb))
-      else item end order by ordinality), '[]'::jsonb) into p_rows
-    from jsonb_array_elements(p_rows) with ordinality as rows(item, ordinality);
-  end if;
-  result := public.ais_import_stage(p_rows);
-  batch := (result->>'batch_id')::uuid;
-  update app_private.import_batches set import_mode = 'incremental' where id = batch;
-  delete from app_private.import_row_issues where batch_id = batch and issue_code = 'serial_exists';
-  insert into app_private.import_row_issues(batch_id,row_number,field_name,issue_code,message)
-  select batch,s.row_number,'branch','branch_not_found','à¹„à¸¡à¹ˆà¸à¸šà¸ªà¸²à¸‚à¸²à¹ƒà¸™à¸—à¸°à¹€à¸šà¸µà¸¢à¸™' from app_private.import_staging_rows s
-  where s.batch_id=batch and s.normalized_data->>'location_code' is not null and s.normalized_data->>'loc_bld' is not null
-    and not exists (select 1 from app_private.branches br where br.location_code=s.normalized_data->>'location_code'
-      and lower(regexp_replace(btrim(br.loc_bld),'[[:space:]]+',' ','g'))=lower(regexp_replace(btrim(s.normalized_data->>'loc_bld'),'[[:space:]]+',' ','g')));
-  insert into app_private.import_row_issues(batch_id,row_number,field_name,issue_code,message)
-  select batch,s.row_number,'com_sn','ambiguous_serial','Serial à¸à¸³à¸à¸§à¸¡à¹ƒà¸™à¸—à¸°à¹€à¸šà¸µà¸¢à¸™' from app_private.import_staging_rows s
-  join app_private.scanner_assets a on regexp_replace(a.com_sn, '^[[:space:]]+|[[:space:]]+$', '', 'g')=s.normalized_data->>'com_sn' where s.batch_id=batch
-  group by s.row_number having count(*)>1;
-  insert into app_private.import_row_issues(batch_id,row_number,field_name,issue_code,message)
-  select batch,s.row_number,'branch','serial_branch_conflict','Serial à¸­à¸¢à¸¹à¹ˆà¸„à¸™à¸¥à¸°à¸ªà¸²à¸‚à¸²à¸à¸±à¸šà¸—à¸°à¹€à¸šà¸µà¸¢à¸™' from app_private.import_staging_rows s
-  join app_private.scanner_assets a on regexp_replace(a.com_sn, '^[[:space:]]+|[[:space:]]+$', '', 'g')=s.normalized_data->>'com_sn'
-  join app_private.branches br on br.id=a.branch_id where s.batch_id=batch and
-    (br.location_code <> s.normalized_data->>'location_code' or
-     lower(regexp_replace(btrim(br.loc_bld),'[[:space:]]+',' ','g')) <> lower(regexp_replace(btrim(s.normalized_data->>'loc_bld'),'[[:space:]]+',' ','g')));
-  select count(*) into v_issue_count from app_private.import_row_issues where batch_id = batch;
-  update app_private.import_batches b set issue_count = v_issue_count where id = batch;
-  select coalesce(jsonb_agg(jsonb_build_object('row_number', i.row_number, 'field', i.field_name,
-    'code', i.issue_code, 'message', i.message) order by i.row_number, i.field_name), '[]'::jsonb)
-    into issues from (select * from app_private.import_row_issues where batch_id = batch order by row_number, field_name limit 100) i;
-  return result || jsonb_build_object('issue_count', v_issue_count, 'issues_truncated', v_issue_count > 100, 'issues', issues);
-end $$;
-
-
-revoke all on function public.ais_import_stage(jsonb) from public, anon;
-grant execute on function public.ais_import_stage(jsonb) to authenticated;
-comment on function public.ais_import_stage(jsonb) is
-  'Stages approved branch and scanner fields for active Data Managers. The RPC accepts row data only; import source metadata is fixed server-side.';
-
-revoke all on function public.ais_incremental_import_stage(jsonb) from public, anon;
-grant execute on function public.ais_incremental_import_stage(jsonb) to authenticated;
-comment on function public.ais_incremental_import_stage(jsonb) is
-  'Stages incremental scanner rows for active Data Managers. The RPC accepts row data only and records a server-side generic import source.';
-
-create or replace function app_private.ais_purge_expired_import_staging()
-returns integer
-language plpgsql
-security definer
-set search_path = ''
-as $$
-declare
-  expired_batch_count integer;
-  retention_cutoff timestamptz := now() - interval '1 year';
-begin
-  delete from app_private.import_staging_rows staged
-  using app_private.import_batches batch
-  where staged.batch_id = batch.id
-    and batch.status = 'staged'
-    and batch.expires_at <= now();
-
-  delete from app_private.import_row_issues issue
-  using app_private.import_batches batch
-  where issue.batch_id = batch.id
-    and batch.status = 'staged'
-    and batch.expires_at <= now();
-
-  update app_private.import_batches batch
-  set status = 'expired'
-  where batch.status = 'staged'
-    and batch.expires_at <= now();
-
-  get diagnostics expired_batch_count = row_count;
-
-  -- Retain import batches and their row-free audit summaries for one year.
-  -- At the exact cutoff, keep them; the next hourly run may purge them.
-  delete from app_private.audit_events
-  where entity_type = 'import_batch'
-    and created_at < retention_cutoff;
-
-  delete from app_private.import_batches
-  where created_at < retention_cutoff;
-
-  return expired_batch_count;
-end
-$$;
-
-revoke all on function app_private.ais_purge_expired_import_staging() from public, anon, authenticated;
-comment on function app_private.ais_purge_expired_import_staging() is
-  'Internal hourly maintenance: removes expired staged rows/issues and import batch/audit metadata older than one year. Import metadata exactly at the one-year cutoff is retained until the next run. Not executable by browser roles.';
-
-
--- The existing hourly job already calls this function; no duplicate job is created.
+       or count(distinct nullif(lower(btrim(normalizexÛ{h‘éì¶»§q«^vRÀĞ¢v6öFRrÂ—77VRæ—77VUö6öFRÂvÖW76vRrÂ—77VRæÖW76vPĞ¢’÷&FW"'’—77VRç&÷uöçVÖ&W"Â—77VRæf–VÆEöæÖR’ÂuµÒs£¦§6öæ"Ğ¢–çFò—77VW0Ğ¢g&öÒ‡6VÆV7B¢g&öÒ÷&—fFRæ–×÷'E÷&÷uö—77VW2v†W&R&F6…ö–BÒeö&F6…ö–@Ğ¢÷&FW"'’&÷uöçVÖ&W"Âf–VÆEöæÖRÆ–Ö—B’—77VS°Ğ¢6VÆV7B6÷VçB‚¢’–çFò&÷w5ö6÷VçBg&öÒ÷&—fFRæ–×÷'E÷7Fv–æu÷&÷w2v†W&R&F6…ö–BÒeö&F6…ö–C°Ğ¢6VÆV7B6÷VçB‚¢’–çFò'&æ6†W5ö6÷VçBg&öÒ€Ğ¢6VÆV7BF—7F–æ7Bæ÷&ÖÆ—¦VEöFFÓãâvÆö6F–öåö6öFRrÀĞ¢Æ÷vW"‡&VvW‡÷&WÆ6R†'G&–Ò†æ÷&ÖÆ—¦VEöFFÓãâvÆö5ö&ÆBr’Âuµ³§76S¥ÕÒ²rÂrrÂvrr’Ğ¢g&öÒ÷&—fFRæ–×÷'E÷7Fv–æu÷&÷w2v†W&R&F6…ö–BÒeö&F6…ö–@Ğ¢’F—7F–æ7Eö'&æ6†W3°Ğ¢&WGW&â§6öæ%ö'V–ÆEöö&¦V7B€Ğ¢v&F6…ö–BrÂeö&F6…ö–BÂw7FGW2rÂw7FvVBrÂw&÷uö6÷VçBrÂ&÷w5ö6÷VçBÂv'&æ6…ö6÷VçBrÂ'&æ6†W5ö6÷VçBÀĞ¢v—77VUö6÷VçBrÂ—77VW5ö6÷VçBÂv—77VW5÷G'Væ6FVBrÂ—77VW5ö6÷VçBâÂv—77VW2rÂ—77VW0Ğ¢“°Ğ¦Væ@Ğ¢BC°Ğ Ğ¦7&VFRgVæ7F–öâV&Æ–2æ—5ö–æ7&VÖVçFÅö–×÷'E÷7FvR‡÷&÷w2§6öæ"Ğ§&WGW&ç2§6öæ"ÆæwVvRÇw7Â6V7W&—G’FVf–æW"6WB6V&6…÷F‚Òrr2B@Ğ¦FV6Æ&R&W7VÇB§6öæ#²&F6‚WV–C²eö—77VUö6÷VçB–çFVvW#²—77VW2§6öæ#²7F÷%÷&öÆR÷&—fFRæ÷&öÆS°Ğ¦&Vv–àĞ¢6VÆV7B&öÆR–çFò7F÷%÷&öÆRg&öÒ÷&—fFRçW6W%ö66W72v†W&RW6W%ö–CÖWF‚çV–B‚’æB—5ö7F—fS°Ğ¢–bWF‚çV–B‚’—2çVÆÂ÷"7F÷%÷&öÆR—2F—7F–æ7Bg&öÒvFFöÖævW"rF†VàĞ¢&—6RW†6WF–öâtFFÖævW"66W72&WV—&VBrW6–ærW'&6öFSÒsC#Ss°Ğ¢VæB–c°Ğ¢–b÷&÷w2—2çVÆÂ÷"§6öæ%÷G—Vöb‡÷&÷w2’—2F—7F–æ7Bg&öÒv'&’rF†VàĞ¢&—6RW†6WF–öât–×÷'B×W7B6öçF–â&WGvVVâæBS&÷w2rW6–ærW'&6öFSÒs###2s°Ğ¢VæB–c°Ğ¢–b§6öæ%ö'&•öÆVæwF‚‡÷&÷w2’æ÷B&WGvVVâæBS÷"ö7FWEöÆVæwF‚‡÷&÷w3£§FW‡B’âƒ3ƒƒc‚F†VàĞ¢&—6RW†6WF–öât–×÷'B–ÆöB—2V×G’÷"W†6VVG2Æ–Ö—G2rW6–ærW'&6öFSÒs###2s°Ğ¢VæB–c°Ğ¢–b§6öæ%÷G—Vöb‡÷&÷w2’Òv'&’rF†VàĞ¢6VÆV7B6öÆW66R†§6öæ%övr†66Rv†Vâ§6öæ%÷G—Vöb†—FVÒ’Òvö&¦V7BræB—FVÒòv6öÕ÷6âpĞ¢F†Vâ§6öæ%÷6WB†—FVÒÂw¶6öÕ÷6çÒrÂ6öÆW66R‡Fõö§6öæ"‡&VvW‡÷&WÆ6R†—FVÒÓãâv6öÕ÷6ârÂuåµ³§76S¥ÕÒ·Åµ³§76S¥ÕÒ²BrÂrrÂvrr’’ÂvçVÆÂs£¦§6öæ"’Ğ¢VÇ6R—FVÒVæB÷&FW"'’÷&F–æÆ—G’’ÂuµÒs£¦§6öæ"’–çFò÷&÷w0Ğ¢g&öÒ§6öæ%ö'&•öVÆVÖVçG2‡÷&÷w2’v—F‚÷&F–æÆ—G’2&÷w2†—FVÒÂ÷&F–æÆ—G’“°Ğ¢VæB–c°Ğ¢&W7VÇB£ÒV&Æ–2æ—5ö–×÷'E÷7FvR‡÷&÷w2“°Ğ¢&F6‚£Ò‡&W7VÇBÓãâv&F6…ö–Br“£§WV–C°Ğ¢WFFR÷&—fFRæ–×÷'Eö&F6†W26WB–×÷'EöÖöFRÒv–æ7&VÖVçFÂrv†W&R–BÒ&F6ƒ°Ğ¢FVÆWFRg&öÒ÷&—fFRæ–×÷'E÷&÷uö—77VW2v†W&R&F6…ö–BÒ&F6‚æB—77VUö6öFRÒw6W&–ÅöW†—7G2s°Ğ¢–ç6W'B–çFò÷&—fFRæ–×÷'E÷&÷uö—77VW2†&F6…ö–BÇ&÷uöçVÖ&W"Æf–VÆEöæÖRÆ—77VUö6öFRÆÖW76vRĞ¢6VÆV7B&F6‚Ç2ç&÷uöçVÖ&W"Âv'&æ6‚rÂv'&æ6…öæ÷Eöf÷VæBrÂ~˜NŠ˜‰î‰®Š®‹.ˆ.‹.˜>‰‰~‹˜‰®‹^Š.‰’rg&öÒ÷&—fFRæ–×÷'E÷7Fv–æu÷&÷w20Ğ¢v†W&R2æ&F6…ö–CÖ&F6‚æB2ææ÷&ÖÆ—¦VEöFFÓãâvÆö6F–öåö6öFRr—2æ÷BçVÆÂæB2ææ÷&ÖÆ—¦VEöFFÓãâvÆö5ö&ÆBr—2æ÷BçVÆÀĞ¢æBæ÷BW†—7G2‡6VÆV7Bg&öÒ÷&—fFRæ'&æ6†W2'"v†W&R'"æÆö6F–öåö6öFS×2ææ÷&ÖÆ—¦VEöFFÓãâvÆö6F–öåö6öFRpĞ¢æBÆ÷vW"‡&VvW‡÷&WÆ6R†'G&–Ò†'"æÆö5ö&ÆB’Âuµ³§76S¥ÕÒ²rÂrrÂvrr’“ÖÆ÷vW"‡&VvW‡÷&WÆ6R†'G&–Ò‡2ææ÷&ÖÆ—¦VEöFFÓãâvÆö5ö&ÆBr’Âuµ³§76S¥ÕÒ²rÂrrÂvrr’’“°Ğ¢–ç6W'B–çFò÷&—fFRæ–×÷'E÷&÷uö—77VW2†&F6…ö–BÇ&÷uöçVÖ&W"Æf–VÆEöæÖRÆ—77VUö6öFRÆÖW76vRĞ¢6VÆV7B&F6‚Ç2ç&÷uöçVÖ&W"Âv6öÕ÷6ârÂvÖ&–wV÷W5÷6W&–ÂrÂu6W&–Âˆ‹>ˆŠ~Š˜>‰‰~‹˜‰®‹^Š.‰’rg&öÒ÷&—fFRæ–×÷'E÷7Fv–æu÷&÷w20Ğ¢¦ö–â÷&—fFRç66ææW%ö76WG2öâ&VvW‡÷&WÆ6R†æ6öÕ÷6âÂuåµ³§76S¥ÕÒ·Åµ³§76S¥ÕÒ²BrÂrrÂvrr“×2ææ÷&ÖÆ—¦VEöFFÓãâv6öÕ÷6ârv†W&R2æ&F6…ö–CÖ&F6€Ğ¢w&÷W'’2ç&÷uöçVÖ&W"†f–ær6÷VçB‚¢“ã°Ğ¢–ç6W'B–çFò÷&—fFRæ–×÷'E÷&÷uö—77VW2†&F6…ö–BÇ&÷uöçVÖ&W"Æf–VÆEöæÖRÆ—77VUö6öFRÆÖW76vRĞ¢6VÆV7B&F6‚Ç2ç&÷uöçVÖ&W"Âv'&æ6‚rÂw6W&–Åö'&æ6…ö6öæfÆ–7BrÂu6W&–ÂŠŞŠ.‹˜ˆN‰Š^‹Š®‹.ˆ.‹.ˆ‹‰®‰~‹˜‰®‹^Š.‰’rg&öÒ÷&—fFRæ–×÷'E÷7Fv–æu÷&÷w20Ğ¢¦ö–â÷&—fFRç66ææW%ö76WG2öâ&VvW‡÷&WÆ6R†æ6öÕ÷6âÂuåµ³§76S¥ÕÒ·Åµ³§76S¥ÕÒ²BrÂrrÂvrr“×2ææ÷&ÖÆ—¦VEöFFÓãâv6öÕ÷6âpĞ¢¦ö–â÷&—fFRæ'&æ6†W2'"öâ'"æ–CÖæ'&æ6…ö–Bv†W&R2æ&F6…ö–CÖ&F6‚æ@Ğ¢†'"æÆö6F–öåö6öFRÃâ2ææ÷&ÖÆ—¦VEöFFÓãâvÆö6F–öåö6öFRr÷ Ğ¢Æ÷vW"‡&VvW‡÷&WÆ6R†'G&–Ò†'"æÆö5ö&ÆB’Âuµ³§76S¥ÕÒ²rÂrrÂvrr’’ÃâÆ÷vW"‡&VvW‡÷&WÆ6R†'G&–Ò‡2ææ÷&ÖÆ—¦VEöFFÓãâvÆö5ö&ÆBr’Âuµ³§76S¥ÕÒ²rÂrrÂvrr’’“°Ğ¢6VÆV7B6÷VçB‚¢’–çFòeö—77VUö6÷VçBg&öÒ÷&—fFRæ–×÷'E÷&÷uö—77VW2v†W&R&F6…ö–BÒ&F6ƒ°Ğ¢WFFR÷&—fFRæ–×÷'Eö&F6†W2"6WB—77VUö6÷VçBÒeö—77VUö6÷VçBv†W&R–BÒ&F6ƒ°Ğ¢6VÆV7B6öÆW66R†§6öæ%övr†§6öæ%ö'V–ÆEöö&¦V7B‚w&÷uöçVÖ&W"rÂ’ç&÷uöçVÖ&W"Âvf–VÆBrÂ’æf–VÆEöæÖRÀĞ¢v6öFRrÂ’æ—77VUö6öFRÂvÖW76vRrÂ’æÖW76vR’÷&FW"'’’ç&÷uöçVÖ&W"Â’æf–VÆEöæÖR’ÂuµÒs£¦§6öæ"Ğ¢–çFò—77VW2g&öÒ‡6VÆV7B¢g&öÒ÷&—fFRæ–×÷'E÷&÷uö—77VW2v†W&R&F6…ö–BÒ&F6‚÷&FW"'’&÷uöçVÖ&W"Âf–VÆEöæÖRÆ–Ö—B’“°Ğ¢&WGW&â&W7VÇBÇÂ§6öæ%ö'V–ÆEöö&¦V7B‚v—77VUö6÷VçBrÂeö—77VUö6÷VçBÂv—77VW5÷G'Væ6FVBrÂeö—77VUö6÷VçBâÂv—77VW2rÂ—77VW2“°Ğ¦VæBBC°Ğ Ğ Ğ§&Wfö¶RÆÂöâgVæ7F–öâV&Æ–2æ—5ö–×÷'E÷7FvR†§6öæ"’g&öÒV&Æ–2Âæöã°Ğ¦w&çBW†V7WFRöâgVæ7F–öâV&Æ–2æ—5ö–×÷'E÷7FvR†§6öæ"’FòWF†VçF–6FVC°Ğ¦6öÖÖVçBöâgVæ7F–öâV&Æ–2æ—5ö–×÷'E÷7FvR†§6öæ"’—0Ğ¢u7FvW2&÷fVB'&æ6‚æB66ææW"f–VÆG2f÷"7F—fRFFÖævW'2âF†R%266WG2&÷rFFöæÇ“²–×÷'B6÷W&6RÖWFFF—2f—†VB6W'fW"×6–FRâs°Ğ Ğ§&Wfö¶RÆÂöâgVæ7F–öâV&Æ–2æ—5ö–æ7&VÖVçFÅö–×÷'E÷7FvR†§6öæ"’g&öÒV&Æ–2Âæöã°Ğ¦w&çBW†V7WFRöâgVæ7F–öâV&Æ–2æ—5ö–æ7&VÖVçFÅö–×÷'E÷7FvR†§6öæ"’FòWF†VçF–6FVC°Ğ¦6öÖÖVçBöâgVæ7F–öâV&Æ–2æ—5ö–æ7&VÖVçFÅö–×÷'E÷7FvR†§6öæ"’—0Ğ¢u7FvW2–æ7&VÖVçFÂ66ææW"&÷w2f÷"7F—fRFFÖævW'2âF†R%266WG2&÷rFFöæÇ’æB&V6÷&G26W'fW"×6–FRvVæW&–2–×÷'B6÷W&6Râs°Ğ Ğ¦7&VFR÷"&WÆ6RgVæ7F–öâ÷&—fFRæ—5÷W&vUöW‡—&VEö–×÷'E÷7Fv–ær‚Ğ§&WGW&ç2–çFVvW Ğ¦ÆæwVvRÇw7ÀĞ§6V7W&—G’FVf–æW Ğ§6WB6V&6…÷F‚ÒrpĞ¦2B@Ğ¦FV6Æ&PĞ¢W‡—&VEö&F6…ö6÷VçB–çFVvW#°Ğ¢&WFVçF–öåö7WFöfbF–ÖW7F×G¢£Òæ÷r‚’Ò–çFW'fÂs–V"s°Ğ¦&Vv–àĞ¢FVÆWFRg&öÒ÷&—fFRæ–×÷'E÷7Fv–æu÷&÷w27FvV@Ğ¢W6–ær÷&—fFRæ–×÷'Eö&F6†W2&F6€Ğ¢v†W&R7FvVBæ&F6…ö–BÒ&F6‚æ–@Ğ¢æB&F6‚ç7FGW2Òw7FvVBpĞ¢æB&F6‚æW‡—&W5öBÃÒæ÷r‚“°Ğ Ğ¢FVÆWFRg&öÒ÷&—fFRæ–×÷'E÷&÷uö—77VW2—77VPĞ¢W6–ær÷&—fFRæ–×÷'Eö&F6†W2&F6€Ğ¢v†W&R—77VRæ&F6…ö–BÒ&F6‚æ–@Ğ¢æB&F6‚ç7FGW2Òw7FvVBpĞ¢æB&F6‚æW‡—&W5öBÃÒæ÷r‚“°Ğ Ğ¢WFFR÷&—fFRæ–×÷'Eö&F6†W2&F6€Ğ¢6WB7FGW2ÒvW‡—&VBpĞ¢v†W&R&F6‚ç7FGW2Òw7FvVBpĞ¢æB&F6‚æW‡—&W5öBÃÒæ÷r‚“°Ğ Ğ¢vWBF–væ÷7F–72W‡—&VEö&F6…ö6÷VçBÒ&÷uö6÷VçC°Ğ Ğ¢ÒÒ&WF–â–×÷'B&F6†W2æBF†V—"&÷rÖg&VRVF—B7VÖÖ&–W2f÷"öæR–V"àĞ¢ÒÒBF†RW†7B7WFöfbÂ¶VWF†VÓ²F†RæW‡B†÷W&Ç’'VâÖ’W&vRF†VÒàĞ¢FVÆWFRg&öÒ÷&—fFRæVF—EöWfVçG0Ğ¢v†W&RVçF—G•÷G—RÒv–×÷'Eö&F6‚pĞ¢æB7&VFVEöBÂ&WFVçF–öåö7WFöfc°Ğ Ğ¢FVÆWFRg&öÒ÷&—fFRæ–×÷'Eö&F6†W0Ğ¢v†W&R7&VFVEöBÂ&WFVçF–öåö7WFöfc°Ğ Ğ¢&WGW&âW‡—&VEö&F6…ö6÷VçC°Ğ¦Væ@Ğ¢BC°Ğ Ğ§&Wfö¶RÆÂöâgVæ7F–öâ÷&—fFRæ—5÷W&vUöW‡—&VEö–×÷'E÷7Fv–ær‚’g&öÒV&Æ–2ÂæöâÂWF†VçF–6FVC°Ğ¦6öÖÖVçBöâgVæ7F–öâ÷&—fFRæ—5÷W&vUöW‡—&VEö–×÷'E÷7Fv–ær‚’—0Ğ¢t–çFW&æÂ†÷W&Ç’Ö–çFVææ6S¢&VÖ÷fW2W‡—&VB7FvVB&÷w2ö—77VW2æB–×÷'B&F6‚öVF—BÖWFFFöÆFW"F†âöæR–V"â–×÷'BÖWFFFW†7FÇ’BF†RöæR×–V"7WFöfb—2&WF–æVBVçF–ÂF†RæW‡B'Vââæ÷BW†V7WF&ÆR'’'&÷w6W"&öÆW2âs°Ğ Ğ Ğ¢ÒÒF†RW†—7F–ær†÷W&Ç’¦ö"Ç&VG’6ÆÇ2F†—2gVæ7F–öã²æòGWÆ–6FR¦ö"—27&VFVBàĞ

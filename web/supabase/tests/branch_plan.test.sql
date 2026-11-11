@@ -1,4 +1,5 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select no_plan();
 
@@ -15,9 +16,12 @@ select throws_ok($$select public.ais_branch_plan_page()$$,'42501','Application a
 select throws_ok($$select public.ais_branch_plan_inventory('1201')$$,'42501','Application access required','unprovisioned users cannot inspect planned-branch inventory');
 select throws_ok($$select public.ais_branch_plan_inventory_for_row(2)$$,'42501','Application access required','unprovisioned users cannot inspect inventory by plan row');
 
-insert into auth.users(id,aud,role,email,encrypted_password,email_confirmed_at,created_at,updated_at)
-values('fc900000-0000-4000-8000-000000000001','authenticated','authenticated','branch-plan-manager@test.invalid','',now(),now(),now())
-on conflict (id) do nothing;
+select pg_temp.create_test_google_user(
+  'fc900000-0000-4000-8000-000000000001',
+  'branch-plan-manager@test.invalid',
+  'admin',
+  'Branch Plan Manager'
+);
 insert into app_private.user_access(user_id,role,display_name,is_active)
 values('fc900000-0000-4000-8000-000000000001','admin','Branch Plan Manager',true)
 on conflict (user_id) do update set role=excluded.role,is_active=excluded.is_active;

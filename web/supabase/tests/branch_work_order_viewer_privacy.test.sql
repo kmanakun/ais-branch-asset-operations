@@ -1,4 +1,5 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select no_plan();
 
@@ -7,10 +8,16 @@ select no_plan();
 alter table app_private.user_access
   drop constraint user_access_only_admin_and_field_technician;
 
-insert into auth.users(id, aud, role, email, created_at, updated_at) values
-  ('fae10000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'viewer-privacy@test.invalid', now(), now());
+select pg_temp.create_test_google_user(
+  'fae10000-0000-4000-8000-000000000001',
+  'viewer-privacy@test.invalid',
+  'field_technician',
+  'Privacy Viewer'
+);
 insert into app_private.user_access(user_id, role, display_name, is_active) values
-  ('fae10000-0000-4000-8000-000000000001', 'viewer', 'Privacy Viewer', true);
+  ('fae10000-0000-4000-8000-000000000001', 'viewer', 'Privacy Viewer', true)
+on conflict (user_id) do update
+  set role = excluded.role, display_name = excluded.display_name, is_active = excluded.is_active;
 insert into app_private.branches(id, location_code, loc_bld, province) values
   ('fae10000-0000-4000-8000-000000000002', 'VIEWER-PRIVACY', 'Viewer Privacy Branch', 'Bangkok');
 insert into app_private.scanner_assets(id, branch_id, com_sn, model_name) values

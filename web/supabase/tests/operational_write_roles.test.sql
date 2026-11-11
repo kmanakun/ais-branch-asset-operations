@@ -1,15 +1,16 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select no_plan();
 
-insert into auth.users (id, aud, role, created_at, updated_at) values
-  ('fa710000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', now(), now()),
-  ('fa710000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', now(), now()),
-  ('fa710000-0000-4000-8000-000000000003', 'authenticated', 'authenticated', now(), now());
+select pg_temp.create_test_google_user('fa710000-0000-4000-8000-000000000001','write-admin@test.invalid','admin','Matrix Admin');
+select pg_temp.create_test_google_user('fa710000-0000-4000-8000-000000000002','write-technician@test.invalid','field_technician','Matrix Technician');
+select pg_temp.create_test_google_user('fa710000-0000-4000-8000-000000000003','write-importer@test.invalid','admin','Matrix Admin Importer');
 insert into app_private.user_access (user_id, role, display_name) values
   ('fa710000-0000-4000-8000-000000000001', 'admin', 'Matrix Admin'),
   ('fa710000-0000-4000-8000-000000000002', 'field_technician', 'Matrix Technician'),
-  ('fa710000-0000-4000-8000-000000000003', 'admin', 'Matrix Admin Importer');
+  ('fa710000-0000-4000-8000-000000000003', 'admin', 'Matrix Admin Importer')
+on conflict (user_id) do update set role=excluded.role,display_name=excluded.display_name,is_active=true;
 
 create temporary table matrix_fixture (
   workbook jsonb, bootstrap_batch uuid, incremental_result jsonb, incremental_batch uuid,

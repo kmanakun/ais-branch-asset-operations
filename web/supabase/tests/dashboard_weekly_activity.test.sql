@@ -1,13 +1,14 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select no_plan();
 
-insert into auth.users(id,aud,role,email,created_at,updated_at) values
- ('fc200000-0000-4000-8000-000000000001','authenticated','authenticated','technician-aggregate@test.invalid',now(),now()),
- ('fc200000-0000-4000-8000-000000000002','authenticated','authenticated','planner-aggregate@test.invalid',now(),now());
+select pg_temp.create_test_google_user('fc200000-0000-4000-8000-000000000001', 'technician-aggregate@test.invalid', 'field_technician', 'Team A Technician');
+select pg_temp.create_test_google_user('fc200000-0000-4000-8000-000000000002', 'planner-aggregate@test.invalid', 'admin', 'Aggregate Planner');
 insert into app_private.user_access(user_id,role,display_name) values
  ('fc200000-0000-4000-8000-000000000001','field_technician','Team A Technician'),
- ('fc200000-0000-4000-8000-000000000002','admin','Aggregate Planner');
+ ('fc200000-0000-4000-8000-000000000002','admin','Aggregate Planner')
+on conflict (user_id) do update set role=excluded.role, display_name=excluded.display_name, is_active=true;
 insert into app_private.teams(id,team_name) values
  ('fc200000-0000-4000-8000-000000000010','Aggregate Team A'),
  ('fc200000-0000-4000-8000-000000000011','Aggregate Team B');

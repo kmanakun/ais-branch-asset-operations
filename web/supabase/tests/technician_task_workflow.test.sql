@@ -1,4 +1,5 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select no_plan();
 
@@ -9,16 +10,15 @@ select ok(not has_function_privilege('anon', 'public.ais_task_filtered_page(text
 select ok(has_function_privilege('authenticated', 'public.ais_task_filtered_page(text,text,integer,integer)', 'EXECUTE'), 'authenticated users can search guarded task pages');
 select ok((select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid = 'public.ais_task_filtered_page(text,text,integer,integer)'::regprocedure), 'filtered task page RPC is SECURITY DEFINER with an empty search_path');
 
-insert into auth.users(id, aud, role, email, created_at, updated_at) values
-  ('fc200000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'tech-a-workflow@test.invalid', now(), now()),
-  ('fc200000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'tech-b-workflow@test.invalid', now(), now()),
-  ('fc200000-0000-4000-8000-000000000003', 'authenticated', 'authenticated', 'viewer-workflow@test.invalid', now(), now()),
-  ('fc200000-0000-4000-8000-000000000004', 'authenticated', 'authenticated', 'unprovisioned-workflow@test.invalid', now(), now());
+select pg_temp.create_test_google_user('fc200000-0000-4000-8000-000000000001','tech-a-workflow@test.invalid','field_technician','Workflow Tech A');
+select pg_temp.create_test_google_user('fc200000-0000-4000-8000-000000000002','tech-b-workflow@test.invalid','field_technician','Workflow Tech B');
+select pg_temp.create_test_google_user('fc200000-0000-4000-8000-000000000003','viewer-workflow@test.invalid','field_technician','Workflow Viewer');
 
 insert into app_private.user_access(user_id, role, display_name) values
   ('fc200000-0000-4000-8000-000000000001', 'field_technician', 'Workflow Tech A'),
   ('fc200000-0000-4000-8000-000000000002', 'field_technician', 'Workflow Tech B'),
-  ('fc200000-0000-4000-8000-000000000003', 'field_technician', 'Workflow Viewer');
+  ('fc200000-0000-4000-8000-000000000003', 'field_technician', 'Workflow Viewer')
+on conflict (user_id) do update set role=excluded.role,display_name=excluded.display_name,is_active=true;
 
 insert into app_private.teams(id, team_name) values
   ('fc200000-0000-4000-8000-000000000010', 'Workflow Team A'),

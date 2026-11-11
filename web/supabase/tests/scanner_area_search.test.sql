@@ -1,13 +1,14 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select plan(14);
 
-insert into auth.users (id, aud, role, created_at, updated_at) values
-  ('fa900000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', now(), now()),
-  ('fa900000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', now(), now());
+select pg_temp.create_test_google_user('fa900000-0000-4000-8000-000000000001','area-search-viewer@test.invalid','field_technician','Area search viewer');
+select pg_temp.create_test_google_user('fa900000-0000-4000-8000-000000000002','area-search-technician@test.invalid','field_technician','Area search technician');
 insert into app_private.user_access (user_id, role, display_name) values
   ('fa900000-0000-4000-8000-000000000001', 'field_technician', 'Area search viewer'),
-  ('fa900000-0000-4000-8000-000000000002', 'field_technician', 'Area search technician');
+  ('fa900000-0000-4000-8000-000000000002', 'field_technician', 'Area search technician')
+on conflict (user_id) do update set role=excluded.role,display_name=excluded.display_name,is_active=true;
 insert into app_private.branches
   (id, location_code, loc_bld, province, district, subdistrict, high_level_location, ro)
 values

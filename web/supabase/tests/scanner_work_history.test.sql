@@ -1,18 +1,19 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select plan(10);
 
 select ok(not has_function_privilege('anon', 'public.ais_scanner_work_history(uuid,uuid,integer,integer)', 'EXECUTE'), 'anonymous users cannot read scanner work history');
 select ok(has_function_privilege('authenticated', 'public.ais_scanner_work_history(uuid,uuid,integer,integer)', 'EXECUTE'), 'authenticated users can call the guarded scanner work history RPC');
 
-insert into auth.users(id, aud, role, email, created_at, updated_at) values
-  ('fb110000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'history-admin@test.invalid', now(), now()),
-  ('fb110000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'history-tech-a@test.invalid', now(), now()),
-  ('fb110000-0000-4000-8000-000000000003', 'authenticated', 'authenticated', 'history-tech-b@test.invalid', now(), now());
+select pg_temp.create_test_google_user('fb110000-0000-4000-8000-000000000001','history-admin@test.invalid','admin','History Admin');
+select pg_temp.create_test_google_user('fb110000-0000-4000-8000-000000000002','history-tech-a@test.invalid','field_technician','Technician A');
+select pg_temp.create_test_google_user('fb110000-0000-4000-8000-000000000003','history-tech-b@test.invalid','field_technician','Technician B');
 insert into app_private.user_access(user_id, role, display_name) values
   ('fb110000-0000-4000-8000-000000000001', 'admin', 'History Admin'),
   ('fb110000-0000-4000-8000-000000000002', 'field_technician', 'Technician A'),
-  ('fb110000-0000-4000-8000-000000000003', 'field_technician', 'Technician B');
+  ('fb110000-0000-4000-8000-000000000003', 'field_technician', 'Technician B')
+on conflict (user_id) do update set role=excluded.role,display_name=excluded.display_name,is_active=true;
 insert into app_private.teams(id, team_name) values
   ('fb110000-0000-4000-8000-000000000010', 'History Team A'),
   ('fb110000-0000-4000-8000-000000000011', 'History Team B');
@@ -51,7 +52,7 @@ select set_config('request.jwt.claim.sub', 'fb110000-0000-4000-8000-000000000003
 select is((public.ais_scanner_work_history('fb110000-0000-4000-8000-000000000030')->>'total')::integer, 2, 'a technician can see every assigned scanner task without team membership');
 select is((public.ais_scanner_work_history('fb110000-0000-4000-8000-000000000031')->>'total')::integer, 1, 'technicians can see work history across teams, including open items');
 select is((public.ais_scanner_work_history('fb110000-0000-4000-8000-000000000030', 'fb110000-0000-4000-8000-000000000062')->>'total')::integer, 0, 'a task ID for another scanner does not disclose its work order');
-select throws_ok($$select public.ais_scanner_work_history('fb110000-0000-4000-8000-000000000030', null, 21, 0)$$, '22023', 'Invalid Scanner work history request', 'history page size is bounded');
+select throws_ok($$select public.ais_scanner_work_history('fb110000-0000-4000-8000-000000000030', null, 21, 0)$$, '22023', 'Invalid scanner work history request', 'history page size is bounded');
 
 select * from finish();
 rollback;

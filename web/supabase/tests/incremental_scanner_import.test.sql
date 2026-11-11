@@ -1,14 +1,15 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select no_plan();
 select ok(to_regprocedure('public.ais_incremental_import_stage(text,jsonb)') is null, 'incremental staging RPC no longer accepts a client filename');
 select ok(to_regprocedure('public.ais_import_stage(text,jsonb)') is null, 'bootstrap staging RPC no longer accepts a client filename');
-insert into auth.users(id,aud,role,email,created_at,updated_at) values
-('fa500000-0000-4000-8000-000000000001','authenticated','authenticated','incremental@test.invalid',now(),now()),
-('fa500000-0000-4000-8000-000000000002','authenticated','authenticated','incremental-viewer@test.invalid',now(),now());
+select pg_temp.create_test_google_user('fa500000-0000-4000-8000-000000000001','incremental@test.invalid','admin','Import Manager');
+select pg_temp.create_test_google_user('fa500000-0000-4000-8000-000000000002','incremental-viewer@test.invalid','field_technician','Viewer');
 insert into app_private.user_access(user_id,role,display_name) values
 ('fa500000-0000-4000-8000-000000000001','admin','Import Manager'),
-('fa500000-0000-4000-8000-000000000002','field_technician','Viewer');
+('fa500000-0000-4000-8000-000000000002','field_technician','Viewer')
+on conflict (user_id) do update set role=excluded.role,display_name=excluded.display_name,is_active=true;
 insert into app_private.branches(id,location_code,loc_bld,province) values
 ('fa500000-0000-4000-8000-000000000010','INCREMENTAL-A','Branch A','Bangkok');
 insert into app_private.scanner_assets(id,branch_id,com_sn,brand,model_name) values
@@ -68,21 +69,21 @@ select set_config('request.jwt.claim.sub','fa500000-0000-4000-8000-000000000002'
 select throws_ok($$select public.ais_incremental_import_stage('[]'::jsonb)$$,'42501','Data Manager or Admin access required','viewer cannot stage');
 select throws_ok($$select public.ais_import_history(50)$$,'42501','Data Manager or Admin access required','viewer cannot read history');
 select throws_ok($$select public.ais_incremental_import_commit('00000000-0000-4000-8000-000000000000')$$,'42501','Data Manager or Admin access required','viewer cannot commit incremental');
-insert into auth.users(id,aud,role,email,created_at,updated_at) values ('fa500000-0000-4000-8000-000000000003','authenticated','authenticated','no-access@test.invalid',now(),now());
 select set_config('request.jwt.claim.sub','fa500000-0000-4000-8000-000000000003',true);
 select throws_ok($$select public.ais_import_stage('[]'::jsonb)$$,'42501','Data Manager or Admin access required','unassigned user cannot stage bootstrap');
 select throws_ok($$select public.ais_import_commit('00000000-0000-4000-8000-000000000000')$$,'42501','Data Manager or Admin access required','unassigned user cannot commit bootstrap');
 select throws_ok($$select public.ais_incremental_import_stage('[]'::jsonb)$$,'42501','Data Manager or Admin access required','unassigned user cannot stage incremental');
 select throws_ok($$select public.ais_incremental_import_commit('00000000-0000-4000-8000-000000000000')$$,'42501','Data Manager or Admin access required','unassigned user cannot commit incremental');
 select throws_ok($$select public.ais_import_history(50)$$,'42501','Data Manager or Admin access required','unassigned user cannot read history');
-insert into app_private.user_access(user_id,role,display_name,is_active) values ('fa500000-0000-4000-8000-000000000003','admin','Disabled Manager',false);
+select pg_temp.create_test_google_user('fa500000-0000-4000-8000-000000000005','disabled-manager@test.invalid','admin','Disabled Manager');
+update app_private.google_signin_allowlist set is_active=false where email='disabled-manager@test.invalid';
+select set_config('request.jwt.claim.sub','fa500000-0000-4000-8000-000000000005',true);
 select throws_ok($$select public.ais_import_stage('[]'::jsonb)$$,'42501','Data Manager or Admin access required','disabled manager cannot stage bootstrap');
 select throws_ok($$select public.ais_import_commit('00000000-0000-4000-8000-000000000000')$$,'42501','Data Manager or Admin access required','disabled manager cannot commit bootstrap');
 select throws_ok($$select public.ais_incremental_import_stage('[]'::jsonb)$$,'42501','Data Manager or Admin access required','disabled manager cannot stage incremental');
 select throws_ok($$select public.ais_incremental_import_commit('00000000-0000-4000-8000-000000000000')$$,'42501','Data Manager or Admin access required','disabled manager cannot commit incremental');
 select throws_ok($$select public.ais_import_history(50)$$,'42501','Data Manager or Admin access required','disabled manager cannot read history');
-insert into auth.users(id,aud,role,email,created_at,updated_at) values ('fa500000-0000-4000-8000-000000000004','authenticated','authenticated','admin-incremental@test.invalid',now(),now());
-insert into app_private.user_access(user_id,role,display_name,is_active) values ('fa500000-0000-4000-8000-000000000004','admin','Admin',true);
+select pg_temp.create_test_google_user('fa500000-0000-4000-8000-000000000004','admin-incremental@test.invalid','admin','Admin');
 select set_config('request.jwt.claim.sub','fa500000-0000-4000-8000-000000000004',true);
 insert into incremental_results values ('admin_bootstrap',public.ais_import_stage('[{"source_row":2,"location_code":"INCREMENTAL-A","loc_bld":"Branch A","com_sn":"ADMIN-BOOTSTRAP"}]'::jsonb));
 select is((select (payload->>'row_count')::int from incremental_results where kind='admin_bootstrap'),1,'Admin can stage the bootstrap import workflow');

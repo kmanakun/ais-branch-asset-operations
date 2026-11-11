@@ -1,4 +1,5 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 
 select no_plan();
@@ -9,12 +10,12 @@ select ok(not has_table_privilege('authenticated', 'app_private.scanner_assets',
 select ok(not has_table_privilege('authenticated', 'app_private.replacement_task_evidence', 'SELECT'), 'authenticated cannot read evidence metadata directly');
 select ok(not has_function_privilege('anon', 'app_private.can_upload_task_evidence_object(text,text,text,text)', 'EXECUTE'), 'anonymous users cannot call the private upload authorization helper');
 select ok(
-   (select count(*)::int = 6
+   (select count(*)::int = 7
    from pg_proc p
    join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'app_private'
      and has_function_privilege('authenticated', p.oid, 'EXECUTE')),
-  'authenticated users can execute only the six guarded private helpers and pages'
+  'authenticated users can execute only the seven guarded private helpers and pages, including the reserved evidence-delete check'
 );
 select ok((select bool_and(rowsecurity) from pg_tables where schemaname = 'app_private'), 'RLS is enabled on every private table');
 select ok(
@@ -83,12 +84,9 @@ select is(
   'all four core access RPCs are SECURITY DEFINER with an empty search_path; scanner list stays SECURITY INVOKER'
 );
 
-insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
-values
-  ('f1000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'admin-local@test.invalid', '', now(), now(), now()),
-  ('f1000000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'tech-local@test.invalid', '', now(), now(), now()),
-  ('f1000000-0000-4000-8000-000000000003', 'authenticated', 'authenticated', 'inactive-local@test.invalid', '', now(), now(), now())
-on conflict (id) do nothing;
+select pg_temp.create_test_google_user('f1000000-0000-4000-8000-000000000001','admin-local@test.invalid','admin','Local Admin');
+select pg_temp.create_test_google_user('f1000000-0000-4000-8000-000000000002','tech-local@test.invalid','field_technician','Local Technician');
+select pg_temp.create_test_google_user('f1000000-0000-4000-8000-000000000003','inactive-local@test.invalid','field_technician','Inactive Technician');
 
 insert into app_private.user_access (user_id, role, display_name, is_active) values
   ('f1000000-0000-4000-8000-000000000001', 'admin', 'Local Admin', true),

@@ -1,4 +1,5 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 select no_plan();
 
@@ -6,12 +7,12 @@ select ok(not has_function_privilege('anon','public.ais_branch_provinces()','EXE
 select ok(has_function_privilege('authenticated','public.ais_branch_provinces()','EXECUTE'),'authenticated users can call the guarded province list');
 select throws_ok($$select public.ais_branch_provinces()$$,'42501','Active application access required','unprovisioned users cannot list provinces');
 
-insert into auth.users(id,aud,role,email,created_at,updated_at) values
- ('fc300000-0000-4000-8000-000000000001','authenticated','authenticated','province-admin@test.invalid',now(),now()),
- ('fc300000-0000-4000-8000-000000000002','authenticated','authenticated','province-tech@test.invalid',now(),now());
+select pg_temp.create_test_google_user('fc300000-0000-4000-8000-000000000001','province-admin@test.invalid','admin','Province Admin');
+select pg_temp.create_test_google_user('fc300000-0000-4000-8000-000000000002','province-tech@test.invalid','field_technician','Province Technician');
 insert into app_private.user_access(user_id,role,display_name) values
  ('fc300000-0000-4000-8000-000000000001','admin','Province Admin'),
- ('fc300000-0000-4000-8000-000000000002','field_technician','Province Technician');
+ ('fc300000-0000-4000-8000-000000000002','field_technician','Province Technician')
+on conflict (user_id) do update set role=excluded.role, display_name=excluded.display_name, is_active=true;
 insert into app_private.teams(id,team_name) values
  ('fc300000-0000-4000-8000-000000000010','Province Team A'),
  ('fc300000-0000-4000-8000-000000000011','Province Team B');

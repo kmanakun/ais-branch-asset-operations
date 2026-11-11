@@ -17,6 +17,9 @@
     "test:all": "npm run test:xlsx && npm run test:app && npm run test:db"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/material": "^9.5.0",
     "@supabase/supabase-js": "^2.57.0",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",

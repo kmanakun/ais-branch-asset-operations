@@ -1,4 +1,5 @@
 begin;
+\ir google_signin_fixture.fixture
 create extension if not exists pgtap with schema extensions;
 
 select plan(21);
@@ -9,11 +10,8 @@ select ok(not has_function_privilege('anon', 'public.ais_import_commit(uuid)', '
 select ok(has_function_privilege('authenticated', 'public.ais_import_stage(jsonb)', 'EXECUTE'), 'signed-in users reach the role-checked staging RPC');
 select ok(has_function_privilege('authenticated', 'public.ais_import_commit(uuid)', 'EXECUTE'), 'signed-in users reach the role-checked commit RPC');
 
-insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
-values
-  ('f9000000-0000-4000-8000-000000000001', 'authenticated', 'authenticated', 'manager-import@test.invalid', '', now(), now(), now()),
-  ('f9000000-0000-4000-8000-000000000002', 'authenticated', 'authenticated', 'viewer-import@test.invalid', '', now(), now(), now())
-on conflict (id) do nothing;
+select pg_temp.create_test_google_user('f9000000-0000-4000-8000-000000000001', 'manager-import@test.invalid', 'admin', 'Import Manager');
+select pg_temp.create_test_google_user('f9000000-0000-4000-8000-000000000002', 'viewer-import@test.invalid', 'field_technician', 'Import Viewer');
 insert into app_private.user_access (user_id, role, display_name, is_active) values
   ('f9000000-0000-4000-8000-000000000001', 'admin', 'Import Manager', true),
   ('f9000000-0000-4000-8000-000000000002', 'field_technician', 'Import Viewer', true)

@@ -6,6 +6,13 @@ export type ProvinceGroup<T extends Record<string, unknown>> = {
   branchCount: number
 }
 
+export type BranchGroup<T extends Record<string, unknown>> = {
+  key: string
+  name: string
+  locationCode: string
+  rows: T[]
+}
+
 export function groupRowsByProvince<T extends Record<string, unknown>>(rows: readonly T[]): ProvinceGroup<T>[] {
   const groups = new Map<string, T[]>()
   for (const row of rows) {
@@ -27,6 +34,23 @@ export function groupRowsByProvince<T extends Record<string, unknown>>(rows: rea
     if (left.province === 'ไม่ระบุจังหวัด') return right.province === 'ไม่ระบุจังหวัด' ? 0 : 1
     if (right.province === 'ไม่ระบุจังหวัด') return -1
     return left.province.localeCompare(right.province, 'th')
+  })
+}
+
+export function groupRowsByBranch<T extends Record<string, unknown>>(rows: readonly T[]): BranchGroup<T>[] {
+  const groups = new Map<string, BranchGroup<T>>()
+  rows.forEach((row, index) => {
+    const branchId = String(row.branch_id || '').trim()
+    const locationCode = String(row.location_code || row.code || '').trim()
+    const name = String(row.branch_name || row.branch || row.loc_bld || '').trim() || 'สาขาไม่ระบุชื่อ'
+    const key = branchId || (locationCode ? `${locationCode}\u0000${name}` : `row-${index}`)
+    const group = groups.get(key) || { key, name, locationCode, rows: [] }
+    group.rows.push(row)
+    groups.set(key, group)
+  })
+  return Array.from(groups.values()).sort((left, right) => {
+    const byLocation = left.locationCode.localeCompare(right.locationCode, 'th', { numeric: true })
+    return byLocation || left.name.localeCompare(right.name, 'th')
   })
 }
 

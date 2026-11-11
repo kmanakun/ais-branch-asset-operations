@@ -16,6 +16,11 @@ create policy google_signin_allowlist_auth_hook_read
 on app_private.google_signin_allowlist
 for select to supabase_auth_admin
 using (true);
+create policy google_signin_allowlist_deny_browser
+on app_private.google_signin_allowlist
+for all to anon, authenticated
+using (false)
+with check (false);
 
 -- Preserve the current role assignments for existing Auth users. The email
 -- list is now the onboarding source; user_access remains the runtime role gate.
