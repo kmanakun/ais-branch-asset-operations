@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Check, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
 import { supabase } from './supabase'
+import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
 
 export type BranchReference = { id: unknown; name: unknown; code: unknown; province: unknown }
 type DiscoveryReport = Record<string, unknown>
@@ -11,14 +12,57 @@ function formatDate(value: unknown) {
   return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
 }
 
-function useDialogRef(onClose: () => void) {
+function useDialogRef(onClose: () => void, busy: boolean) {
   const ref = useRef<HTMLElement>(null)
+  const onCloseRef = useRef(onClose)
+  const busyRef = useRef(busy)
+  onCloseRef.current = onClose
+  busyRef.current = busy
   useEffect(() => {
-    ref.current?.focus()
-    const handleKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('keydown', handleKey)
-    return () => document.removeEventListener('keydown', handleKey)
-  }, [onClose])
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const releaseBodyScroll = lockBodyScroll()
+    const unregisterDialog = registerActiveDialog(ref.current)
+    const focusableSelector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])'
+    const focusable = () => Array.from(ref.current?.querySelectorAll<HTMLElement>(focusableSelector) || [])
+    const handleKey = (event: KeyboardEvent) => {
+      if (!isTopmostActiveDialog(ref.current)) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (!busyRef.current) onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const controls = focusable()
+      if (!controls.length) {
+        event.preventDefault()
+        ref.current?.focus()
+        return
+      }
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && (document.activeElement === first || !ref.current?.contains(document.activeElement))) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (document.activeElement === last || !ref.current?.contains(document.activeElement))) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    const focusFrame = window.requestAnimationFrame(() => focusable()[0]?.focus())
+    window.addEventListener('keydown', handleKey)
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      window.removeEventListener('keydown', handleKey)
+      unregisterDialog()
+      releaseBodyScroll()
+      if (previousFocus && previousFocus !== document.body && previousFocus.isConnected && !previousFocus.closest('[inert]')) {
+        previousFocus.focus()
+      } else {
+        const parentDialog = getTopmostActiveDialog()
+        ;(parentDialog?.querySelector<HTMLElement>(focusableSelector) || parentDialog)?.focus()
+      }
+    }
+  }, [])
   return ref
 }
 
@@ -27,12 +71,12 @@ function Alert({ children }: { children: string }) {
 }
 
 export function ScannerDiscoveryDialog({ branch, onClose, onReported }: { branch: BranchReference; onClose: () => void; onReported: () => void }) {
-  const dialogRef = useDialogRef(onClose)
   const [serial, setSerial] = useState('')
   const [model, setModel] = useState('')
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const dialogRef = useDialogRef(onClose, busy)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError('')
@@ -84,6 +128,7 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
   const [loading, setLoading] = useState(true)
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
+  const [loadedPage, setLoadedPage] = useState<number | null>(null)
   const [busyReport, setBusyReport] = useState('')
   const [error, setError] = useState('')
   const [notesByReport, setNotesByReport] = useState<Record<string, string>>({})
@@ -94,6 +139,7 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
     if (!client) { setLoading(false); setError('เชื่อมต่อระบบไม่ได้'); return () => { active = false } }
     setLoading(true)
     setError('')
+    setLoadedPage(null)
     void (async () => {
       try {
         const { data, error } = await client.rpc('ais_scanner_discovery_queue', { p_limit: 50, p_offset: page * 50 })
@@ -102,9 +148,10 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
         if (active) {
           setReports(Array.isArray(result?.rows) ? result.rows.filter((row): row is DiscoveryReport => Boolean(row) && typeof row === 'object') : [])
           setTotal(Math.max(0, Number(result?.total) || 0))
+          setLoadedPage(page)
         }
       } catch {
-        if (active) { setReports([]); setTotal(0); setError('โหลดรายการรายงานไม่สำเร็จ โปรดลองใหม่') }
+        if (active) setError('โหลดรายการรายงานไม่สำเร็จ โปรดลองใหม่')
       } finally {
         if (active) setLoading(false)
       }
@@ -127,22 +174,29 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
         delete next[reportId]
         return next
       })
-      setReload(value => value + 1)
+      if (reports.length === 1 && loadedPage === page && page > 0) {
+        setPage(value => Math.max(0, value - 1))
+      } else {
+        setReload(value => value + 1)
+      }
       onUpdated('refresh')
     } catch { setError('บันทึกผลตรวจไม่สำเร็จ รายการอาจถูกตรวจไปแล้ว โปรดลองโหลดใหม่') }
     finally { setBusyReport('') }
   }
+  const pageReports = loadedPage === page ? reports : []
+  const retryLoad = () => setReload(value => value + 1)
   return <section className="panel scanner-discovery-queue" aria-labelledby="scanner-discovery-queue-title">
-    <div className="panel-heading"><div><h2 id="scanner-discovery-queue-title">เครื่องที่ช่างรายงานว่าพบนอกทะเบียน</h2><p>ตรวจ SN และสาขาก่อนเพิ่มรายการใหม่ในทะเบียน</p></div><span className="discovery-count">{loading ? '…' : reports.length.toLocaleString('th-TH')} รายการ</span></div>
-    {loading ? <p className="evidence-status">กำลังโหลดรายการรายงาน…</p> : error ? <Alert>{error}</Alert> : reports.length ? <>
-      {reports.map(report => {
+    <div className="panel-heading"><div><h2 id="scanner-discovery-queue-title">เครื่องที่ช่างรายงานว่าพบนอกทะเบียน</h2><p>ตรวจ SN และสาขาก่อนเพิ่มรายการใหม่ในทะเบียน</p></div><span className="discovery-count">{loading && loadedPage === null ? '…' : total.toLocaleString('th-TH')} รายการ</span></div>
+    {error && <div className="scanner-discovery-load-error"><Alert>{error}</Alert><button type="button" className="secondary-button" disabled={loading} onClick={retryLoad}>{loading ? 'กำลังโหลด…' : 'ลองอีกครั้ง'}</button></div>}
+    {loading && pageReports.length === 0 ? <p className="evidence-status">กำลังโหลดรายการรายงาน…</p> : pageReports.length ? <>
+      {pageReports.map(report => {
         const id = String(report.id || '')
         return <article className="scanner-discovery-report" key={id}>
           <div><strong>SN {String(report.serial_number || '—')}</strong><span>{String(report.observed_model || 'ไม่ทราบรุ่น')}</span><small>{String(report.branch_name || 'สาขา')} · {String(report.location_code || '—')} · {String(report.province || '—')}</small><small>รายงานโดย {String(report.reported_by || 'ผู้ใช้')} · {formatDate(report.created_at)}</small>{Boolean(report.notes) && <p>{String(report.notes)}</p>}</div>
           <div className="scanner-discovery-actions"><input aria-label={`หมายเหตุ Admin สำหรับ SN ${String(report.serial_number || '')}`} placeholder="หมายเหตุ (ถ้ามี)" maxLength={1000} value={notesByReport[id] || ''} onChange={event => setNotesByReport(current => ({ ...current, [id]: event.target.value }))} /><button type="button" className="secondary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'reject')}>{busyReport === id ? 'กำลังบันทึก…' : 'ปฏิเสธ'}</button><button type="button" className="primary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'approve')}>{busyReport === id ? 'กำลังบันทึก…' : <><Check size={15} /> ตรวจแล้วเพิ่มทะเบียน</>}</button></div>
         </article>
       })}
-    </> : <div className="scanner-discovery-empty"><span><Plus size={17} /></span><strong>ไม่มีรายการรอตรวจ</strong><small>รายงานจากช่างจะปรากฏที่นี่ และจะยังไม่เพิ่มเข้าในทะเบียนจนกว่า Admin อนุมัติ</small></div>}
-    {!loading && !error && total > 50 && <div className="list-footer"><span>แสดง {page * 50 + 1}–{Math.min(page * 50 + reports.length, total)} จาก {total.toLocaleString('th-TH')} รายการ</span><div><button type="button" className="icon-button" aria-label="หน้าก่อนหน้า" disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft size={16} /></button><span className="page-number">{page + 1}</span><button type="button" className="icon-button" aria-label="หน้าถัดไป" disabled={(page + 1) * 50 >= total} onClick={() => setPage(value => value + 1)}><ChevronRight size={16} /></button></div></div>}
+    </> : error ? null : <div className="scanner-discovery-empty"><span><Plus size={17} /></span><strong>ไม่มีรายการรอตรวจ</strong><small>รายงานจากช่างจะปรากฏที่นี่ และจะยังไม่เพิ่มเข้าในทะเบียนจนกว่า Admin อนุมัติ</small></div>}
+    {pageReports.length > 0 && total > 50 && <div className="list-footer"><span>แสดง {page * 50 + 1}–{Math.min(page * 50 + pageReports.length, total)} จาก {total.toLocaleString('th-TH')} รายการ</span><div><button type="button" className="icon-button" aria-label="หน้าก่อนหน้า" disabled={page === 0 || loading} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft size={16} /></button><span className="page-number">{page + 1}</span><button type="button" className="icon-button" aria-label="หน้าถัดไป" disabled={(page + 1) * 50 >= total || loading} onClick={() => setPage(value => value + 1)}><ChevronRight size={16} /></button></div></div>}
   </section>
 }
