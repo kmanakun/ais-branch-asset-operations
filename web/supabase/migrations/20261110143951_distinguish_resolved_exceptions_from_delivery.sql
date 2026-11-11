@@ -14,6 +14,7 @@ immutable
 set search_path = ''
 as $$
   select case
+    when p_status = 'cancelled' then 'cancelled'
     when p_status = 'scheduled' then 'open'
     when p_status = 'in_progress' and p_closeout_at is null then 'in_progress'
     when p_status = 'in_progress'

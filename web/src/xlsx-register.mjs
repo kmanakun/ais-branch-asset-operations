@@ -1,4 +1,8 @@
 const decoder = new TextDecoder()
+const maxEntryBytes = 32 * 1024 * 1024
+const maxArchiveBytes = 80 * 1024 * 1024
+const maxColumns = 16_384
+const maxRows = 1_048_576
 
 function attribute(xml, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -58,13 +62,14 @@ function readZipEntries(buffer) {
     const localOffset = view.getUint32(offset + 42, true)
     const name = decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLength))
     expandedBytes += uncompressedSize
-    if (uncompressedSize > 32 * 1024 * 1024 || expandedBytes > 80 * 1024 * 1024) {
+    if (uncompressedSize > maxEntryBytes || expandedBytes > maxArchiveBytes) {
       throw new Error('ข้อมูลภายในไฟล์ Excel มีขนาดใหญ่เกินกำหนด')
     }
     entries.set(name, { method, compressedSize, uncompressedSize, localOffset })
     offset += 46 + nameLength + extraLength + commentLength
   }
 
+  let actualExpandedBytes = 0
   return async (name) => {
     const entry = entries.get(name)
     if (!entry) return null
@@ -76,23 +81,51 @@ function readZipEntries(buffer) {
     const compressed = bytes.subarray(start, start + entry.compressedSize)
     if (entry.method === 0) {
       if (compressed.byteLength !== entry.uncompressedSize) throw new Error('ข้อมูลภายในไฟล์ Excel ไม่ครบถ้วน')
+      actualExpandedBytes += compressed.byteLength
+      if (actualExpandedBytes > maxArchiveBytes) throw new Error('ข้อมูลภายในไฟล์ Excel มีขนาดใหญ่เกินกำหนด')
       return decoder.decode(compressed)
     }
     if (entry.method !== 8 || typeof DecompressionStream === 'undefined') {
       throw new Error('เบราว์เซอร์นี้ไม่รองรับการอ่านไฟล์ Excel ชนิดนี้')
     }
     const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
-    const expanded = await new Response(stream).arrayBuffer()
-    if (expanded.byteLength !== entry.uncompressedSize) throw new Error('ข้อมูลภายในไฟล์ Excel ไม่ครบถ้วน')
+    const reader = stream.getReader()
+    const chunks = []
+    let expandedBytes = 0
+    try {
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        expandedBytes += value.byteLength
+        if (expandedBytes > entry.uncompressedSize || expandedBytes > maxEntryBytes || actualExpandedBytes + expandedBytes > maxArchiveBytes) {
+          await reader.cancel().catch(() => {})
+          throw new Error('ข้อมูลภายในไฟล์ Excel มีขนาดใหญ่เกินกำหนดหรือไม่ตรงกับขนาดที่แจ้ง')
+        }
+        chunks.push(value)
+      }
+    } finally {
+      reader.releaseLock()
+    }
+    if (expandedBytes !== entry.uncompressedSize) throw new Error('ข้อมูลภายในไฟล์ Excel ไม่ครบถ้วน')
+    const expanded = new Uint8Array(expandedBytes)
+    let cursor = 0
+    for (const chunk of chunks) {
+      expanded.set(chunk, cursor)
+      cursor += chunk.byteLength
+    }
+    actualExpandedBytes += expandedBytes
     return decoder.decode(expanded)
   }
 }
 
 function columnIndex(reference) {
-  const letters = reference.match(/^[A-Z]+/i)?.[0]?.toUpperCase()
-  if (!letters) return -1
+  const match = /^([A-Z]{1,3})([1-9]\d{0,6})$/i.exec(reference)
+  if (!match) throw new Error('ไฟล์ Excel มีตำแหน่งเซลล์ไม่ถูกต้อง')
+  const [, letters, rowText] = match
+  if (Number(rowText) > maxRows) throw new Error('ไฟล์ Excel มีหมายเลขแถวเกินขอบเขต')
   let result = 0
   for (const letter of letters) result = result * 26 + letter.charCodeAt(0) - 64
+  if (result > maxColumns) throw new Error('ไฟล์ Excel มีหมายเลขคอลัมน์เกินขอบเขต')
   return result - 1
 }
 
@@ -154,13 +187,18 @@ export async function parseRegisterWorkbook(file) {
     : []
   const sheetData = sheetText.match(/<sheetData\b[^>]*>([\s\S]*?)<\/sheetData>/)?.[1] ?? ''
   const rawRows = xmlItems(sheetData, 'row').map(([, attributes, contents]) => {
+    const rawRowNumber = attribute(attributes, 'r')
+    const parsedRowNumber = rawRowNumber ? Number(rawRowNumber) : 0
+    if (rawRowNumber && (!Number.isSafeInteger(parsedRowNumber) || parsedRowNumber < 1 || parsedRowNumber > maxRows)) {
+      throw new Error('ไฟล์ Excel มีหมายเลขแถวเกินขอบเขต')
+    }
     const cells = []
     for (const match of contents.matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c\s*>)/g)) {
       const cell = { attributes: match[1], content: match[2] ?? '' }
       const index = columnIndex(attribute(cell.attributes, 'r') ?? '')
       if (index >= 0) cells[index] = cellValue(cell, sharedStrings)
     }
-    return { rowNumber: Number(attribute(attributes, 'r')) || 0, cells }
+    return { rowNumber: parsedRowNumber || 0, cells }
   }).filter(row => row.cells.some(value => String(value ?? '').trim() !== ''))
 
   const headerRow = rawRows.find(row => row.cells.some(value => normalizeHeader(value) === 'locationcode'))

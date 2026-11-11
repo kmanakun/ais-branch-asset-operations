@@ -25,12 +25,6 @@ function isTransportUncertain(error: { code?: string; message?: string; status?:
   return error.status === 0 || !error.code || /failed to fetch|network|timed? ?out|connection/i.test(error.message || '')
 }
 
-const statusLabels: Record<string, string> = {
-  draft: 'ฉบับร่าง', selection: 'เลือกอุปกรณ์', ready_to_schedule: 'พร้อมเปิดใบงาน',
-  scheduled: 'กำลังดำเนินการ', in_progress: 'กำลังดำเนินการ', blocked: 'Pending',
-  completed: 'เสร็จสิ้น', cancelled: 'ยกเลิก',
-}
-
 export default function CampaignDetailsDialog({ campaign, role, demo, onClose, onUpdated, onOpenScanner, onOpenTask }: {
   campaign: CampaignRow
   role?: string
@@ -49,8 +43,6 @@ export default function CampaignDetailsDialog({ campaign, role, demo, onClose, o
   const campaignId = String(campaign.id || '')
   const code = String(campaign.campaign_code || campaign.code || '')
   const name = String(campaign.campaign_name || campaign.name || 'รอบงานเปลี่ยนเครื่อง')
-  const status = String(campaign.status || campaign.campaign_status || 'draft').toLowerCase()
-  const terminal = ['completed', 'cancelled'].includes(status)
   const selectable = false
   const canManage = false
   const canEditSelection = false
@@ -75,8 +67,6 @@ export default function CampaignDetailsDialog({ campaign, role, demo, onClose, o
   const [additions, setAdditions] = useState<Record<string, Scanner>>({})
   const [removals, setRemovals] = useState<string[]>([])
   const [selectionReason, setSelectionReason] = useState('')
-  const [actionReason, setActionReason] = useState('')
-  const [action, setAction] = useState<'block' | 'cancel' | null>(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -216,8 +206,6 @@ export default function CampaignDetailsDialog({ campaign, role, demo, onClose, o
   const selectedIds = new Set(selectedDevices.map(device => device.asset_id))
   const addedIds = Object.keys(additions)
   const selectedCount = (preview?.selected_assets || 0) - removals.length + addedIds.length
-  const nonterminal = !terminal
-
   function toggleAddition(scanner: Scanner) {
     if (selectedIds.has(scanner.id)) return
     setAdditions(current => {
@@ -259,58 +247,14 @@ export default function CampaignDetailsDialog({ campaign, role, demo, onClose, o
     } finally { setBusy(false) }
   }
 
-  async function submitCampaignAction() {
-    if (!supabase || !action || busy) return
-    const cleanReason = actionReason.trim()
-    if (action !== 'block' && action !== 'cancel') return
-    if (!cleanReason || cleanReason.length > 500) { setError('กรอกเหตุผล 1–500 ตัวอักษร'); return }
-    setBusy(true)
-    setError('')
-    try {
-      const result = await supabase.rpc('ais_campaign_action', {
-        p_campaign_id: campaignId,
-        p_action: action,
-        p_expected_status: status,
-        p_reason: cleanReason,
-      })
-      if (result.error) {
-        if (result.error.code === '40001') onUpdated('สถานะรอบงานเปลี่ยนไปแล้ว ระบบโหลดข้อมูลล่าสุดแล้ว โปรดเปิดรายละเอียดอีกครั้ง')
-        else if (result.error.code === '42501') setError('บัญชีนี้ไม่มีสิทธิ์จัดการรอบงาน')
-        else if (isTransportUncertain(result.error)) onUpdated('ยังยืนยันผลเปลี่ยนสถานะไม่ได้ ระบบโหลดข้อมูลล่าสุดแล้ว โปรดตรวจรอบงานก่อนลองใหม่')
-        else setError('บันทึกสถานะรอบงานไม่สำเร็จ โปรดโหลดข้อมูลใหม่')
-        return
-      }
-      onUpdated(action === 'block' ? 'ระงับรอบงานแล้ว' : 'ยกเลิกรอบงานและใบงานที่ยังไม่เสร็จแล้ว')
-    } catch { onUpdated('การเชื่อมต่อขาดช่วง ระบบโหลดสถานะรอบงานล่าสุดแล้ว โปรดตรวจผลก่อนลองใหม่') }
-    finally { setBusy(false) }
-  }
-
-  async function resumeCampaign() {
-    if (!supabase || busy) return
-    setBusy(true); setError('')
-    try {
-      const result = await supabase.rpc('ais_campaign_action', { p_campaign_id: campaignId, p_action: 'resume', p_expected_status: status, p_reason: null })
-      if (result.error) {
-        if (result.error.code === '40001') onUpdated('สถานะรอบงานเปลี่ยนไปแล้ว ระบบโหลดข้อมูลล่าสุดแล้ว โปรดเปิดรายละเอียดอีกครั้ง')
-        else if (result.error.code === '42501') setError('บัญชีนี้ไม่มีสิทธิ์จัดการรอบงาน')
-        else if (isTransportUncertain(result.error)) onUpdated('ยังยืนยันผลดำเนินรอบงานต่อไม่ได้ ระบบโหลดสถานะล่าสุดแล้ว โปรดตรวจผลก่อนลองใหม่')
-        else setError('ดำเนินรอบงานต่อไม่สำเร็จ โปรดโหลดข้อมูลใหม่')
-        return
-      }
-      onUpdated('นำรอบงานกลับมาดำเนินการต่อแล้ว')
-    } catch { onUpdated('การเชื่อมต่อขาดช่วง ระบบโหลดสถานะรอบงานล่าสุดแล้ว โปรดตรวจผลก่อนลองใหม่') }
-    finally { setBusy(false) }
-  }
-
   return <div className="detail-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose() }}>
     <section ref={dialogRef} className="detail-dialog campaign-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="campaign-detail-title" tabIndex={-1}>
       <header className="detail-dialog-header"><button type="button" className="detail-back" aria-label="กลับไปรายการรอบงาน" disabled={busy} onClick={onClose}>‹</button><div><span className="detail-eyebrow">{code || 'รอบงานเปลี่ยนเครื่อง'}</span><h2 id="campaign-detail-title">{name}</h2></div><button type="button" className="detail-close" aria-label="ปิดรายละเอียด" disabled={busy} onClick={onClose}>×</button></header>
       <div className="detail-readonly-note">ข้อมูลรอบงานนี้เป็นประวัติจากกระบวนการเดิม ใช้อ้างอิงย้อนหลังเท่านั้น การเปิดและดำเนินงานใหม่ให้ใช้หน้าใบงาน</div>
       <section className="detail-section"><h3>ภาพรวมรอบงาน</h3><div className="detail-grid">
-        <div className="detail-field"><span>สถานะ</span><strong>{statusLabels[status] || status}</strong></div>
         <div className="detail-field"><span>จำนวนเครื่อง</span><strong>{Number(campaign.total_assets ?? campaign.selected_assets ?? 0).toLocaleString('th-TH')}</strong></div>
         <div className="detail-field"><span>สาขา</span><strong>{Number(campaign.branches || 0).toLocaleString('th-TH')}</strong></div>
-        <div className="detail-field"><span>ใบงานที่เสร็จหรือยกเลิก</span><strong>{Number(campaign.done_tasks || 0).toLocaleString('th-TH')} / {Number(campaign.total_tasks || 0).toLocaleString('th-TH')}</strong></div>
+        <div className="detail-field"><span>รายการ Scanner ที่ปิดแล้ว</span><strong>{Number(campaign.done_tasks || 0).toLocaleString('th-TH')} / {Number(campaign.total_tasks || 0).toLocaleString('th-TH')}</strong></div>
       </div></section>
 
       <section className="detail-section">
@@ -347,11 +291,6 @@ export default function CampaignDetailsDialog({ campaign, role, demo, onClose, o
         </>}
       </section>}
 
-      {canManage && nonterminal && !editingSelection && <section className="detail-section task-action-panel"><h3>จัดการสถานะรอบงาน</h3>
-        {status === 'blocked' ? <><p>รอบงานถูกระงับอยู่ ช่างจะดำเนินงานต่อไม่ได้จนกว่าจะปลดระงับ</p><button type="button" className="primary-button" disabled={busy} onClick={() => void resumeCampaign()}>{busy ? 'กำลังบันทึก…' : 'ดำเนินรอบงานต่อ'}</button></> : <><p>ระงับชั่วคราวหรือยกเลิกรอบงานพร้อมปิดใบงานที่ยังไม่เสร็จ</p><div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy || action !== null} onClick={() => { setAction('block'); setActionReason(''); setError('') }}>ระงับรอบงาน</button><button type="button" className="secondary-button" disabled={busy || action !== null} onClick={() => { setAction('cancel'); setActionReason(''); setError('') }}>ยกเลิกรอบงาน</button></div></>}
-        {action && <div className="task-action-form"><label>เหตุผล{action === 'cancel' ? 'ที่ยกเลิกรอบงาน' : 'ที่ระงับรอบงาน'}<textarea value={actionReason} onChange={event => setActionReason(event.target.value)} maxLength={500} rows={3} required /></label>{error && <p className="task-action-error" role="alert">{error}</p>}<div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy} onClick={() => { setAction(null); setActionReason(''); setError('') }}>กลับ</button><button type="button" className="primary-button" disabled={busy || !actionReason.trim()} onClick={() => void submitCampaignAction()}>{busy ? 'กำลังบันทึก…' : action === 'cancel' ? 'ยืนยันยกเลิกรอบงาน' : 'ยืนยันระงับรอบงาน'}</button></div></div>}
-        {!action && error && <p className="task-action-error" role="alert">{error}</p>}
-      </section>}
       {demo && <div className="detail-readonly-note">ข้อมูลตัวอย่างนี้ไม่บันทึกการเปลี่ยนแปลงจริง</div>}
     </section>
   </div>

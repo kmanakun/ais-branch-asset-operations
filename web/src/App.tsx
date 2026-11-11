@@ -28,10 +28,10 @@ import {
 } from 'lucide-react'
 import { demoAssets, demoCampaigns, demoStats, demoTasks, dayBars, type MenuKey } from './data'
 import { isSupabaseConfigured, supabase } from './supabase'
-import { parseRegisterWorkbook, type RegisterImportRow } from './xlsx-register.mjs'
+import type { RegisterImportRow } from './xlsx-register.mjs'
 import CampaignDetailsDialog from './CampaignDetailsDialog'
 import ScheduleComposer from './ScheduleComposer'
-import TaskEvidencePanel, { type EvidenceSlot } from './TaskEvidencePanel'
+import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot } from './TaskEvidencePanel'
 import { groupRowsByProvince, ProvinceCardGroup, ProvinceTableGroup } from './province'
 
 type UserContext = {
@@ -48,7 +48,7 @@ type DashboardData = {
 }
 
 type TaskCounts = {
-  scheduled: number
+  open: number
   in_progress: number
   awaiting_review: number
   blocked: number
@@ -58,7 +58,7 @@ type TaskCounts = {
 
 type TaskStatusFilter = 'all' | 'open' | 'in_progress' | 'pending' | 'delivered' | 'exception_resolved' | 'legacy_completed' | 'cancelled'
 
-const emptyTaskCounts: TaskCounts = { scheduled: 0, in_progress: 0, awaiting_review: 0, blocked: 0, completed: 0, cancelled: 0 }
+const emptyTaskCounts: TaskCounts = { open: 0, in_progress: 0, awaiting_review: 0, blocked: 0, completed: 0, cancelled: 0 }
 const campaignPageSize = 20
 
 const navigation: Array<{ key: MenuKey; label: string; icon: typeof LayoutDashboard }> = [
@@ -104,14 +104,14 @@ const statusPresentation: Record<string, { label: string; tone: string }> = {
   awaiting_confirmation: { label: 'เปิดแล้ว · รอเริ่มงาน', tone: 'ready' },
   confirmed: { label: 'เปิดแล้ว · รอเริ่มงาน', tone: 'ready' },
   in_progress: { label: 'กำลังดำเนินการ', tone: 'progress' },
-  awaiting_admin_acceptance: { label: 'Pending', tone: 'blocked' },
+  awaiting_admin_acceptance: { label: 'Pending · งานเดิมรอ Admin', tone: 'blocked' },
   awaiting_admin_exception_review: { label: 'Pending · รอ Admin ตรวจ', tone: 'blocked' },
   replaced: { label: 'เปลี่ยนเครื่องสำเร็จ', tone: 'done' },
   no_damage_found: { label: 'ไม่พบเครื่องชำรุด', tone: 'neutral' },
   different_device_found: { label: 'ไม่พบ SN ตามใบงาน · พบเครื่องอื่น', tone: 'blocked' },
   target_device_not_found: { label: 'ไม่พบ SN ตามใบงาน · ไม่พบเครื่องอื่น', tone: 'blocked' },
   blocked: { label: 'Pending', tone: 'blocked' },
-  completed: { label: 'เสร็จสิ้น', tone: 'done' },
+  completed: { label: 'Completed', tone: 'done' },
   delivered: { label: 'Completed', tone: 'done' },
   exception_resolved: { label: 'ปิดแล้ว · มีข้อยกเว้น', tone: 'neutral' },
   legacy_completed: { label: 'เสร็จแล้ว (ประวัติเดิม)', tone: 'neutral' },
@@ -186,8 +186,6 @@ function App() {
   const [pageLoading, setPageLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
   const [notice, setNotice] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
   const [search, setSearch] = useState('')
   const [listData, setListData] = useState<unknown[]>([])
   const [taskPage, setTaskPage] = useState(0)
@@ -204,6 +202,19 @@ function App() {
   const mobileMenuTriggerRef = useRef<HTMLButtonElement>(null)
   const workspaceMenuRef = useRef<HTMLDivElement>(null)
   const accountMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const callbackUrl = new URL(window.location.href)
+    const oauthError = callbackUrl.searchParams.get('error')
+    const errorDescription = callbackUrl.searchParams.get('error_description')
+    if (!oauthError && !errorDescription) return
+
+    setLoginError('Google Sign-In ไม่สำเร็จ บัญชีอาจยังไม่ได้รับอนุญาต หรือการตั้งค่า OAuth ยังไม่ครบ โปรดติดต่อ Identity Admin')
+    callbackUrl.searchParams.delete('error')
+    callbackUrl.searchParams.delete('error_code')
+    callbackUrl.searchParams.delete('error_description')
+    window.history.replaceState({}, document.title, `${callbackUrl.pathname}${callbackUrl.search}${callbackUrl.hash}`)
+  }, [])
 
   useEffect(() => {
     const client = supabase
@@ -326,7 +337,7 @@ function App() {
             setTaskTotal(Number(result.data?.total || 0))
             const counts = result.data?.counts || {}
             setTaskCounts({
-              scheduled: Number(counts.scheduled) || 0,
+              open: Number(counts.open) || 0,
               in_progress: Number(counts.in_progress) || 0,
               awaiting_review: Number(counts.awaiting_review) || 0,
               blocked: Number(counts.blocked) || 0,
@@ -440,21 +451,22 @@ function App() {
     return () => desktopViewport.removeEventListener('change', closeMobileMenuOnDesktop)
   }, [])
 
-  async function signIn(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function signInWithGoogle() {
     if (isSigningIn) return
     setLoginError('')
     if (!supabase) {
-      setLoginError('ยังไม่ได้ตั้งค่าการเชื่อมต่อระบบจริง เปิดตัวอย่างระบบเพื่อดูหน้าจอได้')
+      setLoginError('Google Sign-In ยังไม่ได้เชื่อมต่อกับ Supabase เปิดตัวอย่างระบบเพื่อดูหน้าจอได้')
       return
     }
     setIsSigningIn(true)
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
-      if (error) setLoginError('เข้าสู่ระบบไม่สำเร็จ โปรดตรวจสอบอีเมล รหัสผ่าน หรือสอบถามผู้ดูแลระบบ')
-      else setPassword('')
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: window.location.origin },
+      })
+      if (error) setLoginError('เข้าใช้ด้วย Google ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อ Identity Admin')
     } catch {
-      setLoginError('เชื่อมต่อระบบเข้าสู่ระบบไม่ได้ โปรดลองอีกครั้ง')
+      setLoginError('เชื่อมต่อ Google Sign-In ไม่ได้ โปรดลองอีกครั้งหรือติดต่อ Identity Admin')
     } finally {
       setIsSigningIn(false)
     }
@@ -462,7 +474,6 @@ function App() {
 
   async function signOut() {
     setSignOutError('')
-    setPassword('')
     try {
       if (supabase && session) {
         const { error } = await supabase.auth.signOut()
@@ -523,7 +534,7 @@ function App() {
 
   if (!authChecked) return <div className="loading-screen"><div className="spinner" /><span>กำลังตรวจสอบสถานะการเข้าสู่ระบบ</span></div>
   if (!session && !demoMode) {
-    return <LoginPage email={email} password={password} setEmail={setEmail} setPassword={setPassword} onSubmit={signIn} onDemo={() => setDemoMode(true)} onHelp={() => setLoginError('โปรดติดต่อ Identity Admin ของระบบเพื่อรับคำเชิญและสิทธิ์เข้าใช้งาน')} error={loginError} configured={isSupabaseConfigured} submitting={isSigningIn} />
+    return <LoginPage onGoogleSignIn={() => void signInWithGoogle()} onDemo={() => setDemoMode(true)} onHelp={() => setLoginError('ใช้บัญชี Google ที่อยู่ในรายชื่อผู้มีสิทธิ์ หากยังเข้าไม่ได้โปรดติดต่อ Identity Admin')} error={loginError} configured={isSupabaseConfigured} submitting={isSigningIn} />
   }
   if (session && contextStatus === 'loading' && !demoMode) return <div className="loading-screen"><div className="spinner" /><span>กำลังตรวจสอบสิทธิ์การใช้งาน</span></div>
   if (session && contextStatus === 'error' && !demoMode) {
@@ -611,12 +622,12 @@ function App() {
             {activeMenu === 'schedule' && !showScheduleComposer && <button className="primary-button" disabled={demoMode || role !== 'admin'} title={demoMode ? 'โหมดตัวอย่างไม่บันทึกงานจริง' : role !== 'admin' ? 'ต้องใช้สิทธิ์ Admin' : undefined} onClick={() => setShowScheduleComposer(true)}><CalendarDays size={16} /> เปิดใบงาน</button>}
           </div>
 
-          {activeMenu === 'overview' && <Overview demo={demoMode} role={role} dashboard={dashboard} error={dashboardError} onNavigate={navigateTo} onTaskUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'กำลังโหลดสถานะใบงานล่าสุด' : action === 'closeout_complete' ? 'ส่งผลปฏิบัติงานพร้อมหลักฐานให้ Admin ตรวจรับแล้ว' : action === 'closeout_pending' ? 'ส่งผลกรณียกเว้นให้ Admin ตรวจรับแล้ว' : action === 'resolve_exception' ? 'Admin ตรวจข้อยกเว้นแล้ว รายการนี้ไม่ใช่งานส่งมอบ' : action === 'accept' ? 'Admin ตรวจรับและส่งมอบใบงานแล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} />}
+            {activeMenu === 'overview' && <Overview demo={demoMode} role={role} dashboard={dashboard} error={dashboardError} onNavigate={navigateTo} onTaskUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'กำลังโหลดสถานะใบงานล่าสุด' : action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'resolve_exception' ? 'Admin ตรวจ Pending และบันทึกผลพิจารณาแล้ว' : action === 'accept' ? 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว' : action === 'resolve_pending' ? 'Admin ตรวจและปิดรายการ Pending แล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} />}
           {activeMenu === 'campaigns' && <><div className="warning-box"><ClipboardList size={17} /><span>หน้านี้เก็บข้อมูลรอบงานเดิมไว้ตรวจสอบย้อนหลังเท่านั้น ไม่มีการสร้าง แก้ไข จัดทีม หรือนัดหมายจากหน้านี้ · เปิดใบงานใหม่ได้จากหน้าใบงาน</span></div><Campaigns role={role} demo={demoMode} items={demoMode ? demoCampaigns : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onUpdated={message => { setListReloadKey(key => key + 1); setNotice(message); void loadContext() }} onOpenScanner={openScannerFromCampaign} search={search} setSearch={setSearch} page={campaignPage} setPage={setCampaignPage} /> </>}
           {activeMenu === 'assets' && <Assets role={role} demo={demoMode} items={demoMode ? demoAssets : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} search={search} setSearch={value => { setActiveProvince(''); setAssetPage(0); setSearch(value) }} page={assetPage} total={assetTotal} setPage={setAssetPage} focusSerial={pendingAssetSerial} onFocusResolved={() => setPendingAssetSerial('')} />}
           {activeMenu === 'schedule' && !showScheduleComposer && !demoMode && role !== 'admin' && <div className="warning-box"><LockKeyhole size={17} /><span>การเปิดใบงานใช้สิทธิ์ Admin บัญชี {getFriendlyRole(role)} ดูงานที่เปิดไว้และบันทึกผลหน้างานได้</span></div>}
           {activeMenu === 'schedule' && showScheduleComposer && <ScheduleComposer onCancel={() => setShowScheduleComposer(false)} onSaved={() => { setShowScheduleComposer(false); setListReloadKey(key => key + 1); setNotice('เปิดใบงานเรียบร้อยแล้ว ช่างทุกคนเห็นงานได้ทันที'); void loadContext() }} />}
-          {activeMenu === 'schedule' && !showScheduleComposer && <Schedule demo={demoMode} role={role} items={demoMode ? demoTasks : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onTaskUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'กำลังโหลดสถานะใบงานล่าสุด' : action === 'closeout_complete' ? 'ส่งผลปฏิบัติงานพร้อมหลักฐานให้ Admin ตรวจรับแล้ว' : action === 'closeout_pending' ? 'ส่งผลกรณียกเว้นให้ Admin ตรวจรับแล้ว' : action === 'resolve_exception' ? 'Admin ตรวจข้อยกเว้นแล้ว รายการนี้ไม่ใช่งานส่งมอบ' : action === 'accept' ? 'Admin ตรวจรับและส่งมอบใบงานแล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} total={taskTotal} counts={taskCounts} page={taskPage} setPage={setTaskPage} search={search} setSearch={value => { setTaskPage(0); setSearch(value) }} statusFilter={taskStatusFilter} setStatusFilter={value => { setTaskPage(0); setTaskStatusFilter(value) }} />}
+          {activeMenu === 'schedule' && !showScheduleComposer && <Schedule demo={demoMode} role={role} items={demoMode ? demoTasks : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onTaskUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'กำลังโหลดสถานะใบงานล่าสุด' : action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'resolve_exception' ? 'Admin ตรวจ Pending และบันทึกผลพิจารณาแล้ว' : action === 'accept' ? 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว' : action === 'resolve_pending' ? 'Admin ตรวจและปิดรายการ Pending แล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} total={taskTotal} counts={taskCounts} page={taskPage} setPage={setTaskPage} search={search} setSearch={value => { setTaskPage(0); setSearch(value) }} statusFilter={taskStatusFilter} setStatusFilter={value => { setTaskPage(0); setTaskStatusFilter(value) }} />}
           {activeMenu === 'imports' && canUseAdminModules && <Imports role={role} onComplete={async () => {
             setListReloadKey(key => key + 1)
             const client = supabase
@@ -646,9 +657,8 @@ function App() {
   )
 }
 
-function LoginPage({ email, password, setEmail, setPassword, onSubmit, onDemo, onHelp, error, configured, submitting }: {
-  email: string; password: string; setEmail: (value: string) => void; setPassword: (value: string) => void
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void; onDemo: () => void; onHelp: () => void; error: string; configured: boolean; submitting: boolean
+function LoginPage({ onGoogleSignIn, onDemo, onHelp, error, configured, submitting }: {
+  onGoogleSignIn: () => void; onDemo: () => void; onHelp: () => void; error: string; configured: boolean; submitting: boolean
 }) {
   return <div className="login-page">
     <section className="login-panel">
@@ -656,7 +666,7 @@ function LoginPage({ email, password, setEmail, setPassword, onSubmit, onDemo, o
       <div className="login-content">
         <div className="eyebrow">SCANNER REPLACEMENT PROGRAM</div>
         <h1>จัดการงานเปลี่ยนเครื่อง<br /><em>ได้ในที่เดียว</em></h1>
-        <p className="login-intro">เปิดใบงานราย Scanner ให้ช่างทุกคนเห็น ติดตามผล หลักฐาน และการตรวจรับได้ในที่เดียว</p>
+        <p className="login-intro">เปิดใบงานแยกตามสาขา ให้ช่างทุกคนเห็นและบันทึกผล Onsite ได้ในที่เดียว</p>
         <div className="login-feature"><div><ClipboardList size={18} /></div><span>ติดตามใบงานตั้งแต่เปิดงานจนส่งมอบ</span></div>
         <div className="login-feature"><div><MapPin size={18} /></div><span>ค้นหาสาขาและอุปกรณ์จากทะเบียนกลาง</span></div>
         <div className="login-feature"><div><ShieldCheck size={18} /></div><span>แสดงใบงานให้ Admin และช่าง Onsite ตามสิทธิ์ปฏิบัติงาน</span></div>
@@ -667,21 +677,23 @@ function LoginPage({ email, password, setEmail, setPassword, onSubmit, onDemo, o
       <div className="login-card">
         <div className="login-icon"><LockKeyhole size={21} /></div>
         <h2>เข้าสู่ระบบ</h2>
-        <p>ใช้บัญชีที่ผู้ดูแลระบบเชิญให้เข้าใช้งาน</p>
-        <form onSubmit={onSubmit}>
-          <label htmlFor="email">อีเมล</label>
-          <input id="email" type="email" autoComplete="username" required placeholder="name@company.com" value={email} onChange={event => setEmail(event.target.value)} />
-          <div className="password-label"><label htmlFor="password">รหัสผ่าน</label><button type="button" onClick={onHelp}>ลืมรหัสผ่าน?</button></div>
-          <input id="password" type="password" autoComplete="current-password" required placeholder="กรอกรหัสผ่าน" value={password} onChange={event => setPassword(event.target.value)} />
-          {error && <div className="form-error" role="alert">{error}</div>}
-          {!configured && <div className="config-note">หน้าลงชื่อเข้าใช้จะเชื่อมต่อเมื่อมีการตั้งค่าระบบ Auth แล้ว</div>}
-          <button className="primary-button login-submit" type="submit" disabled={submitting}>{submitting ? 'กำลังเข้าสู่ระบบ…' : 'เข้าสู่ระบบ'} {!submitting && <ArrowRight size={17} />}</button>
-        </form>
+        <p>ใช้บัญชี Google ที่ Identity Admin อนุมัติไว้</p>
+        {error && <div className="form-error" role="alert">{error}</div>}
+        {!configured && <div className="config-note">ระบบยังไม่ได้เชื่อมต่อ Supabase จึงยังเข้าสู่ระบบไม่ได้</div>}
+        <button className="google-sign-in-button" type="button" onClick={onGoogleSignIn} disabled={submitting || !configured}>
+          <svg className="google-sign-in-mark" viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.51h6.44a5.5 5.5 0 0 1-2.39 3.61v2.99h3.87c2.27-2.09 3.57-5.17 3.57-8.84Z" />
+            <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.94-2.89l-3.87-2.99c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.95H1.27v3.09C3.25 21 7.28 24 12 24Z" />
+            <path fill="#FBBC05" d="M5.27 14.32A7.2 7.2 0 0 1 4.89 12c0-.81.14-1.59.38-2.32V6.59H1.27A11.98 11.98 0 0 0 0 12c0 1.94.46 3.77 1.27 5.41l4-3.09Z" />
+            <path fill="#EA4335" d="M12 4.73c1.76 0 3.34.6 4.59 1.82l3.44-3.44C17.95 1.19 15.24 0 12 0 7.28 0 3.25 3 1.27 6.59l4 3.09C6.22 6.84 8.87 4.73 12 4.73Z" />
+          </svg>
+          <span>{submitting ? 'กำลังเชื่อมต่อ Google…' : 'เข้าสู่ระบบด้วย Google'}</span>
+        </button>
         <div className="login-separator"><span>หรือ</span></div>
         <button className="demo-button" onClick={onDemo}><Activity size={17} /> ดูตัวอย่างระบบด้วยข้อมูลจำลอง</button>
-        <div className="privacy-note"><ShieldCheck size={15} /> ไม่มีการใช้ข้อมูลสาขาหรือ Serial จริงในโหมดตัวอย่าง</div>
+        <div className="privacy-note"><ShieldCheck size={15} /> อนุญาตเฉพาะอีเมลใน whitelist · โหมดตัวอย่างใช้ข้อมูลจำลอง</div>
       </div>
-      <div className="login-bottom"><span>ต้องการสิทธิ์เข้าใช้งาน?</span><button type="button" onClick={onHelp}>ติดต่อ Identity Admin</button></div>
+      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={onHelp}>ติดต่อ Identity Admin</button></div>
     </section>
   </div>
 }
@@ -769,21 +781,17 @@ function Campaigns({ role, demo, items, loading, error, onRetry, onUpdated, onOp
     }
   }
   return <><section className="panel list-panel"><div className="list-toolbar"><div className="search-box"><Search size={17} /><input value={search} onChange={event => setSearch(event.target.value)} placeholder="ค้นหาชื่อหรือรหัสจากประวัติเดิม" /></div></div>
-    {loading ? <EmptyState loading /> : error ? <EmptyState title="โหลดข้อมูลไม่สำเร็จ" detail={error} onRetry={onRetry} /> : rows.length ? <div className="table-wrap"><table><thead><tr><th>ข้อมูลรอบงานเดิม</th><th>จำนวนสาขา</th><th>ความคืบหน้าที่บันทึกไว้</th><th>สถานะเดิม</th><th></th></tr></thead><tbody>{rows.map((row, i) => {
-      const status = String(row.status || row.campaign_status || 'Draft')
-      const presentation = getStatusPresentation(status)
-      const tone = String(row.tone || presentation.tone)
-      const statusLabel = row.tone ? status : presentation.label
+    {loading ? <EmptyState loading /> : error ? <EmptyState title="โหลดข้อมูลไม่สำเร็จ" detail={error} onRetry={onRetry} /> : rows.length ? <div className="table-wrap"><table><thead><tr><th>ข้อมูลรอบงานเดิม</th><th>จำนวนสาขา</th><th>ความคืบหน้าที่บันทึกไว้</th><th></th></tr></thead><tbody>{rows.map((row, i) => {
       const total = Number(row.tasks || row.total_tasks || 0)
       const done = Number(row.done || row.done_tasks || 0)
-      return <tr key={String(row.code || row.campaign_code || i)}><td><div className="table-primary">{String(row.name || row.campaign_name || 'ข้อมูลรอบงานเดิม')}</div><div className="table-secondary">{String(row.code || row.campaign_code || '')} · {String(row.total_assets ?? row.tasks ?? 0)} เครื่อง</div></td><td>{String(row.branches ?? '—')} สาขา</td><td><div className="mini-progress"><span><i style={{ width: getPercent(done, total) + '%' }} /></span><small>{done}/{total} รายการ</small></div></td><td><StatusPill label={statusLabel} tone={tone} /></td><td><button className="icon-button row-action" aria-label={`ดูรายละเอียด ${String(row.campaign_code || row.code || 'รอบงานเดิม')}`} title="ดูข้อมูลเดิมและรายการ SN" onClick={() => setSelectedCampaign(row)}><ChevronRight size={17} /></button></td></tr>
+      return <tr key={String(row.code || row.campaign_code || i)}><td><div className="table-primary">{String(row.name || row.campaign_name || 'ข้อมูลรอบงานเดิม')}</div><div className="table-secondary">{String(row.code || row.campaign_code || '')} · {String(row.total_assets ?? row.tasks ?? 0)} เครื่อง</div></td><td>{String(row.branches ?? '—')} สาขา</td><td><div className="mini-progress"><span><i style={{ width: getPercent(done, total) + '%' }} /></span><small>{done}/{total} รายการ</small></div></td><td><button type="button" className="icon-button row-action" aria-label={`ดูรายละเอียด ${String(row.campaign_code || row.code || 'รอบงานเดิม')}`} title="ดูข้อมูลเดิมและรายการ SN" onClick={() => setSelectedCampaign(row)}><ChevronRight size={17} /></button></td></tr>
     })}</tbody></table></div> : <EmptyState title="ยังไม่มีประวัติงานเดิม" detail="หน้านี้จะแสดงข้อมูลที่บันทึกไว้จากกระบวนการก่อนหน้าเท่านั้น" />}
     <div className="list-footer"><span>แสดง {firstRow.toLocaleString('th-TH')}–{lastRow.toLocaleString('th-TH')} จาก {total.toLocaleString('th-TH')} รายการเดิม</span><div><button className="icon-button" aria-label="หน้าก่อน" disabled={loading || currentPage === 0} onClick={() => setPage(currentPage - 1)}><ChevronLeft size={16} /></button><span className="page-number">{currentPage + 1} / {pageCount}</span><button className="icon-button" aria-label="หน้าถัดไป" disabled={loading || currentPage >= pageCount - 1} onClick={() => setPage(currentPage + 1)}><ChevronRight size={16} /></button></div></div>
   </section>{selectedCampaign && <CampaignDetailsDialog campaign={selectedCampaign} role={role} demo={demo} onClose={() => setSelectedCampaign(null)} onUpdated={message => { setSelectedCampaign(null); onUpdated(message) }} onOpenScanner={serial => { setSelectedCampaign(null); onOpenScanner(serial) }} onOpenTask={(assetId, taskId) => { setSelectedCampaign(null); void openCampaignTask(assetId, taskId) }} />}
   {taskLoading && <div className="detail-readonly-note" role="status">กำลังโหลดรายละเอียดและหลักฐานใบงาน…</div>}
   {taskError && <div className="task-action-error" role="alert">{taskError} <button type="button" className="text-button" onClick={() => setTaskError('')}>ปิด</button></div>}
   {selectedTask && <WorkOrderDetailDialog task={selectedTask} role={role} demo={demo} readOnly onClose={() => setSelectedTask(null)} onUpdated={action => {
-    const messages: Record<string, string> = { refresh: 'กำลังโหลดสถานะใบงานล่าสุด', closeout: 'ส่งผลปฏิบัติงานพร้อมหลักฐานให้ Admin ตรวจรับแล้ว', accept: 'Admin ตรวจรับและส่งมอบใบงานแล้ว', block: 'บันทึกสถานะ Pending แล้ว', resume: 'ใบงานกลับมาดำเนินการแล้ว' }
+    const messages: Record<string, string> = { refresh: 'กำลังโหลดสถานะใบงานล่าสุด', closeout: 'บันทึกผลแล้ว อัปเดตทะเบียนและปิดรายการเป็น Completed แล้ว', resolve_pending: 'Admin พิจารณาและปิดรายการ Pending แล้ว', accept: 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว', block: 'บันทึกสถานะ Pending แล้ว', resume: 'ใบงานกลับมาดำเนินการแล้ว' }
     onUpdated(messages[action] || 'เริ่มปฏิบัติงานแล้ว')
   }} />}</>
 }
@@ -814,7 +822,7 @@ function Assets({ role, demo, items, loading, error, onRetry, search, setSearch,
   return <>
     <div className="asset-summary"><div><span>อุปกรณ์ทั้งหมดตามการค้นหา</span><strong>{demo ? '1,284' : total.toLocaleString('th-TH')}</strong></div><div><span>มีใบงานในหน้านี้</span><strong>{demo ? '248' : linkedToWorkOrder}</strong></div><div><span>Serial ในหน้าจอผู้ชม</span><strong className="mask-example">••••••1234</strong></div></div>
     <section className="panel list-panel">
-      <div className="list-toolbar"><div className="search-box"><Search size={17} /><input aria-label="ค้นหาสาขา จังหวัด LocationCode รุ่น หรือ Serial" value={search} onChange={event => { setFocusMessage(''); if (focusSerial) onFocusResolved(); setSearch(event.target.value) }} placeholder="ค้นหาสาขา จังหวัด LocationCode รุ่น หรือ Serial" /></div><button className="filter-button" disabled title="ตัวกรองยังไม่เปิดใช้งาน"><span className="filter-dot" /> ทุกอุปกรณ์ <ChevronDown size={14} /></button></div>
+      <div className="list-toolbar"><div className="search-box"><Search size={17} /><input aria-label="ค้นหาสาขา จังหวัด LocationCode รุ่น หรือ Serial" value={search} onChange={event => { setFocusMessage(''); if (focusSerial) onFocusResolved(); setSearch(event.target.value) }} placeholder="ค้นหาสาขา จังหวัด LocationCode รุ่น หรือ Serial" /></div></div>
       {focusMessage && <div className="detail-readonly-note" role="status">{focusMessage}</div>}
       {loading ? <EmptyState loading /> : error ? <EmptyState title="โหลดข้อมูลไม่สำเร็จ" detail={error} onRetry={onRetry} /> : rows.length ? <>
         <div className="table-wrap asset-table-wrap"><table><thead><tr><th>สาขา / LocationCode</th><th>อุปกรณ์</th><th>Serial</th><th>ปีข้อมูลเดิม</th><th>ใบงานล่าสุด</th><th>สถานะงาน</th><th>รายละเอียด</th></tr></thead><tbody>{provinceGroups.flatMap(group => [
@@ -873,7 +881,7 @@ function Schedule({ demo, role, items, loading, error, onRetry, onTaskUpdated, t
   const lastRow = Math.min(page * 50 + rows.length, total)
   return <>
     <div className="schedule-summary">
-      <div className="summary-tile"><div className="summary-icon blue"><CalendarDays size={18} /></div><div><strong>{demo ? '4' : counts.scheduled.toLocaleString('th-TH')}</strong><span>เปิดแล้ว · รอเริ่มงาน</span></div></div>
+      <div className="summary-tile"><div className="summary-icon blue"><CalendarDays size={18} /></div><div><strong>{demo ? '4' : counts.open.toLocaleString('th-TH')}</strong><span>เปิดแล้ว · รอเริ่มงาน</span></div></div>
       <div className="summary-tile"><div className="summary-icon orange"><Clock3 size={18} /></div><div><strong>{demo ? '12' : counts.in_progress.toLocaleString('th-TH')}</strong><span>กำลังดำเนินการ</span></div></div>
       <div className="summary-tile"><div className="summary-icon red"><ShieldCheck size={18} /></div><div><strong>{demo ? '4' : (counts.awaiting_review + counts.blocked).toLocaleString('th-TH')}</strong><span>Pending</span></div></div>
       <div className="summary-tile"><div className="summary-icon green"><Check size={18} /></div><div><strong>{demo ? '214' : counts.completed.toLocaleString('th-TH')}</strong><span>Completed</span></div></div>
@@ -1029,7 +1037,6 @@ function DetailField({ label, value }: { label: string; value: unknown }) {
   return <div className="detail-field"><span>{label}</span><strong>{text || '—'}</strong></div>
 }
 
-const readOnlyEvidenceSlots: EvidenceSlot[] = []
 const ignoreEvidenceState = () => undefined
 
 function AssetDetailDialog({ asset, role, demo, onClose }: { asset: Record<string, unknown>; role?: string; demo: boolean; onClose: () => void }) {
@@ -1123,7 +1130,7 @@ function AssetDetailDialog({ asset, role, demo, onClose }: { asset: Record<strin
                       <DetailField label="เหตุผล/หมายเหตุ" value={[selectedHistoryTask.exception_reason, selectedHistoryTask.old_scanner_note].map(value => String(value || '').trim()).filter(Boolean).join(' · ')} />
                     </div>
                   </section>
-                  <TaskEvidencePanel taskId={String(selectedHistoryTask.id)} canEdit={false} canView={canViewHistory} requiredSlots={readOnlyEvidenceSlots} outcome={String(selectedHistoryTask.workflow_outcome || '')} onRequiredReady={ignoreEvidenceState} onBusyChange={ignoreEvidenceState} />
+                  <TaskEvidencePanel key={String(selectedHistoryTask.id)} taskId={String(selectedHistoryTask.id)} canEdit={false} canView={canViewHistory} requiredSlots={[...requiredEvidenceSlotsForOutcome(String(selectedHistoryTask.workflow_outcome || '')), ...(selectedHistoryTask.admin_accepted_at ? ['inspector_signature' as const] : [])]} outcome={String(selectedHistoryTask.workflow_outcome || '')} onRequiredReady={ignoreEvidenceState} onBusyChange={ignoreEvidenceState} />
                 </>}
               </>
                 : <p className="detail-empty-result">{campaignLabel && !['—', '-'].includes(campaignLabel) ? `Scanner เครื่องนี้อยู่ในใบงาน ${campaignLabel} แต่ยังไม่มีผลปฏิบัติงานหรือหลักฐานให้แสดง` : 'ยังไม่มีใบงานที่เปิดสำหรับ Scanner เครื่องนี้ จึงยังไม่มีผู้เปลี่ยนหรือหลักฐานให้แสดง'}</p>}
@@ -1133,30 +1140,21 @@ function AssetDetailDialog({ asset, role, demo, onClose }: { asset: Record<strin
   </div>
 }
 
-const technicianEvidenceSlots: EvidenceSlot[] = [
-  'old_serial_photo', 'new_serial_photo', 'old_device_photo', 'new_device_photo', 'spare_photo_1', 'spare_photo_2',
+const onsiteEvidenceSlots: EvidenceSlot[] = [
+  'old_serial_photo', 'old_device_photo', 'old_condition_photo', 'old_branch_sticker_photo',
+  'new_serial_photo', 'new_front_photo', 'new_side_photo', 'new_com_serial_photo', 'new_device_photo', 'new_cable_management_photo',
+  'spare_photo_1', 'spare_photo_2',
   'technician_signature', 'scanner_user_signature',
 ]
-const officeAcceptanceSlots: EvidenceSlot[] = ['inspector_signature']
-const onsiteEvidenceByOutcome: Record<string, EvidenceSlot[]> = {
-  replaced: ['old_serial_photo', 'new_serial_photo', 'old_device_photo', 'new_device_photo', 'technician_signature', 'scanner_user_signature'],
-  no_damage_found: ['old_serial_photo', 'old_device_photo', 'technician_signature', 'scanner_user_signature'],
-  different_device_found: ['new_serial_photo', 'new_device_photo', 'technician_signature', 'scanner_user_signature'],
-  target_device_not_found: ['spare_photo_1', 'technician_signature', 'scanner_user_signature'],
-}
-
-function requiredEvidenceForStage(stage: string, outcome: string): EvidenceSlot[] {
-  if (stage === 'in_progress') return onsiteEvidenceByOutcome[outcome] || onsiteEvidenceByOutcome.replaced
-  if (['awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage)) return officeAcceptanceSlots
-  if (stage === 'delivered' || stage === 'exception_resolved') {
-    return [...(onsiteEvidenceByOutcome[outcome] || []), 'inspector_signature']
-  }
-  return []
-}
+const adminReviewEvidenceSlots: EvidenceSlot[] = ['inspector_signature']
 
 function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, onUpdated }: { task: Record<string, unknown>; role?: string; demo: boolean; readOnly?: boolean; onClose: () => void; onUpdated: (action: string) => void }) {
   const status = String(task.task_status || task.status || 'scheduled').toLowerCase()
-  const stage = String(task.workflow_stage || (demo ? getTaskWorkflowStage(task) : status === 'scheduled' ? 'open' : status === 'completed' ? 'legacy_completed' : status))
+  const serverStage = String(task.workflow_stage || (demo ? getTaskWorkflowStage(task) : status === 'scheduled' ? 'open' : status === 'completed' ? 'legacy_completed' : status))
+  const taskId = String(task.id || '').trim()
+  const [evidenceStartedTask, setEvidenceStartedTask] = useState<{ id: string; version: number } | null>(null)
+  const startedLocally = evidenceStartedTask?.id === taskId && serverStage === 'open'
+  const stage = startedLocally ? 'in_progress' : serverStage
   const presentation = getStatusPresentation(stage)
   const serial = task.old_serial_snapshot || task.serial || task.com_sn || '—'
   const newSerial = task.new_serial
@@ -1176,26 +1174,24 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
   const isPendingStage = ['blocked', 'pending', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage)
   const currentStep = stage === 'open' ? 0
     : stage === 'in_progress' || stage === 'blocked' ? 1
-    : ['awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage) ? 2
-    : stage === 'delivered' ? 3
-    : ['legacy_completed', 'completed'].includes(stage) ? 2 : -1
+    : ['blocked', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage) ? 2
+    : ['delivered', 'exception_resolved', 'legacy_completed', 'completed'].includes(stage) ? 3 : -1
   const canAct = !demo && !readOnly && ['field_technician', 'admin'].includes(String(role))
   const canManage = !demo && !readOnly && role === 'admin' && !['completed', 'cancelled'].includes(status)
-  const isAdminReview = canManage && ['awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage)
-  const canAdminAccept = isAdminReview && task.can_admin_accept === true
-  const canEditTechnicianEvidence = canAct && stage === 'in_progress'
-  const editableSlots = useMemo<EvidenceSlot[]>(() => canAdminAccept
-    ? officeAcceptanceSlots
-    : canEditTechnicianEvidence ? technicianEvidenceSlots : [], [canAdminAccept, canEditTechnicianEvidence])
+  const isPendingReview = canManage && ['awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage)
+  const canResolvePending = isPendingReview && (task.can_resolve_pending === true || task.can_admin_accept === true)
+  const canEditTechnicianEvidence = canAct && ['open', 'in_progress'].includes(stage)
+  const editableSlots = useMemo<EvidenceSlot[]>(() => canResolvePending
+    ? adminReviewEvidenceSlots
+    : canEditTechnicianEvidence ? onsiteEvidenceSlots : [], [canResolvePending, canEditTechnicianEvidence])
   const [outcomeInput, setOutcomeInput] = useState('replaced')
-  const evidenceOutcome = stage === 'in_progress' ? outcomeInput : outcome
-  const stageRequiredSlots = useMemo(
-    () => requiredEvidenceForStage(stage, evidenceOutcome),
-    [stage, evidenceOutcome],
-  )
+  const fieldRequiredSlots = requiredEvidenceSlotsForOutcome(outcome || outcomeInput)
+  const stageRequiredSlots: EvidenceSlot[] = canResolvePending
+    ? [...fieldRequiredSlots, 'inspector_signature']
+    : fieldRequiredSlots
   const [busy, setBusy] = useState(false)
   const [evidenceBusy, setEvidenceBusy] = useState(false)
-  const [evidenceReady, setEvidenceReady] = useState(false)
+  const [requiredEvidenceReady, setRequiredEvidenceReady] = useState(false)
   const [actionError, setActionError] = useState('')
   const [showBlockForm, setShowBlockForm] = useState(false)
   const [showCancelForm, setShowCancelForm] = useState(false)
@@ -1211,8 +1207,10 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
   const [registerObservedSerial, setRegisterObservedSerial] = useState(false)
   const closeIfIdle = useCallback(() => { if (!busy && !evidenceBusy) onClose() }, [busy, evidenceBusy, onClose])
   const dialogRef = useDialogControls(closeIfIdle)
-  const taskId = String(task.id || '').trim()
-  const version = Number(task.version)
+  const serverVersion = Number(task.version)
+  const version = evidenceStartedTask?.id === taskId && Number.isInteger(evidenceStartedTask.version)
+    ? Math.max(serverVersion, evidenceStartedTask.version)
+    : serverVersion
   const validTaskVersion = Boolean(taskId) && Number.isInteger(version) && version > 0
   const canViewEvidence = !demo && ['admin', 'field_technician'].includes(String(role))
 
@@ -1247,7 +1245,6 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
     } catch {
       setActionError('การเชื่อมต่อขาดช่วง โปรดตรวจสถานะใบงานก่อนลองใหม่')
       onUpdated('refresh')
-      onClose()
     } finally { setBusy(false) }
   }
 
@@ -1262,6 +1259,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
     event.preventDefault()
     setActionError('')
     if (!supabase || !validTaskVersion) { setActionError('เชื่อมต่อระบบไม่ได้หรือข้อมูลใบงานล้าสมัย โปรดโหลดใบงานใหม่'); return }
+    if (!requiredEvidenceReady) { setActionError('บันทึกรูปหลักฐานและลายเซ็นที่จำเป็นให้ครบก่อนส่งผลปิดงาน'); return }
     const cleanSerial = newSerialInput.trim()
     const cleanObserved = observedSerialInput.trim()
     const cleanReason = exceptionReasonInput.trim()
@@ -1302,41 +1300,41 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
         if (error.code === '40001') onUpdated('refresh')
         return
       }
-      onUpdated(outcomeInput === 'replaced' ? 'closeout_complete' : 'closeout_pending')
+      onUpdated('closeout_pending')
       onClose()
     } catch {
       setActionError('ยังยืนยันผลส่งปิดงานไม่ได้ โปรดโหลดสถานะล่าสุดก่อนลองซ้ำ')
       onUpdated('refresh')
-      onClose()
     } finally { setBusy(false) }
   }
 
-  const acceptTask = async () => {
+  const resolvePending = async () => {
     setActionError('')
     if (!supabase || !validTaskVersion) { setActionError('เชื่อมต่อระบบไม่ได้หรือข้อมูลใบงานล้าสมัย โปรดเปิดใบงานใหม่'); return }
+    if (!requiredEvidenceReady) { setActionError('ตรวจหลักฐานและลงลายเซ็นผู้ตรวจรับให้ครบก่อนปิดรายการ'); return }
     setBusy(true)
     try {
-      const { error } = await supabase.rpc('ais_admin_accept_task', {
+      const rpcName = outcome === 'replaced' ? 'ais_admin_accept_task' : 'ais_admin_resolve_pending'
+      const { error } = await supabase.rpc(rpcName, {
         p_task_id: taskId,
         p_expected_version: version,
         p_register_observed_serial: registerObservedSerial,
       })
       if (error) {
         if (error.code === '40001') setActionError('ใบงานถูกอัปเดตจากอีกหน้าจอแล้ว โปรดโหลดรายการล่าสุด')
-        else if (error.code === '23505' && outcome === 'different_device_found') setActionError('SN เครื่องที่พบอยู่ในทะเบียนอีกสาขา ระบบจึงไม่ส่งมอบหรือเปลี่ยนข้อมูลทะเบียน โปรดตรวจสอบและแก้ข้อมูลหลักก่อนตรวจรับ')
-        else if (error.code === '23505') setActionError('Serial เครื่องใหม่ถูกใช้แล้ว โปรดตรวจสอบก่อนรับงาน')
-        else if (error.code === '42501') setActionError('ต้องใช้บัญชี Admin ที่เปิดใช้งานและไม่ได้เป็นผู้ปฏิบัติงานรายการนี้')
+        else if (error.code === '23505' && outcome === 'different_device_found') setActionError('SN เครื่องที่พบอยู่ในทะเบียนอีกสาขา ระบบจึงไม่เพิ่มหรือเปลี่ยนทะเบียน โปรดให้ Admin ตรวจและแก้ข้อมูลหลักก่อนปิด Pending')
+        else if (error.code === '23505') setActionError('Serial เครื่องนี้ถูกใช้แล้ว โปรดตรวจสอบทะเบียนก่อนปิด Pending')
+        else if (error.code === '42501') setActionError('ต้องใช้บัญชี Admin ที่เปิดใช้งานและมีสิทธิ์พิจารณารายการนี้')
         else if (error.code === '22023') setActionError('ปิดรายการ Pending ไม่สำเร็จ โปรดตรวจสถานะใบงานล่าสุด')
         else setActionError('ตรวจรายการ Pending ไม่สำเร็จ โปรดลองใหม่')
         if (error.code === '40001') onUpdated('refresh')
         return
       }
-      onUpdated(['no_damage_found', 'different_device_found', 'target_device_not_found'].includes(outcome) ? 'resolve_exception' : 'accept')
+      onUpdated(outcome === 'replaced' ? 'accept' : 'resolve_exception')
       onClose()
     } catch {
       setActionError('บันทึกผลตรวจสอบไม่ได้ โปรดโหลดสถานะล่าสุดก่อนลองซ้ำ')
       onUpdated('refresh')
-      onClose()
     } finally { setBusy(false) }
   }
 
@@ -1362,19 +1360,18 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
     } catch {
       setActionError('การเชื่อมต่อขาดช่วง โปรดตรวจสถานะใบงานก่อนลองยกเลิกซ้ำ')
       onUpdated('refresh')
-      onClose()
     } finally { setBusy(false) }
   }
 
   const isReplacement = outcomeInput === 'replaced'
-  const canEditEvidence = canEditTechnicianEvidence || canAdminAccept
+  const canEditEvidence = canEditTechnicianEvidence || canResolvePending
   return <div className="detail-overlay work-order-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeIfIdle() }}>
     <section ref={dialogRef} className="detail-dialog work-order-dialog" role="dialog" aria-modal="true" aria-labelledby="work-order-title" tabIndex={-1}>
       <header className="detail-dialog-header"><button type="button" className="detail-back" aria-label="กลับไปรายการใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><ChevronLeft size={20} /></button><div><span className="detail-eyebrow">รายการ Scanner ในใบงาน</span><h2 id="work-order-title">รายละเอียดการเปลี่ยนเครื่อง</h2></div><button type="button" className="detail-close" aria-label="ปิดใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><X size={18} /></button></header>
       <div className="work-order-content">
       <div className="work-order-identity"><div><strong>{String(task.branch_name || task.branch || 'สาขาไม่ระบุ')}</strong><span>{String(task.province || 'ไม่ระบุจังหวัด')} · LocationCode {String(task.location_code || task.code || '—')}</span><small>{String(task.scanner_model || task.model || 'เครื่องสแกน')} · {String(serial)}</small></div><StatusPill label={presentation.label} tone={presentation.tone} /></div>
       <div className="work-order-steps" aria-label="ความคืบหน้าของรายการ Scanner">
-        {['เปิดใบงาน', 'ปฏิบัติงาน', 'บันทึกผล', 'Completed'].map((label, index) => <div className={'work-order-step' + (index < currentStep ? ' complete' : index === currentStep ? ' current' : '')} key={label}><span>{index < currentStep ? '✓' : index + 1}</span><small>{label}</small></div>)}
+        {['เปิดใบงาน', 'ปฏิบัติงาน', 'บันทึกผล', 'ปิดรายการ'].map((label, index) => <div className={'work-order-step' + (index < currentStep ? ' complete' : index === currentStep ? ' current' : '')} key={label}><span>{index < currentStep ? '✓' : index + 1}</span><small>{label}</small></div>)}
       </div>
       <div className="work-order-layout">
         <div className="work-order-main">
@@ -1382,10 +1379,13 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
           <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span><div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div></div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
           <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} /><DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} /><DetailField label="รุ่นเครื่องที่พบ" value={task.observed_model} /><DetailField label="ผลการติดตั้งและทดสอบ" value={installResult || 'ยังไม่มีข้อมูล'} /><DetailField label="สถานะเครื่องเดิม" value={recordedOldStatus ? oldStatusLabels[String(recordedOldStatus)] || String(recordedOldStatus) : 'ยังไม่มีข้อมูล'} /><DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || 'ยังไม่มีข้อมูล'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
-          {((canViewEvidence && Boolean(taskId)) || demo) && <TaskEvidencePanel taskId={taskId || undefined} canEdit={canEditEvidence} editableSlots={editableSlots} requiredSlots={stageRequiredSlots} canView={canViewEvidence} previewOnly={demo} outcome={outcome || outcomeInput} onRequiredReady={setEvidenceReady} onBusyChange={setEvidenceBusy} />}
+          {((canViewEvidence && Boolean(taskId)) || demo) && <TaskEvidencePanel key={taskId || 'demo'} taskId={taskId || undefined} canEdit={canEditEvidence} editableSlots={editableSlots} requiredSlots={stageRequiredSlots} canView={canViewEvidence} previewOnly={demo} outcome={outcome || outcomeInput} onRequiredReady={setRequiredEvidenceReady} onBusyChange={setEvidenceBusy} onTaskStarted={nextVersion => {
+            setEvidenceStartedTask(current => current?.id === taskId && current.version > nextVersion ? current : { id: taskId, version: nextVersion })
+            onUpdated('start')
+          }} />}
           {!demo && !canViewEvidence && <section className="detail-section"><h3>หลักฐานประกอบ</h3><p className="detail-empty-result">หลักฐานใบงานดูได้โดย Admin และช่างที่มีสิทธิ์เข้าระบบ</p></section>}
-          {canAct && stage === 'in_progress' && <section className="detail-section task-action-panel"><h3>บันทึกผลปฏิบัติงาน</h3><p>SN ในใบงานมาจากทะเบียนที่ยืนยันแล้ว จึงเริ่มทำงานได้ทันที เมื่อเปลี่ยนเครื่องให้บันทึก SN/ผลตรวจ รูป และลายเซ็นผู้เกี่ยวข้อง ส่งให้ Admin อีกบัญชีตรวจรับก่อนระบบจึงอัปเดตทะเบียนและปิดงาน หากไม่พบ SN หรือพบเครื่องอื่นให้ส่งเป็น Pending</p><form className="task-action-form" onSubmit={submitCloseout}>
-            <label>ผลการเข้าหน้างาน<select value={outcomeInput} onChange={event => { setOutcomeInput(event.target.value); setActionError(''); setEvidenceReady(false) }}><option value="replaced">เปลี่ยนเครื่องสำเร็จ</option><option value="no_damage_found">ไม่พบเครื่องชำรุด</option><option value="different_device_found">ไม่พบ SN ตามใบงาน แต่พบเครื่องอื่น</option><option value="target_device_not_found">ไม่พบ SN ตามใบงานและไม่พบเครื่องอื่น</option></select></label>
+          {canAct && stage === 'in_progress' && <section className="detail-section task-action-panel"><h3>บันทึกผลปฏิบัติงาน</h3><p>กรณีเปลี่ยนเครื่อง ต้องบันทึกรูปหลักฐานเครื่องเก่า 4 รูป เครื่องใหม่ 6 รูป และลายเซ็นช่างกับผู้ใช้ Scanner ให้ครบก่อนส่งผล จากนั้น Admin อีกบัญชีจะตรวจหลักฐาน ลงลายเซ็นรับผ่าน แล้วระบบจึงอัปเดตทะเบียนและส่งมอบงาน หากพบเครื่องอื่นหรือไม่พบเครื่องตาม SN ให้ส่งเป็น Pending เพื่อให้ Admin ตรวจ</p><form className="task-action-form" onSubmit={submitCloseout}>
+            <label>ผลการเข้าหน้างาน<select value={outcomeInput} onChange={event => { setOutcomeInput(event.target.value); setActionError('') }}><option value="replaced">เปลี่ยนเครื่องสำเร็จ</option><option value="no_damage_found">ไม่พบเครื่องชำรุด</option><option value="different_device_found">ไม่พบ SN ตามใบงาน แต่พบเครื่องอื่น</option><option value="target_device_not_found">ไม่พบ SN ตามใบงานและไม่พบเครื่องอื่น</option></select></label>
             {outcomeInput === 'different_device_found' && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>บันทึก SN ที่พบและเหตุผล รายการนี้จะเป็น Pending; ระบบยังไม่เพิ่มหรือเปลี่ยนข้อมูลทะเบียนจนกว่า Admin ตรวจ</span></p>}
             {outcomeInput === 'target_device_not_found' && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>บันทึกเหตุผล รายการนี้จะเป็น Pending เพื่อให้ Admin ตรวจ ไม่เพิ่ม SN ใหม่</span></p>}
             {isReplacement && <label>Serial เครื่องใหม่<input value={newSerialInput} onChange={event => setNewSerialInput(event.target.value)} maxLength={100} required autoComplete="off" /></label>}
@@ -1395,20 +1395,19 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
             {isReplacement && oldStatusInput === 'other' && <label>หมายเหตุเครื่องเดิม<textarea value={oldStatusNote} onChange={event => setOldStatusNote(event.target.value)} maxLength={1000} required rows={3} /></label>}
             {!isReplacement && <label>เหตุผล/รายละเอียด<textarea value={exceptionReasonInput} onChange={event => setExceptionReasonInput(event.target.value)} maxLength={1000} required rows={3} /></label>}
             {actionError && !showBlockForm && <p className="task-action-error" role="alert">{actionError}</p>}
-            {!evidenceReady && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>บันทึกรูปและลายเซ็นที่ระบุว่าจำเป็นก่อนส่งผล</span></p>}
-            <button type="submit" className="primary-button task-action-submit" disabled={busy || evidenceBusy || !evidenceReady}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : isReplacement ? 'ส่งผลให้ Admin ตรวจรับ' : 'ส่งข้อยกเว้นให้ Admin ตรวจ'}</button>
+            {isReplacement && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>รูปและลายเซ็นเป็นข้อมูลเสริม การปิด Completed ใช้ข้อมูล Serial และผลตรวจที่กรอก</span></p>}
+            <button type="submit" className="primary-button task-action-submit" disabled={busy || evidenceBusy}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : isReplacement ? 'บันทึกผลและปิดงาน' : 'บันทึกผลเป็น Pending'}</button>
           </form><button type="button" className="secondary-button task-block-toggle" disabled={busy} onClick={() => { setShowBlockForm(value => !value); setActionError('') }}>{showBlockForm ? 'ซ่อนฟอร์ม Pending' : 'พักรายการนี้เป็น Pending'}</button>{showBlockForm && <form className="task-action-form" onSubmit={submitBlock}><label>เหตุผลที่ทำงานต่อไม่ได้<textarea value={blockReason} onChange={event => setBlockReason(event.target.value)} maxLength={500} required rows={3} /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<button type="submit" className="secondary-button" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก Pending'}</button></form>}</section>}
-          {isAdminReview && !canAdminAccept && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>Pending รายการนี้รอ Admin ที่มีสิทธิ์ตรวจสอบและบันทึกผลการพิจารณา</span></div>}
-          {canAdminAccept && outcome === 'different_device_found' && <section className="detail-section task-action-panel"><label className="task-exception-register"><input type="checkbox" checked={registerObservedSerial} onChange={event => setRegisterObservedSerial(event.target.checked)} />เพิ่ม SN ที่ตรวจแล้วว่าเป็นเครื่องใหม่ในทะเบียนสาขานี้</label><p>ตรวจรูป SN สาขา และทะเบียนทุกสาขาก่อนเลือก ระบบจะเพิ่มเฉพาะ SN ที่ยังไม่อยู่ในทะเบียน หากเพิ่มแล้วแต่ยังต้องเปลี่ยนเครื่อง ให้เปิดใบงานต่อสำหรับ SN ใหม่นี้ รายการปัจจุบันจะถูกปิดเป็น “ตรวจข้อยกเว้นแล้ว” ไม่ใช่งานส่งมอบ การพบ SN ซ้ำต่างสาขาจะถูกปฏิเสธโดยไม่ย้ายข้อมูล</p></section>}
+          {isPendingReview && !canResolvePending && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>Pending รายการนี้รอ Admin ที่มีสิทธิ์พิจารณา</span></div>}
+          {canResolvePending && outcome === 'different_device_found' && <section className="detail-section task-action-panel"><label className="task-exception-register"><input type="checkbox" checked={registerObservedSerial} onChange={event => setRegisterObservedSerial(event.target.checked)} />เพิ่ม SN ที่ตรวจแล้วว่าเป็นเครื่องใหม่ในทะเบียนสาขานี้</label><p>ตรวจ SN สาขาและทะเบียนทุกสาขาก่อนเลือก ระบบจะเพิ่มเฉพาะ SN ที่ยังไม่อยู่ในทะเบียน หากต้องเปลี่ยนเครื่องต่อ ให้เปิดใบงานใหม่ด้วย SN ที่เพิ่มแล้ว การพบ SN ซ้ำต่างสาขาจะถูกปฏิเสธโดยไม่ย้ายข้อมูล</p></section>}
           {demo && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>ใบงานตัวอย่างเป็นแบบอ่านอย่างเดียว ไม่บันทึกข้อมูลจริง</span></div>}
         </div>
         <aside className="work-order-side" aria-label="ขั้นตอน สาขา และการจัดการใบงาน">
           <section className="detail-section"><h3>ข้อมูลการเปิดใบงาน</h3><div className="detail-grid"><DetailField label="เปิดใบงานเมื่อ" value={formatDate(task.created_at)} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="สถานะใบงาน" value={presentation.label} /><DetailField label="ผู้ปฏิบัติงาน" value={task.performed_by_name} /></div></section>
-          {canAct && stage === 'open' && <section className="detail-section task-action-panel"><h3>เริ่มปฏิบัติงานกับ SN นี้</h3><p>SN มาจากทะเบียนที่ยืนยันแล้ว จึงไม่ต้องกดยืนยันซ้ำ หากไปถึงสาขาแล้วให้เริ่มงาน หรือเลือกแจ้งกรณีไม่พบ/พบเครื่องคนละ SN ในหน้าบันทึกผล</p><button type="button" className="primary-button task-action-submit" disabled={busy} onClick={() => void submitAction('start')}>{busy ? 'กำลังเริ่มงาน…' : 'เริ่มดำเนินการ'}</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</section>}
           {canAct && stage === 'blocked' && <section className="detail-section task-action-panel"><h3>ดำเนินงานต่อ</h3><p>แก้สาเหตุที่พักงานแล้วจึงกลับมาทำรายการนี้ต่อ</p><button type="button" className="primary-button" disabled={busy} onClick={() => void submitAction('resume')}>{busy ? 'กำลังบันทึก…' : 'ดำเนินงานต่อ'}</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</section>}
-          {canAdminAccept && <section className="detail-section task-action-panel"><h3>ตรวจรายการ Pending</h3><p>ตรวจผลและหลักฐานจากผู้ปฏิบัติงาน onsite แล้วลงลายเซ็น Admin อีกบัญชีก่อนบันทึกผล การตรวจข้อยกเว้นจะไม่ถูกนับเป็นการเปลี่ยนหรือส่งมอบ Scanner</p>{!evidenceReady && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>ลงลายเซ็น Admin ผู้ตรวจรับก่อนปิดรายการ</span></p>}{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<button type="button" className="primary-button task-action-submit" disabled={busy || evidenceBusy || !evidenceReady} onClick={() => void acceptTask()}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : outcome === 'replaced' ? 'ตรวจรับและส่งมอบงาน' : 'บันทึกผลตรวจข้อยกเว้น'}</button></section>}
+          {canResolvePending && <section className="detail-section task-action-panel"><h3>{outcome === 'replaced' ? 'ตรวจรับและส่งมอบงาน' : 'พิจารณารายการ Pending'}</h3><p>ตรวจรูปและข้อมูลที่ช่างบันทึก แล้วลงลายเซ็นตรวจรับด้วยบัญชี Admin อีกบัญชีหนึ่ง สำหรับเครื่องอื่น ระบบจะเพิ่ม SN ได้เมื่อยืนยันแล้วว่าไม่ซ้ำกับทะเบียนทุกสาขา หากต้องกลับไปทำงานหน้างาน ให้ยกเลิกรายการนี้พร้อมเหตุผลแล้วเปิดใบงานใหม่</p>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<button type="button" className="primary-button task-action-submit" disabled={busy || evidenceBusy || !requiredEvidenceReady} onClick={() => void resolvePending()}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : outcome === 'replaced' ? 'ลงนามรับผ่านและส่งมอบงาน' : 'บันทึกผลตรวจ Pending'}</button></section>}
           {canManage && !['completed', 'cancelled'].includes(status) && <section className="detail-section task-action-panel"><h3>การจัดการรายการ Scanner</h3>{showCancelForm ? <form className="task-action-form" onSubmit={event => void submitCancel(event)}><label>เหตุผลที่ยกเลิก<textarea value={cancelReason} onChange={event => setCancelReason(event.target.value)} maxLength={500} rows={3} required /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(false); setCancelReason(''); setActionError('') }}>กลับ</button><button type="submit" className="primary-button" disabled={busy || !cancelReason.trim()}>{busy ? 'กำลังบันทึก…' : 'ยืนยันยกเลิกรายการนี้'}</button></div></form> : <><p>Admin ยกเลิกรายการเครื่องนี้แยกจากเครื่องอื่นในใบงานได้ โดยระบุเหตุผลและระบบจะเก็บประวัติไว้</p><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(true); setActionError('') }}>ยกเลิกรายการเครื่องนี้</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</>}</section>}
-          {['delivered', 'exception_resolved', 'legacy_completed', 'cancelled'].includes(stage) && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>{stage === 'delivered' ? 'งานนี้ตรวจรับและส่งมอบแล้ว' : stage === 'exception_resolved' ? 'Admin ตรวจข้อยกเว้นแล้ว รายการนี้ไม่ได้เปลี่ยนสถานะทะเบียนตามใบงาน' : 'ใบงานนี้ปิดแล้วและแก้ไขไม่ได้'}</span></div>}
+          {['delivered', 'exception_resolved', 'legacy_completed', 'cancelled'].includes(stage) && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>{stage === 'delivered' ? 'รายการนี้ Completed แล้ว และทะเบียนอัปเดตตามผลเปลี่ยนเครื่อง' : stage === 'exception_resolved' ? 'Admin พิจารณา Pending แล้ว รายการนี้ปิดโดยคง SN เดิมไว้' : 'รายการนี้ปิดแล้วและแก้ไขไม่ได้'}</span></div>}
           {!demo && !['field_technician', 'admin'].includes(String(role)) && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>บัญชีปัจจุบันดูข้อมูลได้อย่างเดียว</span></div>}
         </aside>
       </div>
@@ -1476,6 +1475,7 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
     setFileName('')
     if (!file) return
     try {
+      const { parseRegisterWorkbook } = await import('./xlsx-register.mjs')
       const parsed = await parseRegisterWorkbook(file)
       setFileName(file.name)
       setRows(parsed)
@@ -1582,10 +1582,10 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
 
 function People() {
   const roles = [
-    ['Admin', 'ดูแลทะเบียนและสิทธิ์ เปิด/ยกเลิกใบงาน และทำขั้นตอน onsite ได้ครบทุกขั้นตอน; งานที่ Admin ลงมือเองต้องให้ Admin อีกบัญชีลงนามตรวจรับ', 'Admin ประจำ Office'],
-    ['Field Technician', 'เห็นใบงานทุกใบที่เปิดไว้ เริ่มและบันทึกผลหน้างานได้โดยไม่ต้องยืนยัน SN ซ้ำ พร้อมแนบรูปและลายเซ็นที่จำเป็นตามผลที่พบ', 'ช่าง Onsite'],
+    ['Admin', 'ดูแลทะเบียนและสิทธิ์ เปิดหรือยกเลิกใบงาน และพิจารณารายการ Pending', 'Admin ประจำ Office'],
+    ['Field Technician', 'เห็นใบงานที่เปิดไว้ และบันทึกผลหน้างานได้', 'ช่าง Onsite'],
   ]
-  return <div className="people-layout"><section className="panel roles-panel"><div className="panel-heading"><div><h2>บทบาทงานปฏิบัติการ</h2><p>มี 2 บทบาทสำหรับการทำงาน: Admin ประจำ Office และช่าง Onsite</p></div><div className="readonly-badge"><LockKeyhole size={14} /> อ่านอย่างเดียว</div></div><div className="roles-list">{roles.map(([role, description, label]) => <div className="role-row" key={role}><div className={'role-avatar role-' + role.toLowerCase().replaceAll(' ', '-')}>{role === 'Field Technician' ? <Wrench size={17} /> : <Users size={17} />}</div><div className="role-copy"><strong>{role}</strong><span>{description}</span></div><span className="role-label">{label}</span></div>)}</div><p className="team-access-note">ช่างทุกคนเข้าถึงใบงานที่เปิดไว้ได้ ระบบบันทึกบัญชีและเวลาของผู้ปฏิบัติงาน; งานทุกเครื่องต้องส่งหลักฐานให้ Admin ตรวจรับก่อนส่งมอบ หากไม่พบ SN หรือพบเครื่องอื่น ให้คงทะเบียนเดิมและรอ Admin ตรวจสอบก่อนแก้ข้อมูล</p></section></div>
+  return <div className="people-layout"><section className="panel roles-panel"><div className="panel-heading"><div><h2>บทบาทงานปฏิบัติการ</h2><p>Admin ประจำ Office และช่าง Onsite</p></div><div className="readonly-badge"><LockKeyhole size={14} /> อ่านอย่างเดียว</div></div><div className="roles-list">{roles.map(([role, description, label]) => <div className="role-row" key={role}><div className={'role-avatar role-' + role.toLowerCase().replaceAll(' ', '-')}>{role === 'Field Technician' ? <Wrench size={17} /> : <Users size={17} />}</div><div className="role-copy"><strong>{role}</strong><span>{description}</span></div><span className="role-label">{label}</span></div>)}</div><p className="team-access-note">ช่างทุกคนเข้าถึงใบงานที่เปิดไว้ได้ บันทึกงานและแนบหลักฐานได้โดยไม่จำกัดทีม</p></section></div>
 }
 
 function EmptyState({ title, detail, loading, compact, onRetry }: { title?: string; detail?: string; loading?: boolean; compact?: boolean; onRetry?: () => void }) {

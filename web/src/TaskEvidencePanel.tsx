@@ -1,21 +1,27 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { Check, ImagePlus, LoaderCircle, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { supabase } from './supabase'
 
 const PHOTO_SLOTS = [
-  { key: 'old_serial_photo', label: 'SN เครื่องเดิม', required: true, hint: 'ถ่ายฉลาก Serial ของ Scanner เครื่องเดิมให้เห็นเลขชัดเจน' },
-  { key: 'new_serial_photo', label: 'SN เครื่องใหม่', required: true, hint: 'ถ่ายฉลาก Serial ของ Scanner เครื่องใหม่ให้เห็นเลขชัดเจน' },
-  { key: 'old_device_photo', label: 'เครื่องเดิม', required: true, hint: 'ถ่ายสภาพ Scanner เครื่องเดิมก่อนถอดหรือส่งคืน' },
-  { key: 'new_device_photo', label: 'เครื่องใหม่', required: true, hint: 'ถ่าย Scanner เครื่องใหม่หลังติดตั้งและทดสอบ' },
-  { key: 'spare_photo_1', label: 'รูปสำรอง 1', required: false, hint: 'แนบภาพประกอบเพิ่มเติม (ถ้ามี)' },
+  { key: 'old_serial_photo', label: 'SN เครื่องเก่า', required: false, hint: 'ถ่ายฉลาก Serial ของ Scanner เดิมให้เห็นเลขชัดเจน', section: 'เครื่องเก่า · 4 รูป' },
+  { key: 'old_device_photo', label: 'ภาพรวมเครื่องเก่า', required: false, hint: 'ถ่ายภาพ Scanner เครื่องเดิมทั้งเครื่อง' },
+  { key: 'old_condition_photo', label: 'สภาพเครื่องเก่า', required: false, hint: 'ถ่ายตำหนิหรือสภาพปัจจุบันของ Scanner เดิม' },
+  { key: 'old_branch_sticker_photo', label: 'สติกเกอร์สาขาเดิม', required: false, hint: 'ถ่ายสติกเกอร์ที่ระบุสาขาเดิมให้เห็นชัด' },
+  { key: 'new_serial_photo', label: 'SN เครื่องใหม่', required: false, hint: 'ถ่ายฉลาก Serial ของ Scanner ใหม่ให้เห็นเลขชัดเจน', section: 'เครื่องใหม่ · 6 รูป' },
+  { key: 'new_front_photo', label: 'ด้านหน้าเครื่องใหม่', required: false, hint: 'ถ่ายด้านหน้าของ Scanner หลังติดตั้ง' },
+  { key: 'new_side_photo', label: 'ด้านข้างเครื่องใหม่', required: false, hint: 'ถ่ายด้านข้างของ Scanner หลังติดตั้ง' },
+  { key: 'new_com_serial_photo', label: 'Com SN เครื่องใหม่', required: false, hint: 'ถ่ายฉลาก Com SN ให้เห็นเลขชัดเจน' },
+  { key: 'new_device_photo', label: 'ภาพรวมเครื่องใหม่', required: false, hint: 'ถ่ายภาพ Scanner ใหม่ทั้งเครื่องหลังติดตั้ง' },
+  { key: 'new_cable_management_photo', label: 'การจัดสายเครื่องใหม่', required: false, hint: 'ถ่ายการจัดสายและจุดเชื่อมต่อหลังติดตั้ง' },
+  { key: 'spare_photo_1', label: 'รูปสำรอง 1', required: false, hint: 'แนบภาพประกอบเพิ่มเติม (ถ้ามี)', section: 'รูปสำรอง · ไม่บังคับ 2 รูป' },
   { key: 'spare_photo_2', label: 'รูปสำรอง 2', required: false, hint: 'แนบภาพประกอบเพิ่มเติม (ถ้ามี)' },
 ] as const
 
 const SIGNATURE_SLOTS = [
-  { key: 'technician_signature', label: 'ผู้ปฏิบัติงานที่เข้าสาขา', hint: 'ช่าง Onsite หรือ Admin ที่ลงพื้นที่ต้องลงลายเซ็น ระบบบันทึกบัญชีและเวลาปฏิบัติงานประกอบ' },
-  { key: 'scanner_user_signature', label: 'ผู้ใช้งาน Scanner', hint: 'ผู้ใช้งานประจำลงชื่อรับรองการเปลี่ยนเครื่อง' },
-  { key: 'inspector_signature', label: 'Admin ผู้ตรวจรับ', hint: 'Admin อีกบัญชีลงชื่อรับรองหลังตรวจหลักฐาน ผู้ปฏิบัติงานห้ามตรวจรับงานของตนเอง' },
+  { key: 'technician_signature', label: 'ผู้ปฏิบัติงานที่เข้าสาขา', hint: 'ลงลายเซ็นผู้ปฏิบัติงาน' },
+  { key: 'scanner_user_signature', label: 'ผู้ใช้งาน Scanner', hint: 'ผู้ใช้งาน Scanner ลงลายเซ็นรับทราบ' },
+  { key: 'inspector_signature', label: 'ผู้ตรวจรับงาน', hint: 'Admin ลงลายเซ็นหลังตรวจงาน' },
 ] as const
 
 type PhotoSlot = typeof PHOTO_SLOTS[number]['key']
@@ -27,6 +33,7 @@ type EvidenceEntry = {
   path: string
   byte_size: number
   signer_name: string | null
+  outcome_context: string | null
   uploaded_at: string | null
   can_finalize?: boolean
 }
@@ -41,8 +48,26 @@ type TaskEvidencePanelProps = {
   requiredSlots?: EvidenceSlot[]
   onRequiredReady: (ready: boolean) => void
   onBusyChange: (busy: boolean) => void
+  onTaskStarted?: (version: number) => void
 }
 type Point = { x: number; y: number }
+
+export function requiredEvidenceSlotsForOutcome(outcome?: string): EvidenceSlot[] {
+  const fieldSignatures: EvidenceSlot[] = ['technician_signature', 'scanner_user_signature']
+  if (outcome === 'replaced') return [
+    'old_serial_photo', 'old_device_photo', 'old_condition_photo', 'old_branch_sticker_photo',
+    'new_serial_photo', 'new_front_photo', 'new_side_photo', 'new_com_serial_photo',
+    'new_device_photo', 'new_cable_management_photo', ...fieldSignatures,
+  ]
+  if (outcome === 'no_damage_found') return [
+    'old_serial_photo', 'old_device_photo', 'old_condition_photo', 'old_branch_sticker_photo', ...fieldSignatures,
+  ]
+  if (outcome === 'different_device_found') return [
+    'new_serial_photo', 'new_device_photo', ...fieldSignatures,
+  ]
+  if (outcome === 'target_device_not_found') return ['spare_photo_1', ...fieldSignatures]
+  return []
+}
 
 const REQUIRED_SLOTS: EvidenceSlot[] = []
 const MAX_PHOTO_BYTES = 90 * 1024
@@ -57,6 +82,16 @@ function toEntryMap(rows: unknown): Partial<Record<EvidenceSlot, EvidenceEntry>>
     if (!knownSlot || !['pending', 'ready'].includes(row.status) || typeof row.path !== 'string') return []
     return [[slot, row]]
   })) as Partial<Record<EvidenceSlot, EvidenceEntry>>
+}
+
+function outcomeLabel(outcome?: string | null) {
+  const labels: Record<string, string> = {
+    replaced: 'เปลี่ยนเครื่อง',
+    no_damage_found: 'ไม่พบเครื่องชำรุด',
+    different_device_found: 'พบอุปกรณ์อื่น',
+    target_device_not_found: 'ไม่พบเครื่องตาม SN',
+  }
+  return outcome ? labels[outcome] || outcome : 'ยังไม่ระบุผล'
 }
 
 function blobFromCanvas(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
@@ -232,7 +267,7 @@ function slotErrorMessage(error: unknown): string {
   return 'บันทึกหลักฐานไม่สำเร็จ ตรวจสัญญาณอินเทอร์เน็ต แล้วลองอีกครั้ง'
 }
 
-export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnly = false, outcome, editableSlots, requiredSlots, onRequiredReady, onBusyChange }: TaskEvidencePanelProps) {
+export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnly = false, outcome, editableSlots, requiredSlots, onRequiredReady, onBusyChange, onTaskStarted }: TaskEvidencePanelProps) {
   const stageEditableSlots = editableSlots || (canEdit ? REQUIRED_SLOTS : [])
   const stageRequiredSlots = requiredSlots || REQUIRED_SLOTS
   const canEditSlot = (slot: EvidenceSlot) => Boolean(taskId) && canEdit && stageEditableSlots.includes(slot)
@@ -244,17 +279,31 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
   const [loadError, setLoadError] = useState('')
   const [actionMessage, setActionMessage] = useState('')
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const loadRequestRef = useRef(0)
+  const evidenceContextRef = useRef({ taskId, canView })
+  evidenceContextRef.current = { taskId, canView }
   const requiredReadyRef = useRef(onRequiredReady)
   const busyCallbackRef = useRef(onBusyChange)
   useEffect(() => { requiredReadyRef.current = onRequiredReady }, [onRequiredReady])
   useEffect(() => { busyCallbackRef.current = onBusyChange }, [onBusyChange])
   useEffect(() => { busyCallbackRef.current(busySlot !== null) }, [busySlot])
+  useEffect(() => () => { busyCallbackRef.current(false) }, [])
+  useEffect(() => {
+    const ready = stageRequiredSlots.every(slot => entries[slot]?.status === 'ready' && entries[slot]?.outcome_context === outcome)
+    requiredReadyRef.current(ready)
+  }, [entries, stageRequiredSlots, outcome])
 
   const loadEvidence = useCallback(async () => {
-    if (!supabase || !canView || !taskId) {
+    const { taskId: activeTaskId, canView: canViewActiveTask } = evidenceContextRef.current
+    const requestId = ++loadRequestRef.current
+    const isCurrentRequest = () => requestId === loadRequestRef.current
+      && activeTaskId === evidenceContextRef.current.taskId
+      && canViewActiveTask === evidenceContextRef.current.canView
+    if (!supabase || !canViewActiveTask || !activeTaskId) {
       setEntries({})
       setPreviewUrls({})
       setPreviewStatuses({})
+      setLoadError('')
       requiredReadyRef.current(false)
       setLoadState('ready')
       return
@@ -265,21 +314,24 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
     setLoadState('loading')
     setLoadError('')
     requiredReadyRef.current(false)
-    const { data, error } = await supabase.rpc('ais_task_evidence_list', { p_task_id: taskId })
-    if (error) {
+    try {
+      const { data, error } = await supabase.rpc('ais_task_evidence_list', { p_task_id: activeTaskId })
+      if (!isCurrentRequest()) return
+      if (error) throw error
+      const nextEntries = toEntryMap(data)
+      setEntries(nextEntries)
+      setLoadState('ready')
+    } catch {
+      if (!isCurrentRequest()) return
       setEntries({})
       setLoadError('โหลดหลักฐานไม่ได้ บัญชีนี้อาจไม่มีสิทธิ์ดูใบงาน หรือการเชื่อมต่อขัดข้อง')
       setLoadState('error')
       requiredReadyRef.current(false)
-      return
     }
-    const nextEntries = toEntryMap(data)
-    setEntries(nextEntries)
-    requiredReadyRef.current(stageRequiredSlots.every(slot => nextEntries[slot]?.status === 'ready'))
-    setLoadState('ready')
-  }, [canView, taskId, stageRequiredSlots])
+  }, [])
 
-  useEffect(() => { void loadEvidence() }, [loadEvidence])
+  useEffect(() => { void loadEvidence() }, [loadEvidence, canView, taskId])
+  useEffect(() => () => { loadRequestRef.current += 1 }, [])
 
   useEffect(() => {
     let active = true
@@ -294,9 +346,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
         return
       }
       const pairs = await Promise.all(readyEntries.map(async entry => {
-        const { data, error } = await client.storage.from(EVIDENCE_BUCKET).download(entry.path)
-        if (error || !data) return [entry.slot, null] as const
-        return [entry.slot, URL.createObjectURL(data)] as const
+        try {
+          const { data, error } = await client.storage.from(EVIDENCE_BUCKET).download(entry.path)
+          if (error || !data) return [entry.slot, null] as const
+          return [entry.slot, URL.createObjectURL(data)] as const
+        } catch {
+          return [entry.slot, null] as const
+        }
       }))
       const next: Partial<Record<EvidenceSlot, string>> = {}
       const nextStatuses: Partial<Record<EvidenceSlot, 'loading' | 'error'>> = {}
@@ -328,15 +384,20 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       if (blob.size > (isSignature ? MAX_SIGNATURE_BYTES : MAX_PHOTO_BYTES)) {
         throw new Error(isSignature ? 'ลายเซ็นใหญ่เกิน 32 KB กรุณาเซ็นใหม่' : 'รูปใหญ่เกิน 90 KB กรุณาครอปภาพแล้วลองใหม่')
       }
-      const { data: reservation, error: reserveError } = await supabase.rpc('ais_task_evidence_reserve', {
+      const { data: reservation, error: reserveError } = await supabase.rpc('ais_task_evidence_reserve_for_outcome', {
         p_task_id: taskId,
         p_slot: slot,
         p_byte_size: blob.size,
         p_signer_name: signerName,
         p_consent_confirmed: isSignature,
+        p_outcome: outcome,
       })
       if (reserveError) throw reserveError
-      const reservationToken = (reservation as { reservation_token?: unknown } | null)?.reservation_token
+      const reservationResult = reservation as { reservation_token?: unknown; task_started?: unknown; task_version?: unknown } | null
+      if (reservationResult?.task_started === true && typeof reservationResult.task_version === 'number' && Number.isInteger(reservationResult.task_version)) {
+        onTaskStarted?.(reservationResult.task_version)
+      }
+      const reservationToken = reservationResult?.reservation_token
       if (typeof reservationToken !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reservationToken)) {
         throw new Error('ระบบไม่คืนรหัสยืนยันการอัปโหลด กรุณาลองใหม่')
       }
@@ -350,13 +411,17 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       })
       if (uploadError) {
         const recovery = await supabase.rpc('ais_task_evidence_finalize', { p_task_id: taskId, p_slot: slot })
-        if (recovery.error) {
+        const recoveryStatus = (recovery.data as { status?: unknown } | null)?.status
+        if (recovery.error || recoveryStatus !== 'ready') {
           await supabase.rpc('ais_task_evidence_cancel_pending', { p_task_id: taskId, p_slot: slot })
           throw uploadError
         }
       } else {
-        const { error: finalizeError } = await supabase.rpc('ais_task_evidence_finalize', { p_task_id: taskId, p_slot: slot })
+        const { data: finalized, error: finalizeError } = await supabase.rpc('ais_task_evidence_finalize', { p_task_id: taskId, p_slot: slot })
         if (finalizeError) throw finalizeError
+        if ((finalized as { status?: unknown } | null)?.status !== 'ready') {
+          throw new Error('ระบบยังยืนยันหลักฐานไม่สำเร็จ กรุณาลองบันทึกอีกครั้ง')
+        }
       }
       setActionMessage('บันทึกหลักฐานแล้ว')
       await loadEvidence()
@@ -388,19 +453,26 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
     if (!supabase || !canEditSlot(slot)) return
     setBusySlot(slot)
     setActionMessage('')
-    const { error } = await supabase.rpc('ais_task_evidence_finalize', { p_task_id: taskId, p_slot: slot })
-    if (error) setActionMessage('ยังยืนยันไฟล์ไม่ได้ เลือกรูป/เซ็นใหม่แล้วบันทึกซ้ำได้')
-    else setActionMessage('ยืนยันหลักฐานแล้ว')
-    await loadEvidence()
-    setBusySlot(null)
+    try {
+      const { data, error } = await supabase.rpc('ais_task_evidence_finalize', { p_task_id: taskId, p_slot: slot })
+      const status = (data as { status?: unknown } | null)?.status
+      if (error || status !== 'ready') setActionMessage('ยังยืนยันไฟล์ไม่ได้ เลือกรูป/เซ็นใหม่แล้วบันทึกซ้ำได้')
+      else setActionMessage('ยืนยันหลักฐานแล้ว')
+      await loadEvidence()
+    } catch {
+      setActionMessage('ยังยืนยันไฟล์ไม่ได้ ตรวจสัญญาณอินเทอร์เน็ต แล้วลองอีกครั้ง')
+      await loadEvidence()
+    } finally {
+      setBusySlot(null)
+    }
   }
 
   return <section className="detail-section task-evidence-panel" aria-labelledby="task-evidence-title">
     <div className="task-evidence-heading">
-      <div><h3 id="task-evidence-title">รูปภาพและลายเซ็นของใบงาน</h3><p>หลักฐานจะเปลี่ยนตามผลที่บันทึก รายการที่ระบุว่า “จำเป็นในขั้นนี้” ต้องครบก่อนส่งผลปฏิบัติงานหรือ Admin ตรวจรับ</p></div>
-      {stageRequiredSlots.length > 0 ? <span className={'evidence-completion-badge' + (stageRequiredSlots.every(slot => entries[slot]?.status === 'ready') ? ' is-ready' : '')}>
-        {stageRequiredSlots.filter(slot => entries[slot]?.status === 'ready').length}/{stageRequiredSlots.length} รายการ
-      </span> : <span className="evidence-completion-badge">หลักฐานที่บันทึกไว้</span>}
+      <div><h3 id="task-evidence-title">รูปภาพและลายเซ็นประกอบใบงาน</h3><p>แนบหลักฐานของ “{outcomeLabel(outcome)}” ได้ทันที ระบบเริ่มบันทึกการปฏิบัติงานเมื่อเริ่มแนบหลักฐาน</p></div>
+      {stageRequiredSlots.length > 0 ? <span className={'evidence-completion-badge' + (stageRequiredSlots.every(slot => entries[slot]?.status === 'ready' && entries[slot]?.outcome_context === outcome) ? ' is-ready' : '')}>
+        {stageRequiredSlots.filter(slot => entries[slot]?.status === 'ready' && entries[slot]?.outcome_context === outcome).length}/{stageRequiredSlots.length} รายการ
+      </span> : <span className="evidence-completion-badge">ไม่บังคับ</span>}
     </div>
     {previewOnly && <p className="detail-empty-result">ตัวอย่างนี้ไม่มีรูปหรือลายเซ็นจริงให้ดู และไม่เชื่อมต่อเพื่อบันทึกหลักฐาน</p>}
     {!supabase && !previewOnly && <p className="task-action-error" role="alert">ระบบยังไม่เชื่อมต่อฐานข้อมูล จึงบันทึกหลักฐานไม่ได้</p>}
@@ -411,10 +483,11 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       {PHOTO_SLOTS.map(slot => {
         const entry = entries[slot.key]
         const imageUrl = previewUrls[slot.key]
+        const matchesOutcome = entry?.outcome_context === outcome
         const label = outcome === 'different_device_found' && slot.key === 'new_serial_photo'
           ? 'SN เครื่องที่พบ'
           : outcome === 'different_device_found' && slot.key === 'new_device_photo'
-            ? 'อุปกรณ์ที่พบ'
+          ? 'ภาพอุปกรณ์ที่พบ'
             : outcome === 'target_device_not_found' && slot.key === 'spare_photo_1'
               ? 'ภาพบริเวณที่ตรวจค้น'
             : slot.label
@@ -425,18 +498,18 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
             : outcome === 'target_device_not_found' && slot.key === 'spare_photo_1'
               ? 'ถ่ายภาพบริเวณหรือจุดที่ควรพบ Scanner ตามทะเบียน เพื่อให้ Admin ตรวจสอบ'
             : slot.hint
-        return <article className="task-evidence-card" key={slot.key}>
-          <div className="task-evidence-card-heading"><strong>{label}</strong><span className={stageRequiredSlots.includes(slot.key) ? 'evidence-required' : 'evidence-optional'}>{stageRequiredSlots.includes(slot.key) ? 'จำเป็นในขั้นนี้' : entry?.status === 'ready' ? 'บันทึกแล้ว' : slot.required ? 'ใช้ในขั้นอื่น' : 'สำรอง'}</span></div>
+        return <Fragment key={slot.key}>{'section' in slot && <h4 className="task-evidence-group-title">{slot.section}</h4>}<article className="task-evidence-card">
+          <div className="task-evidence-card-heading"><strong>{label}</strong><span className={stageRequiredSlots.includes(slot.key) ? 'evidence-required' : 'evidence-optional'}>{stageRequiredSlots.includes(slot.key) ? (entry?.status === 'ready' && !matchesOutcome ? 'ต้องบันทึกใหม่' : 'จำเป็นในขั้นนี้') : entry?.status === 'ready' ? 'บันทึกแล้ว' : slot.required ? 'ใช้ในขั้นอื่น' : 'ไม่บังคับ'}</span></div>
           <p>{hint}</p>
           {imageUrl ? <a className="task-evidence-preview" href={imageUrl} target="_blank" rel="noreferrer" aria-label={`เปิดดูรูป ${label} ขนาดเต็ม`}><img src={imageUrl} alt={`หลักฐาน ${label}`} /></a> : entry?.status === 'ready' ? previewStatuses[slot.key] === 'loading' ? <div className="task-evidence-empty"><LoaderCircle className="evidence-spinner" size={18} /><span>กำลังโหลดภาพ…</span></div> : <div className="task-evidence-image-missing">โหลดภาพไม่สำเร็จ <button type="button" className="text-button" onClick={retryPreviews}>ลองโหลดอีกครั้ง</button></div> : <div className="task-evidence-empty"><ImagePlus size={20} /><span>{entry?.status === 'pending' ? 'รอการยืนยัน' : loadState === 'loading' ? 'กำลังตรวจสอบรายการ…' : loadState === 'error' ? 'ตรวจสอบรูปไม่ได้' : 'ยังไม่มีรูป'}</span></div>}
-          {entry?.status === 'ready' && <div className="task-evidence-saved"><Check size={14} />บันทึกแล้ว · {(entry.byte_size / 1024).toFixed(0)} KB</div>}
+          {entry?.status === 'ready' && <div className="task-evidence-saved"><Check size={14} />บันทึกแล้วสำหรับ “{outcomeLabel(entry.outcome_context)}” · {(entry.byte_size / 1024).toFixed(0)} KB</div>}
           {entry?.status === 'pending' && <div className="task-evidence-pending">การบันทึกยังไม่สมบูรณ์</div>}
           {canEditSlot(slot.key) && <label className="secondary-button evidence-upload-button">
             <ImagePlus size={16} />{busySlot === slot.key ? 'กำลังบันทึก…' : entry?.status === 'ready' ? 'ถ่าย/เลือกรูปใหม่' : 'ถ่าย/เลือกรูป'}
             <input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" disabled={busySlot !== null} onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void savePhoto(slot.key, file) }} />
           </label>}
           {canEditSlot(slot.key) && entry?.status === 'pending' && entry.can_finalize && <button type="button" className="text-button" disabled={busySlot !== null} onClick={() => void retryFinalize(slot.key)}><RotateCcw size={14} /> ลองยืนยันไฟล์เดิม</button>}
-        </article>
+        </article></Fragment>
       })}
     </div>
 
@@ -449,12 +522,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
           label={slot.label}
           hint={slot.hint}
           entry={entries[slot.key]}
+          outcome={outcome}
           previewUrl={previewUrls[slot.key]}
           previewStatus={previewStatuses[slot.key]}
           canEdit={canEditSlot(slot.key)}
           busy={busySlot === slot.key}
           disabled={busySlot !== null}
-          needsName={slot.key === 'scanner_user_signature'}
+          needsName={slot.key === 'scanner_user_signature' || slot.key === 'inspector_signature'}
           required={stageRequiredSlots.includes(slot.key)}
           onSave={saveBlob}
           onRetry={() => void retryFinalize(slot.key)}
@@ -469,12 +543,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
 }
 
 function SignatureEntry({
-  slot, label, hint, entry, previewUrl, previewStatus, canEdit, busy, disabled, needsName, required, onSave, onRetry, onRetryPreview, showEmpty,
+  slot, label, hint, entry, outcome, previewUrl, previewStatus, canEdit, busy, disabled, needsName, required, onSave, onRetry, onRetryPreview, showEmpty,
 }: {
   slot: SignatureSlot
   label: string
   hint: string
   entry?: EvidenceEntry
+  outcome?: string
   previewUrl?: string
   previewStatus?: 'loading' | 'error'
   canEdit: boolean
@@ -509,11 +584,11 @@ function SignatureEntry({
     }
   }
   return <article className="task-evidence-card signature-card">
-    <div className="task-evidence-card-heading"><strong>{label}</strong><span className={required ? 'evidence-required' : 'evidence-optional'}>{required ? 'จำเป็นในขั้นนี้' : entry?.status === 'ready' ? 'บันทึกแล้ว' : 'ใช้ในขั้นอื่น'}</span></div>
+    <div className="task-evidence-card-heading"><strong>{label}</strong><span className={required ? 'evidence-required' : 'evidence-optional'}>{required ? (entry?.status === 'ready' && entry.outcome_context !== outcome ? 'ต้องบันทึกใหม่' : 'จำเป็นในขั้นนี้') : entry?.status === 'ready' ? 'บันทึกแล้ว' : 'ใช้ในขั้นอื่น'}</span></div>
           <p>{hint}</p>
     {needsName && canEdit && <label className="evidence-signer-name">ชื่อ-นามสกุลผู้ลงนาม<input value={signerName} onChange={event => setSignerName(event.target.value)} maxLength={120} autoComplete="name" required /></label>}
     {entry?.status === 'ready' && (previewUrl ? <a className="task-evidence-preview signature-preview" href={previewUrl} target="_blank" rel="noreferrer"><img src={previewUrl} alt={`ลายเซ็น ${label}`} /></a> : previewStatus === 'loading' ? <div className="task-evidence-empty"><LoaderCircle className="evidence-spinner" size={18} /><span>กำลังโหลดลายเซ็น…</span></div> : <div className="task-evidence-image-missing">โหลดลายเซ็นไม่สำเร็จ <button type="button" className="text-button" onClick={onRetryPreview}>ลองโหลดอีกครั้ง</button></div>)}
-    {entry?.status === 'ready' && <div className="task-evidence-saved"><Check size={14} />{entry.signer_name ? `ลงชื่อโดย ${entry.signer_name}` : 'บันทึกลายเซ็นแล้ว'}</div>}
+    {entry?.status === 'ready' && <div className="task-evidence-saved"><Check size={14} />{entry.signer_name ? `ลงชื่อโดย ${entry.signer_name}` : 'บันทึกลายเซ็นแล้ว'} · {outcomeLabel(entry.outcome_context)}</div>}
     {entry?.status === 'pending' && <div className="task-evidence-pending">ลายเซ็นยังรอยืนยัน</div>}
     {!entry && !canEdit && showEmpty && <div className="task-evidence-empty">ยังไม่มีลายเซ็น</div>}
     {canEdit && <>

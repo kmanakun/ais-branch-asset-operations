@@ -8,12 +8,13 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc -b && vite build && node scripts/clean-stale-build-assets.mjs",
+    "build": "tsc -b && vite build && node scripts/configure-csp-headers.mjs && node scripts/clean-stale-build-assets.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -b --pretty",
+    "test:xlsx": "node --test scripts/xlsx-register.test.mjs",
     "test:app": "node --test scripts/app-flow.test.mjs",
     "test:db": "supabase test db",
-    "test:all": "npm run test:app && npm run test:db"
+    "test:all": "npm run test:xlsx && npm run test:app && npm run test:db"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",

@@ -35,6 +35,11 @@
 /.agents/
 /ais-publish-stage.git/
 
+# Internal production evidence and recovery notes; never publish these locally maintained reports
+/docs/v1-release-acceptance.md
+/docs/security-review.md
+/docs/recovery-runbook.md
+
 # Local production recovery helpers
 /web/Run AIS Backup.cmd
 /web/scripts/backup-production.ps1

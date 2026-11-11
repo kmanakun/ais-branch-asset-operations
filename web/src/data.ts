@@ -22,7 +22,7 @@ export const demoTasks = [
 
 export const demoAssets = [
   { branch: 'สาขาตัวอย่าง 001', province: 'กรุงเทพมหานคร', code: 'DEMO-001', model: 'Zebra DS9308', serial: '••••••0001', year: '2022', campaign: 'DEMO-ROUND-04', status: 'เลือกเข้ารอบงาน', tone: 'ready' },
-  { branch: 'สาขาตัวอย่าง 004', province: 'กรุงเทพมหานคร', code: 'DEMO-004', model: 'Honeywell HF680', serial: '••••••0002', year: '2021', campaign: 'DEMO-ROUND-04', status: 'นัดหมายแล้ว', tone: 'scheduled' },
+  { branch: 'สาขาตัวอย่าง 004', province: 'กรุงเทพมหานคร', code: 'DEMO-004', model: 'Honeywell HF680', serial: '••••••0002', year: '2021', campaign: 'DEMO-ROUND-04', status: 'open' },
   { branch: 'สาขาตัวอย่าง 002', province: 'ปทุมธานี', code: 'DEMO-002', model: 'Zebra DS9308', serial: '••••••0003', year: '2020', campaign: 'DEMO-ROUND-04', status: 'Pending', tone: 'blocked' },
   { branch: 'สาขาตัวอย่าง 003', province: 'กรุงเทพมหานคร', code: 'DEMO-003', model: 'Zebra DS9308', serial: '••••••0004', year: '2021', campaign: '—', status: 'ยังไม่เลือก', tone: 'neutral' },
 ]

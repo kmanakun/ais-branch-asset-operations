@@ -3,11 +3,12 @@ create extension if not exists pgtap with schema extensions;
 select no_plan();
 
 select ok(not has_function_privilege('anon', 'public.ais_task_evidence_list(uuid)', 'EXECUTE'), 'anonymous callers cannot list task evidence');
-select ok(not has_function_privilege('anon', 'public.ais_task_evidence_reserve(uuid,text,integer,text,boolean)', 'EXECUTE'), 'anonymous callers cannot reserve task evidence');
+select ok(not has_function_privilege('anon', 'public.ais_task_evidence_reserve_for_outcome(uuid,text,integer,text,boolean,text)', 'EXECUTE'), 'anonymous callers cannot reserve task evidence');
+select ok(not has_function_privilege('authenticated', 'public.ais_task_evidence_reserve(uuid,text,integer,text,boolean)', 'EXECUTE'), 'authenticated callers cannot bypass outcome-bound reservations');
 select ok(not has_function_privilege('anon', 'public.ais_task_evidence_finalize(uuid,text)', 'EXECUTE'), 'anonymous callers cannot finalize task evidence');
 select ok(not has_function_privilege('anon', 'public.ais_task_evidence_cancel_pending(uuid,text)', 'EXECUTE'), 'anonymous callers cannot cancel task evidence');
 select ok(has_function_privilege('authenticated', 'public.ais_task_evidence_list(uuid)', 'EXECUTE'), 'authenticated users can reach the guarded evidence list');
-select ok(has_function_privilege('authenticated', 'public.ais_task_evidence_reserve(uuid,text,integer,text,boolean)', 'EXECUTE'), 'authenticated users can reach the guarded evidence reservation');
+select ok(has_function_privilege('authenticated', 'public.ais_task_evidence_reserve_for_outcome(uuid,text,integer,text,boolean,text)', 'EXECUTE'), 'authenticated users can reach the guarded outcome-bound evidence reservation');
 select ok(has_function_privilege('authenticated', 'public.ais_task_evidence_finalize(uuid,text)', 'EXECUTE'), 'authenticated users can reach the guarded evidence finalizer');
 select ok(has_function_privilege('authenticated', 'public.ais_task_evidence_cancel_pending(uuid,text)', 'EXECUTE'), 'authenticated users can reach the guarded evidence cancellation');
 
@@ -61,7 +62,8 @@ grant select, update on evidence_test_state to authenticated;
 
 create function pg_temp.save_task_evidence(
   p_task_id uuid, p_slot text, p_byte_size integer,
-  p_signer_name text default null, p_consent_confirmed boolean default false
+  p_signer_name text default null, p_consent_confirmed boolean default false,
+  p_outcome text default 'replaced'
 )
 returns text
 language plpgsql
@@ -70,15 +72,23 @@ as $function$
 declare
   reservation jsonb;
 begin
-  reservation := public.ais_task_evidence_reserve(
-    p_task_id, p_slot, p_byte_size, p_signer_name, p_consent_confirmed
+  reservation := public.ais_task_evidence_reserve_for_outcome(
+    p_task_id, p_slot, p_byte_size, p_signer_name, p_consent_confirmed, p_outcome
   );
-  insert into storage.objects(bucket_id, name, owner, owner_id, metadata, user_metadata)
-  values (
-    'ais-task-evidence', reservation ->> 'path', auth.uid(), auth.uid()::text,
-    pg_catalog.jsonb_build_object('size', p_byte_size, 'mimetype', 'image/jpeg'),
-    pg_catalog.jsonb_build_object('reservation_token', reservation ->> 'reservation_token')
-  );
+  update storage.objects
+  set owner = auth.uid(),
+      owner_id = auth.uid()::text,
+      metadata = pg_catalog.jsonb_build_object('size', p_byte_size, 'mimetype', 'image/jpeg'),
+      user_metadata = pg_catalog.jsonb_build_object('reservation_token', reservation ->> 'reservation_token')
+  where bucket_id = 'ais-task-evidence' and name = reservation ->> 'path';
+  if not found then
+    insert into storage.objects(bucket_id, name, owner, owner_id, metadata, user_metadata)
+    values (
+      'ais-task-evidence', reservation ->> 'path', auth.uid(), auth.uid()::text,
+      pg_catalog.jsonb_build_object('size', p_byte_size, 'mimetype', 'image/jpeg'),
+      pg_catalog.jsonb_build_object('reservation_token', reservation ->> 'reservation_token')
+    );
+  end if;
   return public.ais_task_evidence_finalize(p_task_id, p_slot) ->> 'status';
 end;
 $function$;
@@ -89,16 +99,16 @@ select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
 
 select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000060', 'start', 1)->>'status', 'in_progress', 'a technician without team membership can start work without confirming the verified target Serial');
-select ok(app_private.can_edit_task_evidence('fc810000-0000-4000-8000-000000000060'), 'any active technician can edit evidence for an assigned in-progress work order');
-select throws_ok($$select public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000060', 'technician_signature', 8192, null, false)$$,
+select ok(app_private.can_edit_task_evidence('fc810000-0000-4000-8000-000000000060'), 'any active technician can edit evidence for an opened in-progress work order');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'technician_signature', 8192, null, false, 'replaced')$$,
   '22023', 'Signature and consent confirmation are required', 'technician signature reservation requires affirmative consent');
-select throws_ok($$select public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 100000)$$,
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 100000, null, false, 'replaced')$$,
   '22023', 'Evidence file exceeds its slot size limit', 'photo slot enforces its per-file size limit');
-select throws_ok($$select public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 64, null, true)$$,
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 64, null, true, 'replaced')$$,
   '22023', 'Photo evidence cannot contain signature consent fields', 'photo slots reject signature consent metadata');
 
 update evidence_test_state
-set reservation = public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000060', 'old_serial_photo', 64);
+set reservation = public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'old_serial_photo', 64, null, false, 'replaced');
 
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000001', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
@@ -121,33 +131,41 @@ select lives_ok($$insert into storage.objects(bucket_id, name, owner, owner_id, 
 select is(public.ais_task_evidence_finalize('fc810000-0000-4000-8000-000000000060', 'old_serial_photo')->>'status', 'ready', 'matching Storage object finalizes the evidence reservation');
 select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_serial_photo', 64), 'ready', 'routine replacement records a photo of the new Serial');
 select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 64), 'ready', 'routine replacement records the old device photo');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'old_condition_photo', 64), 'ready', 'routine replacement records the current condition of the old Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'old_branch_sticker_photo', 64), 'ready', 'routine replacement records the old branch sticker');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_front_photo', 64), 'ready', 'routine replacement records the front of the new Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_side_photo', 64), 'ready', 'routine replacement records the side of the new Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_com_serial_photo', 64), 'ready', 'routine replacement records the Com SN of the new Scanner');
 select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_device_photo', 64), 'ready', 'routine replacement records the new device photo');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_cable_management_photo', 64), 'ready', 'routine replacement records the cable arrangement of the new Scanner');
 select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'technician_signature', 8192, null, true), 'ready', 'routine replacement records the onsite technician signature');
 select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'scanner_user_signature', 8192, 'Scanner User One', true), 'ready', 'routine replacement records the Scanner user signature');
-select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000060', 2, 'replaced', 'EVIDENCE-NEW-1', 'Installed and tested', 'returned_usable')->>'workflow_stage', 'awaiting_admin_acceptance', 'routine replacement closeout waits for separate Admin acceptance');
-select throws_ok($$select public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64)$$,
+select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000060', 2, 'replaced', 'EVIDENCE-NEW-1', 'Installed and tested', 'returned_usable')->>'workflow_stage', 'awaiting_admin_acceptance', 'routine replacement waits for a different Admin to inspect and accept the work');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64, null, false, 'replaced')$$,
   '42501', 'Task evidence is not editable', 'technician cannot alter evidence after submitting closeout');
 
 reset role;
-select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000060'), 'in_progress', 'routine closeout remains open while Admin acceptance is pending');
-select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000030'), 'EVIDENCE-OLD-1', 'the register Serial remains unchanged before Admin acceptance');
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000060'), 'in_progress', 'field closeout stays open until independent Admin acceptance');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000030'), 'EVIDENCE-OLD-1', 'the Scanner register remains unchanged before Admin acceptance');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'inspector_signature', 8192, null, true), 'ready', 'a separate Admin records the acceptance signature');
-select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000060', 3, false)->>'workflow_stage', 'delivered', 'a separate Admin accepts the routine replacement and delivers the work');
+select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000060', 3, false)$$,
+  '22023', 'A different Office Admin must save the acceptance signature', 'Admin acceptance is blocked until its signature is saved');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'inspector_signature', 8192, null, true), 'ready', 'a different Admin records the acceptance signature');
+select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000060', 3, false)->>'workflow_stage', 'delivered', 'a different Admin accepts the completed replacement after checking its evidence');
 reset role;
-select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000060'), 'completed', 'Admin acceptance completes the work item');
-select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000030'), 'EVIDENCE-NEW-1', 'the register Serial changes only after Admin acceptance');
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000060'), 'completed', 'Admin acceptance completes the replacement work item');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000030'), 'EVIDENCE-NEW-1', 'Admin acceptance updates the Scanner register Serial');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
-select throws_ok($$select public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64)$$,
-  '55000', 'Task is no longer in progress', 'Admin cannot add evidence after a normal replacement is completed');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64, null, false, 'replaced')$$,
+  '55000', 'Task is no longer in progress', 'optional evidence cannot be added after a normal replacement is completed');
 reset role;
 
 set local role authenticated;
@@ -155,24 +173,32 @@ select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000001
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000001","role":"authenticated"}', true);
 select ok(exists(select 1 from storage.objects where bucket_id = 'ais-task-evidence' and name = 'fc810000-0000-4000-8000-000000000060/old_serial_photo.jpg'), 'another active technician can read the accepted evidence after delivery');
-select is(jsonb_array_length(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000060')), 7, 'all required photos and signatures remain visible after delivery');
+select is(jsonb_array_length(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000060')), 13, 'all 10 required photos and 3 signatures remain visible after delivery');
 
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
 select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000061', 'start', 1)->>'status', 'in_progress', 'technician starts the second assigned scanner without a duplicate target confirmation');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_device_photo', 64), 'ready', 'different-device exception saves a photo of the device found');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_serial_photo', 64), 'ready', 'different-device exception saves a clear photo of the observed Serial');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'technician_signature', 8192, null, true), 'ready', 'exception closeout saves the technician signature');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'scanner_user_signature', 8192, 'Scanner User Two', true), 'ready', 'exception closeout saves the Scanner user signature');
-select throws_ok($$select public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, 'Inspector', true)$$,
-  '42501', 'Task evidence is not editable', 'technician cannot sign the Admin acceptance slot');
-select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000061', 2, 'different_device_found', null, 'Different device observed', 'other', null, 'OBSERVED-OTHER-2', 'Other scanner model', 'Target device did not match the assigned scanner')->>'workflow_stage', 'awaiting_admin_exception_review', 'different-device outcome records the observed Serial and is routed for Admin review');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_device_photo', 64, null, false, 'different_device_found'), 'ready', 'different-device exception saves a photo of the device found');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_serial_photo', 64, null, false, 'different_device_found'), 'ready', 'different-device exception saves a clear photo of the observed Serial');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'technician_signature', 8192, null, true, 'different_device_found'), 'ready', 'exception closeout saves the technician signature');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'scanner_user_signature', 8192, 'Scanner User Two', true, 'different_device_found'), 'ready', 'exception closeout saves the Scanner user signature');
+select is((
+  select evidence ->> 'outcome_context'
+  from jsonb_array_elements(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000061')) as evidence
+  where evidence ->> 'slot' = 'new_device_photo'
+), 'different_device_found', 'saved evidence retains the outcome selected when it was captured');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_device_photo', 64), 'ready', 'reusing the same photo slot for a different result changes its binding');
+select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000061', 2, 'different_device_found', null, 'Different device observed', 'other', null, 'OBSERVED-OTHER-2', 'Other scanner model', 'Target device did not match the assigned scanner')->>'workflow_stage', 'awaiting_admin_exception_review', 'a different-device exception with matching evidence becomes Pending for Admin review');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, 'Inspector', true, 'different_device_found')$$,
+  '42501', 'Task evidence is not editable', 'technician cannot sign the Admin reviewer slot');
 
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, null, true), 'ready', 'Admin signs the reviewed different-device exception');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, 'Inspector', true, 'replaced')$$,
+  '22023', 'Admin signature outcome does not match the submitted work result', 'Admin signature cannot be attached to another closeout outcome');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, null, true, 'different_device_found'), 'ready', 'Admin records the required acceptance signature while reviewing the different-device exception');
 reset role;
 insert into app_private.scanner_assets (branch_id, com_sn, model_name)
 values ('fc810000-0000-4000-8000-000000000020', 'OBSERVED-OTHER-2', 'Already registered elsewhere');
@@ -180,10 +206,10 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
-select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000061', 3, true)$$,
-  '23505', 'This Serial is already registered to another branch; resolve that record before acceptance', 'Admin cannot duplicate or move an observed Serial registered at another branch');
-select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000061', 3, false)$$,
-  '23505', 'This Serial is already registered to another branch; resolve that record before acceptance', 'Admin cannot bypass the cross-branch check by accepting without adding the Serial');
+select throws_ok($$select public.ais_admin_resolve_pending('fc810000-0000-4000-8000-000000000061', 3, true)$$,
+  '23505', 'This Serial is already registered to another branch; resolve that record before review', 'Admin cannot duplicate or move an observed Serial registered at another branch');
+select throws_ok($$select public.ais_admin_resolve_pending('fc810000-0000-4000-8000-000000000061', 3, false)$$,
+  '23505', 'This Serial is already registered to another branch; resolve that record before review', 'Admin cannot bypass the cross-branch check by closing Pending without adding the observed Serial');
 reset role;
 select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000061'), 'in_progress', 'cross-branch duplicate rejection keeps the exception open for review');
 select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000031'), 'EVIDENCE-OLD-2', 'cross-branch duplicate rejection leaves the original registered Serial unchanged');
@@ -192,7 +218,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
-select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000061', 3, true)->>'workflow_stage', 'exception_resolved', 'Admin resolves the exception and registers the observed Serial without marking a replacement delivered');
+select is(public.ais_admin_resolve_pending('fc810000-0000-4000-8000-000000000061', 3, true)->>'workflow_stage', 'exception_resolved', 'Admin resolves the exception and registers the observed Serial without marking a replacement delivered');
 reset role;
 select is((select scanner.value->>'workflow_stage'
   from jsonb_array_elements(public.ais_branch_work_order_page(null, 'all', 20, 0)->'rows') as work_order(value)
@@ -203,7 +229,7 @@ select is((select work_order.value->>'workflow_stage'
   from jsonb_array_elements(public.ais_branch_work_order_page(null, 'all', 20, 0)->'rows') as work_order(value)
   where work_order.value->>'id' = 'fc810000-0000-4000-8000-000000000081'),
   'exception_resolved', 'an exception-only work order is not reported as delivered');
-select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000031'), 'EVIDENCE-OLD-2', 'different-device acceptance preserves the registered scanner Serial');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000031'), 'EVIDENCE-OLD-2', 'resolving a different-device exception preserves the target Scanner Serial');
 select is((select count(*)::integer from app_private.scanner_assets where branch_id = 'fc810000-0000-4000-8000-000000000021' and com_sn = 'OBSERVED-OTHER-2'), 1, 'reviewed different-device Serial is added to the correct branch register');
 select is((select outcome from app_private.field_visits where task_id = 'fc810000-0000-4000-8000-000000000061'), 'different_device_found', 'different-device result is retained in the field visit');
 select is((select status::text from app_private.campaigns where id = 'fc810000-0000-4000-8000-000000000040'), 'scheduled', 'legacy campaign metadata remains unchanged because delivery is tracked by the branch work order');
@@ -219,26 +245,32 @@ select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
 select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000063', 'start', 1)->>'status', 'in_progress', 'a work order without team assignment can start using the approved onsite flow');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_serial_photo', 64), 'ready', 'Admin acting onsite can record the old Serial photo');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_serial_photo', 64), 'ready', 'Admin acting onsite can record the new Serial photo');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_device_photo', 64), 'ready', 'Admin acting onsite can record the old device photo');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_device_photo', 64), 'ready', 'Admin acting onsite can record the new device photo');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'technician_signature', 8192, null, true), 'ready', 'Admin acting onsite can record the performer signature');
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'scanner_user_signature', 8192, 'Scanner User Three', true), 'ready', 'Admin acting onsite can record the Scanner user signature');
-select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000063', 2, 'replaced', 'EVIDENCE-NEW-3', 'Installed and tested', 'returned_usable')->>'workflow_stage', 'awaiting_admin_acceptance', 'Admin can close out onsite work but must await a different Admin');
-select throws_ok($$select public.ais_task_evidence_reserve('fc810000-0000-4000-8000-000000000063', 'inspector_signature', 8192, null, true)$$,
-  '42501', 'Task evidence is not editable', 'the Admin who performed onsite work cannot sign its acceptance');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_serial_photo', 64), 'ready', 'Admin can perform onsite work and record the old Scanner Serial');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_device_photo', 64), 'ready', 'Admin records the old Scanner overview');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_condition_photo', 64), 'ready', 'Admin records the old Scanner condition');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_branch_sticker_photo', 64), 'ready', 'Admin records the old branch sticker');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_serial_photo', 64), 'ready', 'Admin records the new Scanner Serial');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_front_photo', 64), 'ready', 'Admin records the new Scanner front view');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_side_photo', 64), 'ready', 'Admin records the new Scanner side view');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_com_serial_photo', 64), 'ready', 'Admin records the new Scanner Com SN');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_device_photo', 64), 'ready', 'Admin records the new Scanner overview');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_cable_management_photo', 64), 'ready', 'Admin records the new Scanner cable arrangement');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'technician_signature', 8192, null, true), 'ready', 'Admin records the onsite operator signature');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'scanner_user_signature', 8192, 'Scanner User Admin', true), 'ready', 'Admin captures the Scanner user signature');
+select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000063', 2, 'replaced', 'EVIDENCE-NEW-3', 'Installed and tested', 'returned_usable')->>'workflow_stage', 'awaiting_admin_acceptance', 'Admin can perform onsite work but the task still waits for an independent reviewer');
+select is(jsonb_array_length(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000063')), 12, 'onsite Admin closeout contains 10 required photos and two field signatures');
 select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000063', 3, false)$$,
-  '42501', 'The Admin who performed this work cannot accept it; another Admin must review it', 'the performing Admin cannot self-accept the work');
+  '42501', 'The Admin who performed this work cannot accept it; another Admin must review it', 'the Admin who worked onsite cannot accept their own work');
 reset role;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000006', true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
 select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000006","role":"authenticated"}', true);
-select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'inspector_signature', 8192, null, true), 'ready', 'a different Admin can sign onsite work acceptance');
-select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000063', 3, false)->>'workflow_stage', 'delivered', 'a different Admin accepts and delivers onsite work');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'inspector_signature', 8192, null, true), 'ready', 'a different Admin signs acceptance for onsite work performed by an Admin');
+select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000063', 3, false)->>'workflow_stage', 'delivered', 'a different Admin accepts the onsite Admin work');
 reset role;
-select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000035'), 'EVIDENCE-NEW-3', 'the register Serial updates only after separate Admin acceptance');
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000063'), 'completed', 'a different Admin acceptance completes the onsite Admin work item');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000035'), 'EVIDENCE-NEW-3', 'the register Serial updates only after the different Admin accepts the work');
 reset role;
 
 insert into app_private.scanner_assets(id, branch_id, com_sn, model_name) values
@@ -283,5 +315,33 @@ select throws_ok($$select public.ais_task_evidence_list('fc810000-0000-4000-8000
   '42501', 'Task evidence is outside your assigned access', 'unprovisioned users cannot view evidence');
 
 reset role;
+insert into app_private.scanner_assets(id, branch_id, com_sn, model_name)
+values ('fc810000-0000-4000-8000-000000000036', 'fc810000-0000-4000-8000-000000000020', 'EVIDENCE-FIRST-UPLOAD', 'Evidence Test Scanner');
+insert into app_private.replacement_tasks(id, campaign_item_id, team_id, status, scanner_asset_id,
+  branch_work_order_id, scanner_serial_snapshot)
+values ('fc810000-0000-4000-8000-000000000068', null, null, 'scheduled',
+  'fc810000-0000-4000-8000-000000000036', 'fc810000-0000-4000-8000-000000000080', 'EVIDENCE-FIRST-UPLOAD');
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000068'),
+  'scheduled', 'viewing a linked work item leaves it open until evidence is started');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+update evidence_test_state
+set reservation = public.ais_task_evidence_reserve_for_outcome(
+  'fc810000-0000-4000-8000-000000000068', 'old_serial_photo', 64, null, false, 'replaced'
+);
+select is((select reservation->>'task_started' from evidence_test_state), 'true',
+  'the first evidence reservation starts a linked open work item');
+select is((select (reservation->>'task_version')::integer from evidence_test_state), 2,
+  'the evidence reservation returns the new optimistic-lock version');
+reset role;
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000068'),
+  'in_progress', 'first evidence starts the Scanner task');
+select is((select started_by from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000068'),
+  'fc810000-0000-4000-8000-000000000002'::uuid, 'the first evidence records the onsite actor');
+select is((select count(*)::integer from app_private.audit_events where entity_id = 'fc810000-0000-4000-8000-000000000068' and event_type = 'scanner_work_started'),
+  1, 'the implicit start is recorded once in the audit log');
+
 select * from finish();
 rollback;

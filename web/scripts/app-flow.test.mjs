@@ -1,12 +1,16 @@
 import assert from 'node:assert/strict'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { execSync } from 'node:child_process'
-import { mkdir, writeFile, unlink } from 'node:fs/promises'
+import { execFileSync, execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { test, before, after } from 'node:test'
 import { createClient } from '@supabase/supabase-js'
 
 const localOnly = /^http:\/\/(127\.0\.0\.1|localhost):\d+$/
 const cli = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+const config = readFileSync(new URL('../supabase/config.toml', import.meta.url), 'utf8')
+const projectId = config.match(/^project_id\s*=\s*"([A-Za-z0-9_-]+)"/m)?.[1]
+assert.ok(projectId, 'Supabase config must contain a valid local project_id')
+const databaseContainer = `supabase_db_${projectId}`
 const commandOptions = {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -21,14 +25,12 @@ const fixture = {
   inactive: { email: `inactive-${fixtureTag}@test.invalid`, password: randomBytes(32).toString('base64url'), id: null },
   branchA: randomUUID(), branchB: randomUUID(), scannerA: randomUUID(), scannerB: randomUUID(),
   teamA: randomUUID(), teamB: randomUUID(), campaign: randomUUID(), itemA: randomUUID(), itemB: randomUUID(),
-  orderA: randomUUID(), orderB: randomUUID(), taskA: randomUUID(), taskB: randomUUID(), visit: randomUUID(), importBatch: null,
+  orderA: randomUUID(), orderB: randomUUID(), openRequestId: randomUUID(), taskA: randomUUID(), taskB: randomUUID(), visit: randomUUID(), importBatch: null,
 }
 
 let apiUrl
 let anonKey
 let serviceKey
-let seedFile
-let cleanupFile
 const clients = []
 
 function signIn(user) {
@@ -47,6 +49,26 @@ function runSupabase(args) {
       throw new Error('Supabase CLI timed out. Confirm Docker Desktop and the local Supabase stack are available before running app-flow tests.')
     }
     throw error
+  }
+}
+
+function runLocalSql(sql) {
+  try {
+    return execFileSync('docker', [
+      'exec', '-i', databaseContainer, 'psql', '--no-psqlrc',
+      '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres',
+    ], {
+      encoding: 'utf8',
+      input: sql,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 60_000,
+      env: { ...process.env, SUPABASE_TELEMETRY_DISABLED: '1' },
+    })
+  } catch (error) {
+    if (error.code === 'ETIMEDOUT') {
+      throw new Error('Local Supabase database SQL fixture timed out. Confirm Docker Desktop and the local database container are available.')
+    }
+    throw new Error(`Could not run SQL against the local Supabase Docker database: ${error.stderr?.toString().trim() || error.message}`)
   }
 }
 
@@ -119,6 +141,9 @@ function sqlCleanup() {
   const u = fixture
   return `do $$ begin
 delete from app_private.field_visits where id = '${u.visit}';
+delete from app_private.replacement_tasks
+where branch_work_order_id in (select id from app_private.branch_work_orders where request_id = '${u.openRequestId}');
+delete from app_private.branch_work_orders where request_id = '${u.openRequestId}';
 delete from app_private.replacement_tasks where id in ('${u.taskA}', '${u.taskB}');
 delete from app_private.branch_work_orders where id in ('${u.orderA}', '${u.orderB}');
 delete from app_private.campaign_items where id in ('${u.itemA}', '${u.itemB}');
@@ -146,11 +171,7 @@ before(async () => {
   await createLocalUser(fixture.technician)
   await createLocalUser(fixture.inactive)
 
-  await mkdir('supabase/.temp', { recursive: true })
-  seedFile = `supabase/.temp/app-flow-seed-${fixtureTag}.sql`
-  cleanupFile = `supabase/.temp/app-flow-cleanup-${fixtureTag}.sql`
-  await writeFile(seedFile, sqlFixture(), 'utf8')
-  runSupabase(['db', 'query', '--file', seedFile])
+  runLocalSql(sqlFixture())
 
   for (const user of [fixture.admin, fixture.technician, fixture.inactive]) {
     user.client = createClient(apiUrl, anonKey, {
@@ -165,9 +186,7 @@ after(async () => {
   if (apiUrl && localOnly.test(apiUrl)) {
     if (fixture.admin.id && fixture.technician.id && fixture.inactive.id) {
       try {
-        await mkdir('supabase/.temp', { recursive: true })
-        await writeFile(cleanupFile, sqlCleanup(), 'utf8')
-        runSupabase(['db', 'query', '--file', cleanupFile])
+        runLocalSql(sqlCleanup())
       } catch (error) {
         console.error('Could not remove local app-flow database fixtures:', error.message)
       }
@@ -178,9 +197,6 @@ after(async () => {
         catch (error) { console.error('Could not remove a local Auth test user:', error.message) }
       }
     }
-  }
-  for (const file of [seedFile, cleanupFile]) {
-    if (file) await unlink(file).catch(() => {})
   }
 })
 
@@ -318,4 +334,28 @@ test('Admin can stage an incremental import while an inactive technician is deni
   assert.equal(data.branch_count, 1)
   assert.equal(data.issue_count, 0)
   fixture.importBatch = data.batch_id
+})
+
+test('concurrent retries for one work-order request return the same order without duplicate errors', async () => {
+  const { error: authError } = await signIn(fixture.admin)
+  assert.ifError(authError)
+
+  const payload = {
+    p_branch_id: fixture.branchA,
+    p_scanner_asset_ids: [fixture.scannerA],
+    p_request_id: fixture.openRequestId,
+  }
+  const results = await Promise.all([
+    fixture.admin.client.rpc('ais_open_branch_work_order', payload),
+    fixture.admin.client.rpc('ais_open_branch_work_order', payload),
+  ])
+  assert.ifError(results[0].error)
+  assert.ifError(results[1].error)
+  assert.equal(results[0].data.work_order_id, results[1].data.work_order_id)
+  assert.deepEqual(
+    results.map(result => result.data.already_opened).sort(),
+    [false, true],
+  )
+  assert.equal(results[0].data.selected_scanners, 1)
+  assert.equal(results[1].data.selected_scanners, 1)
 })

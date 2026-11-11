@@ -96,7 +96,7 @@ select is((select resume_status::text from app_private.replacement_tasks where i
 select is(public.ais_field_task_action('fc200000-0000-4000-8000-000000000060', 'resume', 3)->>'status', 'in_progress', 'technician can resume the prior state');
 select throws_ok($$select public.ais_field_task_action('fc200000-0000-4000-8000-000000000060', 'start', 1)$$, '40001', 'Work item changed since it was loaded; refresh before retrying', 'stale task version is rejected');
 
-select throws_ok($$select public.ais_field_task_action('fc200000-0000-4000-8000-000000000060', 'complete', 5, null, 'WORKFLOW-NEW-1', 'Installed and tested', 'returned_usable')$$, '22023', 'Unsupported field action', 'legacy completion cannot bypass photo evidence and Office Admin acceptance');
+select throws_ok($$select public.ais_field_task_action('fc200000-0000-4000-8000-000000000060', 'complete', 5, null, 'WORKFLOW-NEW-1', 'Installed and tested', 'returned_usable')$$, '22023', 'Unsupported field action', 'legacy completion is disabled; successful closeout uses the guarded closeout RPC');
 select is((select com_sn from app_private.scanner_assets where id = 'fc200000-0000-4000-8000-000000000030'), ' WORKFLOW-OLD-1 ', 'scanner register serial remains unchanged until Office Admin accepts the closeout');
 select is((select count(*)::int from app_private.field_visits where task_id = 'fc200000-0000-4000-8000-000000000060'), 0, 'legacy completion did not create a field visit');
 
