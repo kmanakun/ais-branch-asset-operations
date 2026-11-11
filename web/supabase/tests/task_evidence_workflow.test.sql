@@ -30,10 +30,10 @@ on conflict (user_id) do update set role=excluded.role,display_name=excluded.dis
 insert into app_private.teams(id, team_name) values
   ('fc810000-0000-4000-8000-000000000010', 'Evidence Team A'),
   ('fc810000-0000-4000-8000-000000000011', 'Evidence Team B');
-insert into app_private.branches(id, location_code, loc_bld) values
-  ('fc810000-0000-4000-8000-000000000020', 'EVIDENCE-A', 'Evidence Branch A'),
-  ('fc810000-0000-4000-8000-000000000021', 'EVIDENCE-B', 'Evidence Branch B'),
-  ('fc810000-0000-4000-8000-000000000022', 'EVIDENCE-UNASSIGNED', 'Unassigned Evidence Branch');
+insert into app_private.branches(id, location_code, loc_bld, province) values
+  ('fc810000-0000-4000-8000-000000000020', 'EVIDENCE-A', 'Evidence Branch A', null),
+  ('fc810000-0000-4000-8000-000000000021', 'EVIDENCE-B', 'Evidence Branch B', 'Evidence Dashboard Province'),
+  ('fc810000-0000-4000-8000-000000000022', 'EVIDENCE-UNASSIGNED', 'Unassigned Evidence Branch', null);
 insert into app_private.scanner_assets(id, branch_id, com_sn, model_name) values
   ('fc810000-0000-4000-8000-000000000030', 'fc810000-0000-4000-8000-000000000020', 'EVIDENCE-OLD-1', 'Evidence Test Scanner'),
   ('fc810000-0000-4000-8000-000000000031', 'fc810000-0000-4000-8000-000000000021', 'EVIDENCE-OLD-2', 'Evidence Test Scanner'),
@@ -82,35 +82,326 @@ begin
   set owner = auth.uid(),
       owner_id = auth.uid()::text,
       metadata = pg_catalog.jsonb_build_object('size', p_byte_size, 'mimetype', 'image/jpeg'),
-      user_metadata = pg_catalog.jsonb_build_object('reservation_token', reservati|ó^í¢G§²ÚîÆ­yÙXÝ\Ê×Ý[\œØ]™WÝ\Ú×Ù]šY[˜ÙJ	Ù˜ÎLLMNLŒÉË	Ú[œÜXÝÜ—ÜÚYÛ˜]\™IËNL‹[YJK	Ü™XYIË	ØHY™™\™[YZ[ˆÚYÛœÈXØÙ\[˜ÙH›ÜˆÛœÚ]HÛÜšÈ\™›Ü›YYžH[ˆYZ[‰ÊNÂœÙ[XÝ\ÊX›XË˜Z\×ØYZ[—ØXØÙ\Ý\ÚÊ	Ù˜ÎLLMNLŒÉËË˜[ÙJKO‰ÝÛÜšÙ›Ý×ÜÝYÙIË	Ù[]™\™Y	Ë	ØHY™™\™[YZ[ˆXØÙ\ÈHÛœÚ]HYZ[ˆÛÜšÉÊNÂœ™\Ù]›ÛNÂœÙ[XÝ\Ê
-Ù[XÝÝ]\ÎŽ^œ›ÛH\Üš]˜]Kœ™\XÙ[Y[Ý\ÚÜÈÚ\™HYH	Ù˜ÎLLMNLŒÉÊK	ØÛÛ\]Y	Ë	ØHY™™\™[YZ[ˆXØÙ\[˜ÙHÛÛ\]\ÈHÛœÚ]HYZ[ˆÛÜšÈ][IÊNÂœÙ[XÝ\Ê
-Ù[XÝÛÛWÜÛˆœ›ÛH\Üš]˜]KœØØ[›™\—Ø\ÜÙ]ÈÚ\™HYH	Ù˜ÎLLMNLÍIÊK	ÑU’QSÑKS‘UËLÉË	ÝH™YÚ\Ý\ˆÙ\šX[\]\ÈÛ›HY\ˆHY™™\™[YZ[ˆXØÙ\ÈHÛÜšÉÊNÂœ™\Ù]›ÛNÂ‚š[œÙ\[È\Üš]˜]KœØØ[›™\—Ø\ÜÙ]ÊYœ˜[˜ÚÚYÛÛWÜÛ‹[Ù[Û˜[YJH˜[Y\Âˆ
-	Ù˜ÎLLMNLÌÉË	Ù˜ÎLLMNLŒ‰Ë	ÑU’QSÑKSÓM	Ë	Ñ]šY[˜ÙH\ÝØØ[›™\‰ÊKˆ
-	Ù˜ÎLLMNLÍ	Ë	Ù˜ÎLLMNLŒ‰Ë	ÑU’QSÑKSÓMIË	Ñ]šY[˜ÙH\ÝØØ[›™\‰ÊNÂš[œÙ\[È\Üš]˜]Kœ™\XÙ[Y[Ý\ÚÜÊYØ[\ZYÛ—Ú][WÚYX[WÚYÝ]\ËØØ[›™\—Ø\ÜÙ]ÚYˆœ˜[˜ÚÝÛÜš×ÛÜ™\—ÚYØØ[›™\—ÜÙ\šX[ÜÛ˜\ÚÝ
-H˜[Y\Âˆ
-	Ù˜ÎLLMNL	Ë[[	ÜØÚY[Y	Ë	Ù˜ÎLLMNLÌÉË	Ù˜ÎLLMNLÌ	Ë	ÑU’QSÑKSÓM	ÊKˆ
-	Ù˜ÎLLMNLIË[[	ÜØÚY[Y	Ë	Ù˜ÎLLMNLÍ	Ë	Ù˜ÎLLMNLÌ	Ë	ÑU’QSÑKSÓMIÊNÂœÙ]ØØ[›ÛH]][XØ]YÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[KœÝX‰Ë	Ù˜ÎLLMNLÉËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[Kœ›ÛIË	Ø]][XØ]Y	ËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[\ÉË	ÞÈœÝXˆŽˆ™˜ÎLLMNLÈ‹œ›ÛHŽˆ˜]][XØ]YŸIËYJNÂœÙ[XÝ\ÊX›XË˜Z\×Øœ˜[˜ÚÝÛÜš×ÛÜ™\—ÜYÙJ[	Ø[	ËŒ
-KO‰Ü›ÝÜÉËOŒO‰ÝÛÜšÙ›Ý×ÜÝYÙIË	ÛÜ[‰Ë	ØHÛÜšÈÜ™\ˆ™[XZ[œÈÜ[ˆÚ[ˆÛÛ\]Y[™›Ý^Y]\Ý\YØØ[›™\œÈÛÙ^\Ý	ÊNÂœÙ[XÝ\ÊX›XË˜Z\×ÙšY[Ý\Ú×ØXÝ[ÛŠ	Ù˜ÎLLMNL	Ë	ÜÝ\	ËJKO‰ÜÝ]\ÉË	Ú[—Ü›ÙÜ™\ÜÉË	Ùš\œÝØØ[›™\ˆØ[ˆ›ØÙYY[™\[™[IÊNÂœÙ[XÝ\ÊX›XË˜Z\×ÙšY[Ý\Ú×ØXÝ[ÛŠ	Ù˜ÎLLMNLIË	ÜÝ\	ËJKO‰ÜÝ]\ÉË	Ú[—Ü›ÙÜ™\ÜÉË	ÜÙXÛÛ™ØØ[›™\ˆØ[ˆ›ØÙYY[™\[™[IÊNÂœÙ[XÝ\ÊX›XË˜Z\×ÙšY[Ý\Ú×ØXÝ[ÛŠ	Ù˜ÎLLMNLIË	Ø›ØÚÉË‹	ÕØZ][™È›ÜˆÚ]HXØÙ\ÜÉÊKO‰ÜÝ]\ÉË	Ø›ØÚÙY	Ë	ÛÛ™HØØ[›™\ˆØ[ˆ™H[™[™ÈÚ]Ý]ÝÜ[™È[›Ý\‰ÊNÂœÙ[XÝ\ÊX›XË˜Z\×Øœ˜[˜ÚÝÛÜš×ÛÜ™\—ÜYÙJ[	Ø[	ËŒ
-KO‰Ü›ÝÜÉËOŒO‰ÝÛÜšÙ›Ý×ÜÝYÙIË	Ú[—Ü›ÙÜ™\ÜÉË	Ø[ˆXÝ]™HØØ[›™\ˆÙY\ÈH\™[ÛÜšÈÜ™\ˆ[ˆ›ÙÜ™\ÜÈÚ[H[›Ý\ˆ\È[™[™ÉÊNÂœÙ[XÝ\ÊX›XË˜Z\×ÙšY[Ý\Ú×ØXÝ[ÛŠ	Ù˜ÎLLMNL	Ë	Ø›ØÚÉË‹	ÕØZ][™È›ÜˆÚ]HXØÙ\ÜÉÊKO‰ÜÝ]\ÉË	Ø›ØÚÙY	Ë	ÝH™[XZ[š[™ÈXÝ]™HØØ[›™\ˆØ[ˆ[™\[™[H™XÛÛYH[™[™ÉÊNÂœÙ[XÝ\ÊX›XË˜Z\×Øœ˜[˜ÚÝÛÜš×ÛÜ™\—ÜYÙJ[	Ø[	ËŒ
-KO‰Ü›ÝÜÉËOŒO‰ÝÛÜšÙ›Ý×ÜÝYÙIË	Ø]ØZ][™×ØYZ[—Ù^Ù\[Û—Ü™]šY]ÉË	ØHÛÜšÈÜ™\ˆ™XÛÛY\È[™[™ÈÚ[ˆ]™\žH[™š[š\ÚYØØ[›™\ˆ\È[™[™ÉÊNÂœ™\Ù]›ÛNÂ‚š[œÙ\[È\Üš]˜]Kœ™\XÙ[Y[Ý\ÚÜÊYØ[\ZYÛ—Ú][WÚYX[WÚYÝ]\ËØØ[›™\—Ø\ÜÙ]ÚYØØ[›™\—ÜÙ\šX[ÜÛ˜\ÚÝ
-B˜[Y\È
-	Ù˜ÎLLMNL‰Ë	Ù˜ÎLLMNLL‰Ë[	ÜØÚY[Y	Ë[[
-NÂœÙ]ØØ[›ÛH]][XØ]YÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[KœÝX‰Ë	Ù˜ÎLLMNLIËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[Kœ›ÛIË	Ø]][XØ]Y	ËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[\ÉË	ÞÈœÝXˆŽˆ™˜ÎLLMNLH‹œ›ÛHŽˆ˜]][XØ]YŸIËYJNÂœÙ[XÝ›ÝÜ×ÛÚÊ		Ù[XÝX›XË˜Z\×Ý\Ú×Ù]šY[˜ÙWÛ\Ý
-	Ù˜ÎLLMNL‰ÊI	ˆ	ÍLIË	Õ\ÚÈ]šY[˜ÙH\ÈÝ]ÚYH[Ý\ˆ\ÜÚYÛ™YXØÙ\ÜÉË	ÝXÚšXÚX[œÈØ[››ÝXØÙ\ÜÈH\ÚÈ]Ø\È™]™\ˆÜ[™Y\ÈHÛÜšÈÜ™\‰ÊNÂœÙ[XÝ›ÝÜ×ÛÚÊ		Ù[XÝX›XË˜Z\×ÙšY[Ý\Ú×ØXÝ[ÛŠ	Ù˜ÎLLMNL‰Ë	ÜÝ\	ËJI	ˆ	ÍLIË	ÑšY[XÚšXÚX[œÈØ[ˆÛ›HXØÙ\ÜÈÜ[™YÛÜšÈÜ™\œÉË	ÝXÚšXÚX[œÈØ[››ÝÝ\[ˆÜœ[ˆ\ÚÈÝ]ÚYH[ˆÜ[™YÛÜšÈÜ™\‰ÊNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[KœÝX‰Ë	Ù˜ÎLLMNL	ËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[Kœ›ÛIË	Ø]][XØ]Y	ËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[\ÉË	ÞÈœÝXˆŽˆ™˜ÎLLMNL‹œ›ÛHŽˆ˜]][XØ]YŸIËYJNÂœÙ[XÝ›ÝÜ×ÛÚÊ		Ù[XÝX›XË˜Z\×Ý\Ú×Ù]šY[˜ÙWÛ\Ý
-	Ù˜ÎLLMNLŒ	ÊI	ˆ	ÍLIË	Õ\ÚÈ]šY[˜ÙH\ÈÝ]ÚYH[Ý\ˆ\ÜÚYÛ™YXØÙ\ÜÉË	Ú[˜XÝ]™HXÚšXÚX[œÈØ[››ÝšY]È]šY[˜ÙIÊNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[KœÝX‰Ë	Ù˜ÎLLMNLIËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[Kœ›ÛIË	Ø]][XØ]Y	ËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[\ÉË	ÞÈœÝXˆŽˆ™˜ÎLLMNLH‹œ›ÛHŽˆ˜]][XØ]YŸIËYJNÂœÙ[XÝ›ÝÜ×ÛÚÊ		Ù[XÝX›XË˜Z\×Ý\Ú×Ù]šY[˜ÙWÛ\Ý
-	Ù˜ÎLLMNLŒ	ÊI	ˆ	ÍLIË	Õ\ÚÈ]šY[˜ÙH\ÈÝ]ÚYH[Ý\ˆ\ÜÚYÛ™YXØÙ\ÜÉË	Ý[œ›Ýš\Ú[Û™Y\Ù\œÈØ[››ÝšY]È]šY[˜ÙIÊNÂ‚œ™\Ù]›ÛNÂš[œÙ\[È\Üš]˜]KœØØ[›™\—Ø\ÜÙ]ÊYœ˜[˜ÚÚYÛÛWÜÛ‹[Ù[Û˜[YJB˜[Y\È
-	Ù˜ÎLLMNLÍ‰Ë	Ù˜ÎLLMNLŒ	Ë	ÑU’QSÑKQ’T”ÕUTÐQ	Ë	Ñ]šY[˜ÙH\ÝØØ[›™\‰ÊNÂš[œÙ\[È\Üš]˜]Kœ™\XÙ[Y[Ý\ÚÜÊYØ[\ZYÛ—Ú][WÚYX[WÚYÝ]\ËØØ[›™\—Ø\ÜÙ]ÚYˆœ˜[˜ÚÝÛÜš×ÛÜ™\—ÚYØØ[›™\—ÜÙ\šX[ÜÛ˜\ÚÝ
-B˜[Y\È
-	Ù˜ÎLLMNLŽ	Ë[[	ÜØÚY[Y	Ëˆ	Ù˜ÎLLMNLÍ‰Ë	Ù˜ÎLLMNL	Ë	ÑU’QSÑKQ’T”ÕUTÐQ	ÊNÂœÙ[XÝ\Ê
-Ù[XÝÝ]\ÎŽ^œ›ÛH\Üš]˜]Kœ™\XÙ[Y[Ý\ÚÜÈÚ\™HYH	Ù˜ÎLLMNLŽ	ÊKˆ	ÜØÚY[Y	Ë	ÝšY]Ú[™ÈH[šÙYÛÜšÈ][HX]™\È]Ü[ˆ[[]šY[˜ÙH\ÈÝ\Y	ÊNÂœÙ]ØØ[›ÛH]][XØ]YÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[KœÝX‰Ë	Ù˜ÎLLMNL‰ËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[Kœ›ÛIË	Ø]][XØ]Y	ËYJNÂœÙ[XÝÙ]ØÛÛ™šYÊ	Ü™\]Y\ÝšÝ˜ÛZ[\ÉË	ÞÈœÝXˆŽˆ™˜ÎLLMNLˆ‹œ›ÛHŽˆ˜]][XØ]YŸIËYJNÂ\]H]šY[˜ÙWÝ\ÝÜÝ]BœÙ]™\Ù\˜][ÛˆHX›XË˜Z\×Ý\Ú×Ù]šY[˜ÙWÜ™\Ù\™WÙ›Ü—ÛÝ]ÛÛYJˆ	Ù˜ÎLLMNLŽ	Ë	ÛÛÜÙ\šX[ÜÝÉË[˜[ÙK	Ü™\XÙY	ÂŠNÂœÙ[XÝ\Ê
-Ù[XÝ™\Ù\˜][Û‹O‰Ý\Ú×ÜÝ\Y	Èœ›ÛH]šY[˜ÙWÝ\ÝÜÝ]JK	ÝYIËˆ	ÝHš\œÝ]šY[˜ÙH™\Ù\˜][ÛˆÝ\ÈH[šÙYÜ[ˆÛÜšÈ][IÊNÂœÙ[XÝ\Ê
-Ù[XÝ
-™\Ù\˜][Û‹O‰Ý\Ú×Ý™\œÚ[Û‰ÊNŽš[YÙ\ˆœ›ÛH]šY[˜ÙWÝ\ÝÜÝ]JK‹ˆ	ÝH]šY[˜ÙH™\Ù\˜][Ûˆ™]\›œÈH™]ÈÜ[Z\ÝXË[ØÚÈ™\œÚ[Û‰ÊNÂœ™\Ù]›ÛNÂœÙ[XÝ\Ê
-Ù[XÝÝ]\ÎŽ^œ›ÛH\Üš]˜]Kœ™\XÙ[Y[Ý\ÚÜÈÚ\™HYH	Ù˜ÎLLMNLŽ	ÊKˆ	Ú[—Ü›ÙÜ™\ÜÉË	Ùš\œÝ]šY[˜ÙHÝ\ÈHØØ[›™\ˆ\ÚÉÊNÂœÙ[XÝ\Ê
-Ù[XÝÝ\YØžHœ›ÛH\Üš]˜]Kœ™\XÙ[Y[Ý\ÚÜÈÚ\™HYH	Ù˜ÎLLMNLŽ	ÊKˆ	Ù˜ÎLLMNL‰ÎŽ]ZY	ÝHš\œÝ]šY[˜ÙH™XÛÜ™ÈHÛœÚ]HXÝÜ‰ÊNÂœÙ[XÝ\Ê
-Ù[XÝÛÝ[
+      user_metadata = pg_catalog.jsonb_build_object('reservation_token', reservation ->> 'reservation_token')
+  where bucket_id = 'ais-task-evidence' and name = reservation ->> 'path';
+  if not found then
+    insert into storage.objects(bucket_id, name, owner, owner_id, metadata, user_metadata)
+    values (
+      'ais-task-evidence', reservation ->> 'path', auth.uid(), auth.uid()::text,
+      pg_catalog.jsonb_build_object('size', p_byte_size, 'mimetype', 'image/jpeg'),
+      pg_catalog.jsonb_build_object('reservation_token', reservation ->> 'reservation_token')
+    );
+  end if;
+  return public.ais_task_evidence_finalize(p_task_id, p_slot) ->> 'status';
+end;
+$function$;
 
-ŠNŽš[YÙ\ˆœ›ÛH\Üš]˜]K˜]Y]Ù]™[ÈÚ\™H[]WÚYH	Ù˜ÎLLMNLŽ	È[™]™[Ý\HH	ÜØØ[›™\—ÝÛÜš×ÜÝ\Y	ÊKˆK	ÝH[\XÚ]Ý\\È™XÛÜ™YÛ˜ÙH[ˆH]Y]ÙÉÊNÂ‚œÙ[XÝ
-ˆœ›ÛHš[š\Ú
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
 
-NÂœ›Û˜XÚÎÂ
+select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000060', 'start', 1)->>'status', 'in_progress', 'a technician without team membership can start work without confirming the verified target Serial');
+select ok(app_private.can_edit_task_evidence('fc810000-0000-4000-8000-000000000060'), 'any active technician can edit evidence for an opened in-progress work order');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'technician_signature', 8192, null, false, 'replaced')$$,
+  '22023', 'Signature and consent confirmation are required', 'technician signature reservation requires affirmative consent');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 100000, null, false, 'replaced')$$,
+  '22023', 'Evidence file exceeds its slot size limit', 'photo slot enforces its per-file size limit');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 64, null, true, 'replaced')$$,
+  '22023', 'Photo evidence cannot contain signature consent fields', 'photo slots reject signature consent metadata');
+
+update evidence_test_state
+set reservation = public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'old_serial_photo', 64, null, false, 'replaced');
+
+select throws_ok($$select public.ais_task_evidence_finalize('fc810000-0000-4000-8000-000000000060', 'old_serial_photo')$$,
+  '22023', 'Uploaded evidence is missing or does not match the active reservation', 'an upload that has not reached Storage is reported as a recoverable client error');
+select is(public.ais_task_evidence_cancel_pending('fc810000-0000-4000-8000-000000000060', 'old_serial_photo')->>'status', 'cancelled', 'a failed upload reservation can be safely cleaned up');
+
+update evidence_test_state
+set reservation = public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'old_serial_photo', 64, null, false, 'replaced');
+
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+select ok(app_private.can_access_task_evidence_object((select reservation->>'path' from evidence_test_state), 'write'), 'a second active technician may access evidence without matching a team');
+select ok(not app_private.can_upload_task_evidence_object(
+  (select reservation->>'path' from evidence_test_state), '64', 'image/jpeg',
+  (select reservation->>'reservation_token' from evidence_test_state)
+), 'a different technician cannot use another uploader reservation token');
+select is(jsonb_array_length(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000060')), 1, 'a technician can view another technician evidence across teams');
+
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+select ok(app_private.can_upload_task_evidence_object(
+  (select reservation->>'path' from evidence_test_state), null, 'image/jpeg',
+  (select reservation->>'reservation_token' from evidence_test_state)
+), 'multipart preflight without metadata.size accepts the owner reservation token');
+select ok(not app_private.can_upload_task_evidence_object(
+  (select reservation->>'path' from evidence_test_state), '65', 'image/jpeg',
+  (select reservation->>'reservation_token' from evidence_test_state)
+), 'an available file size must still match the reserved byte size');
+select lives_ok($$insert into storage.objects(bucket_id, name, owner, owner_id, metadata, user_metadata)
+  select 'ais-task-evidence', reservation->>'path', auth.uid(), auth.uid()::text,
+    pg_catalog.jsonb_build_object('contentLength', 427, 'mimetype', 'image/jpeg'),
+    pg_catalog.jsonb_build_object('reservation_token', reservation->>'reservation_token')
+  from evidence_test_state$$, 'Storage preflight ignores multipart request-body length while checking the one-use reservation token');
+select lives_ok($$update storage.objects set metadata = pg_catalog.jsonb_build_object('contentLength', 427, 'mimetype', 'image/jpeg')
+  where bucket_id = 'ais-task-evidence' and name = (select reservation->>'path' from evidence_test_state)$$,
+  'Storage upsert preflight accepts multipart request-body length without mistaking it for file size');
+select lives_ok($$update storage.objects set metadata = pg_catalog.jsonb_build_object('size', 64, 'mimetype', 'image/jpeg')
+  where bucket_id = 'ais-task-evidence' and name = (select reservation->>'path' from evidence_test_state)$$,
+  'the persisted Storage object metadata shape remains accepted after upload');
+select is(public.ais_task_evidence_finalize('fc810000-0000-4000-8000-000000000060', 'old_serial_photo')->>'status', 'ready', 'matching Storage object finalizes the evidence reservation');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_serial_photo', 64), 'ready', 'routine replacement records a photo of the new Serial');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'old_device_photo', 64), 'ready', 'routine replacement records the old device photo');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'old_condition_photo', 64), 'ready', 'routine replacement records the current condition of the old Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'old_branch_sticker_photo', 64), 'ready', 'routine replacement records the old branch sticker');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_front_photo', 64), 'ready', 'routine replacement records the front of the new Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_side_photo', 64), 'ready', 'routine replacement records the side of the new Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_com_serial_photo', 64), 'ready', 'routine replacement records the Com SN of the new Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_device_photo', 64), 'ready', 'routine replacement records the new device photo');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'new_cable_management_photo', 64), 'ready', 'routine replacement records the cable arrangement of the new Scanner');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'technician_signature', 8192, null, true), 'ready', 'routine replacement records the onsite technician signature');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'scanner_user_signature', 8192, 'Scanner User One', true), 'ready', 'routine replacement records the Scanner user signature');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64), 'ready', 'an optional photo can be removed without affecting required closeout evidence');
+update evidence_delete_test_state set reservation = public.ais_task_evidence_delete_reserve('fc810000-0000-4000-8000-000000000060', 'spare_photo_1');
+select ok(app_private.can_delete_task_evidence_object((select reservation->>'path' from evidence_delete_test_state)), 'the technician who owns the reservation can remove their evidence');
+select throws_ok($$select pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64)$$,
+  '55000', 'Evidence removal is in progress; retry the upload after it finishes', 'the same evidence slot cannot be overwritten during removal');
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+select ok(not app_private.can_delete_task_evidence_object((select reservation->>'path' from evidence_delete_test_state)), 'only the account holding the evidence-removal reservation can delete the file');
+select throws_ok($$select public.ais_task_evidence_delete_finalize('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', (select (reservation->>'reservation_token')::uuid from evidence_delete_test_state))$$,
+  '22023', 'Evidence deletion request is missing or expired', 'another technician cannot finalize someone else evidence removal');
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+select ok(app_private.can_delete_task_evidence_object((select reservation->>'path' from evidence_delete_test_state)), 'the account holding the evidence-removal reservation can delete the file');
+select throws_ok($$select public.ais_task_evidence_delete_finalize('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', (select (reservation->>'reservation_token')::uuid from evidence_delete_test_state))$$,
+  '55000', 'Evidence file remains in Storage; retry removal before confirming', 'metadata cannot be finalized before Storage confirms deletion');
+reset role;
+select is((select count(*)::integer from app_private.replacement_task_evidence where task_id = 'fc810000-0000-4000-8000-000000000060' and slot = 'spare_photo_1'), 1, 'failed deletion leaves the evidence metadata available for retry');
+select is(jsonb_array_length(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000060')), 13, 'failed deletion keeps all evidence visible for a safe retry');
+select is((select count(*)::integer from app_private.task_evidence_removal_history where task_id = 'fc810000-0000-4000-8000-000000000060' and slot = 'spare_photo_1'), 0, 'the audit history is written only after Storage deletion succeeds');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000060', 2, 'replaced', 'EVIDENCE-NEW-1', 'Installed and tested', 'returned_usable')->>'workflow_stage', 'awaiting_admin_acceptance', 'routine replacement waits for a different Admin to inspect and accept the work');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64, null, false, 'replaced')$$,
+  '42501', 'Task evidence is not editable', 'technician cannot alter evidence after submitting closeout');
+
+reset role;
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000060'), 'in_progress', 'field closeout stays open until independent Admin acceptance');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000030'), 'EVIDENCE-OLD-1', 'the Scanner register remains unchanged before Admin acceptance');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000060', 3, false)$$,
+  '22023', 'A different Office Admin must save the acceptance signature', 'Admin acceptance is blocked until its signature is saved');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000060', 'inspector_signature', 8192, null, true), 'ready', 'a different Admin records the acceptance signature');
+select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000060', 3, false)->>'workflow_stage', 'delivered', 'a different Admin accepts the completed replacement after checking its evidence');
+reset role;
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000060'), 'completed', 'Admin acceptance completes the replacement work item');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000030'), 'EVIDENCE-NEW-1', 'Admin acceptance updates the Scanner register Serial');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000060', 'spare_photo_1', 64, null, false, 'replaced')$$,
+  '55000', 'Task is no longer editable', 'optional evidence cannot be added after a normal replacement is completed');
+reset role;
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+select ok(exists(select 1 from storage.objects where bucket_id = 'ais-task-evidence' and name = 'fc810000-0000-4000-8000-000000000060/old_serial_photo.jpg'), 'another active technician can read the accepted evidence after delivery');
+select is(jsonb_array_length(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000060')), 14, 'all required evidence and the optional photo remain visible after delivery');
+
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000061', 'start', 1)->>'status', 'in_progress', 'technician starts the second assigned scanner without a duplicate target confirmation');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_device_photo', 64, null, false, 'different_device_found'), 'ready', 'different-device exception saves a photo of the device found');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_serial_photo', 64, null, false, 'different_device_found'), 'ready', 'different-device exception saves a clear photo of the observed Serial');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'technician_signature', 8192, null, true, 'different_device_found'), 'ready', 'exception closeout saves the technician signature');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'scanner_user_signature', 8192, 'Scanner User Two', true, 'different_device_found'), 'ready', 'exception closeout saves the Scanner user signature');
+select is((
+  select evidence ->> 'outcome_context'
+  from jsonb_array_elements(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000061')) as evidence
+  where evidence ->> 'slot' = 'new_device_photo'
+), 'different_device_found', 'saved evidence retains the outcome selected when it was captured');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_device_photo', 64), 'ready', 'reusing the same photo slot for a different result changes its binding');
+select throws_ok($$select public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000061', 2, 'different_device_found', null, 'Different device observed', 'other', null, 'OBSERVED-OTHER-2', 'Other scanner model', 'Target device did not match the registered target')$$,
+  '22023', 'Save required photos and field signatures first: new_device_photo', 'closeout rejects evidence bound to a different outcome');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'new_device_photo', 64, null, false, 'different_device_found'), 'ready', 'technician saves the observed device photo under the selected exception outcome');
+select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000061', 2, 'different_device_found', null, 'Different device observed', 'other', null, 'OBSERVED-OTHER-2', 'Other scanner model', 'Target device did not match the assigned scanner')->>'workflow_stage', 'awaiting_admin_exception_review', 'a different-device exception with matching evidence becomes Pending for Admin review');
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, 'Inspector', true, 'different_device_found')$$,
+  '42501', 'Task evidence is not editable', 'technician cannot sign the Admin reviewer slot');
+
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select throws_ok($$select public.ais_task_evidence_reserve_for_outcome('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, 'Inspector', true, 'replaced')$$,
+  '22023', 'Admin signature outcome does not match the submitted work result', 'Admin signature cannot be attached to another closeout outcome');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000061', 'inspector_signature', 8192, null, true, 'different_device_found'), 'ready', 'Admin records the required acceptance signature while reviewing the different-device exception');
+reset role;
+insert into app_private.scanner_assets (branch_id, com_sn, model_name)
+values ('fc810000-0000-4000-8000-000000000020', 'OBSERVED-OTHER-2', 'Already registered elsewhere');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000061', 3, true)$$,
+  '23505', 'This Serial is already registered to another branch; resolve that record before acceptance', 'Admin cannot duplicate or move an observed Serial registered at another branch');
+select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000061', 3, false)$$,
+  '23505', 'This Serial is already registered to another branch; resolve that record before acceptance', 'Admin cannot bypass the cross-branch check by closing Pending without adding the observed Serial');
+reset role;
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000061'), 'in_progress', 'cross-branch duplicate rejection keeps the exception open for review');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000031'), 'EVIDENCE-OLD-2', 'cross-branch duplicate rejection leaves the original registered Serial unchanged');
+delete from app_private.scanner_assets where com_sn = 'OBSERVED-OTHER-2' and branch_id = 'fc810000-0000-4000-8000-000000000020';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000061', 3, true)->>'workflow_stage', 'exception_resolved', 'Admin resolves the exception and registers the observed Serial without marking a replacement delivered');
+reset role;
+select is((select province.value->>'scanners_open'
+  from jsonb_array_elements(public.ais_dashboard_province_summary()->'provinces') as province(value)
+  where province.value->>'province' = 'Evidence Dashboard Province'),
+  '2', 'dashboard keeps a reviewed exception and its newly observed Scanner in Open');
+select is((select province.value->>'scanners_complete'
+  from jsonb_array_elements(public.ais_dashboard_province_summary()->'provinces') as province(value)
+  where province.value->>'province' = 'Evidence Dashboard Province'),
+  '0', 'dashboard does not count a reviewed exception as a completed replacement');
+select is((select scanner.value->>'workflow_stage'
+  from jsonb_array_elements(public.ais_branch_work_order_page(null, 'all', 20, 0)->'rows') as work_order(value)
+  cross join lateral jsonb_array_elements(work_order.value->'scanners') as scanner(value)
+  where scanner.value->>'task_id' = 'fc810000-0000-4000-8000-000000000061'),
+  'exception_resolved', 'the work-order detail retains the reviewed-exception status');
+select is((select work_order.value->>'workflow_stage'
+  from jsonb_array_elements(public.ais_branch_work_order_page(null, 'all', 20, 0)->'rows') as work_order(value)
+  where work_order.value->>'id' = 'fc810000-0000-4000-8000-000000000081'),
+  'exception_resolved', 'an exception-only work order is not reported as delivered');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000031'), 'EVIDENCE-OLD-2', 'resolving a different-device exception preserves the target Scanner Serial');
+select is((select count(*)::integer from app_private.scanner_assets where branch_id = 'fc810000-0000-4000-8000-000000000021' and com_sn = 'OBSERVED-OTHER-2'), 1, 'reviewed different-device Serial is added to the correct branch register');
+select is((select outcome from app_private.field_visits where task_id = 'fc810000-0000-4000-8000-000000000061'), 'different_device_found', 'different-device result is retained in the field visit');
+select is((select status::text from app_private.campaigns where id = 'fc810000-0000-4000-8000-000000000040'), 'scheduled', 'legacy campaign metadata remains unchanged because delivery is tracked by the branch work order');
+
+insert into app_private.branch_work_orders(id, work_order_code, branch_id, origin, created_by)
+values ('fc810000-0000-4000-8000-000000000070', 'EVIDENCE-ADMIN-FIELD', 'fc810000-0000-4000-8000-000000000022', 'admin', 'fc810000-0000-4000-8000-000000000003');
+insert into app_private.replacement_tasks(id, campaign_item_id, team_id, status, scanner_asset_id,
+  branch_work_order_id, scanner_serial_snapshot)
+values ('fc810000-0000-4000-8000-000000000063', null, null, 'scheduled',
+  'fc810000-0000-4000-8000-000000000035', 'fc810000-0000-4000-8000-000000000070', 'EVIDENCE-OLD-ADMIN');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000063', 'start', 1)->>'status', 'in_progress', 'a work order without team assignment can start using the approved onsite flow');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_serial_photo', 64), 'ready', 'Admin can perform onsite work and record the old Scanner Serial');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_device_photo', 64), 'ready', 'Admin records the old Scanner overview');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_condition_photo', 64), 'ready', 'Admin records the old Scanner condition');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'old_branch_sticker_photo', 64), 'ready', 'Admin records the old branch sticker');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_serial_photo', 64), 'ready', 'Admin records the new Scanner Serial');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_front_photo', 64), 'ready', 'Admin records the new Scanner front view');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_side_photo', 64), 'ready', 'Admin records the new Scanner side view');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_com_serial_photo', 64), 'ready', 'Admin records the new Scanner Com SN');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_device_photo', 64), 'ready', 'Admin records the new Scanner overview');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'new_cable_management_photo', 64), 'ready', 'Admin records the new Scanner cable arrangement');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'technician_signature', 8192, null, true), 'ready', 'Admin records the onsite operator signature');
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'scanner_user_signature', 8192, 'Scanner User Admin', true), 'ready', 'Admin captures the Scanner user signature');
+select is(public.ais_technician_submit_closeout('fc810000-0000-4000-8000-000000000063', 2, 'replaced', 'EVIDENCE-NEW-3', 'Installed and tested', 'returned_usable')->>'workflow_stage', 'awaiting_admin_acceptance', 'Admin can perform onsite work but the task still waits for an independent reviewer');
+select is(jsonb_array_length(public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000063')), 12, 'onsite Admin closeout contains 10 required photos and two field signatures');
+select throws_ok($$select public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000063', 3, false)$$,
+  '42501', 'The Admin who performed this work cannot accept it; another Admin must review it', 'the Admin who worked onsite cannot accept their own work');
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000006', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000006","role":"authenticated"}', true);
+select is(pg_temp.save_task_evidence('fc810000-0000-4000-8000-000000000063', 'inspector_signature', 8192, null, true), 'ready', 'a different Admin signs acceptance for onsite work performed by an Admin');
+select is(public.ais_admin_accept_task('fc810000-0000-4000-8000-000000000063', 3, false)->>'workflow_stage', 'delivered', 'a different Admin accepts the onsite Admin work');
+reset role;
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000063'), 'completed', 'a different Admin acceptance completes the onsite Admin work item');
+select is((select com_sn from app_private.scanner_assets where id = 'fc810000-0000-4000-8000-000000000035'), 'EVIDENCE-NEW-3', 'the register Serial updates only after the different Admin accepts the work');
+reset role;
+
+insert into app_private.scanner_assets(id, branch_id, com_sn, model_name) values
+  ('fc810000-0000-4000-8000-000000000033', 'fc810000-0000-4000-8000-000000000022', 'EVIDENCE-OLD-4', 'Evidence Test Scanner'),
+  ('fc810000-0000-4000-8000-000000000034', 'fc810000-0000-4000-8000-000000000022', 'EVIDENCE-OLD-5', 'Evidence Test Scanner');
+insert into app_private.replacement_tasks(id, campaign_item_id, team_id, status, scanner_asset_id,
+  branch_work_order_id, scanner_serial_snapshot) values
+  ('fc810000-0000-4000-8000-000000000064', null, null, 'scheduled', 'fc810000-0000-4000-8000-000000000033', 'fc810000-0000-4000-8000-000000000070', 'EVIDENCE-OLD-4'),
+  ('fc810000-0000-4000-8000-000000000065', null, null, 'scheduled', 'fc810000-0000-4000-8000-000000000034', 'fc810000-0000-4000-8000-000000000070', 'EVIDENCE-OLD-5');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000003', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000003","role":"authenticated"}', true);
+select is(public.ais_branch_work_order_page(null, 'all', 20, 0)->'rows'->0->>'workflow_stage', 'open', 'a Work Order remains Open when completed and not-yet-started scanners coexist');
+select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000064', 'start', 1)->>'status', 'in_progress', 'first scanner can proceed independently');
+select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000065', 'start', 1)->>'status', 'in_progress', 'second scanner can proceed independently');
+select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000065', 'block', 2, 'Waiting for site access')->>'status', 'blocked', 'one scanner can be Pending without stopping another');
+select is(public.ais_branch_work_order_page(null, 'all', 20, 0)->'rows'->0->>'workflow_stage', 'in_progress', 'an active scanner keeps the parent Work Order In Progress while another is Pending');
+select is(public.ais_field_task_action('fc810000-0000-4000-8000-000000000064', 'block', 2, 'Waiting for site access')->>'status', 'blocked', 'the remaining active scanner can independently become Pending');
+select is(public.ais_branch_work_order_page(null, 'all', 20, 0)->'rows'->0->>'workflow_stage', 'awaiting_admin_exception_review', 'a Work Order becomes Pending when every unfinished scanner is Pending');
+reset role;
+
+insert into app_private.replacement_tasks(id, campaign_item_id, team_id, status, scanner_asset_id, scanner_serial_snapshot)
+values ('fc810000-0000-4000-8000-000000000066', 'fc810000-0000-4000-8000-000000000052', null, 'scheduled', null, null);
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+select throws_ok($$select public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000066')$$,
+  '42501', 'Task evidence is outside your assigned access', 'technicians cannot access a task that was never opened as a work order');
+select throws_ok($$select public.ais_field_task_action('fc810000-0000-4000-8000-000000000066', 'start', 1)$$,
+  '42501', 'Field Technicians can only access opened work orders', 'technicians cannot start an orphan task outside an opened work order');
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000004', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000004","role":"authenticated"}', true);
+select throws_ok($$select public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000060')$$,
+  '42501', 'Task evidence is outside your assigned access', 'inactive technicians cannot view evidence');
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000005', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000005","role":"authenticated"}', true);
+select throws_ok($$select public.ais_task_evidence_list('fc810000-0000-4000-8000-000000000060')$$,
+  '42501', 'Task evidence is outside your assigned access', 'unprovisioned users cannot view evidence');
+
+reset role;
+insert into app_private.scanner_assets(id, branch_id, com_sn, model_name)
+values ('fc810000-0000-4000-8000-000000000036', 'fc810000-0000-4000-8000-000000000020', 'EVIDENCE-FIRST-UPLOAD', 'Evidence Test Scanner');
+insert into app_private.replacement_tasks(id, campaign_item_id, team_id, status, scanner_asset_id,
+  branch_work_order_id, scanner_serial_snapshot)
+values ('fc810000-0000-4000-8000-000000000068', null, null, 'scheduled',
+  'fc810000-0000-4000-8000-000000000036', 'fc810000-0000-4000-8000-000000000080', 'EVIDENCE-FIRST-UPLOAD');
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000068'),
+  'scheduled', 'viewing a linked work item leaves it open until evidence is started');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'fc810000-0000-4000-8000-000000000002', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"fc810000-0000-4000-8000-000000000002","role":"authenticated"}', true);
+update evidence_test_state
+set reservation = public.ais_task_evidence_reserve_for_outcome(
+  'fc810000-0000-4000-8000-000000000068', 'old_serial_photo', 64, null, false, 'replaced'
+);
+select is((select reservation->>'task_started' from evidence_test_state), 'true',
+  'the first evidence reservation starts a linked open work item');
+select is((select (reservation->>'task_version')::integer from evidence_test_state), 2,
+  'the evidence reservation returns the new optimistic-lock version');
+reset role;
+select is((select status::text from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000068'),
+  'in_progress', 'first evidence starts the Scanner task');
+select is((select started_by from app_private.replacement_tasks where id = 'fc810000-0000-4000-8000-000000000068'),
+  'fc810000-0000-4000-8000-000000000002'::uuid, 'the first evidence records the onsite actor');
+select is((select count(*)::integer from app_private.audit_events where entity_id = 'fc810000-0000-4000-8000-000000000068' and event_type = 'scanner_work_started'),
+  1, 'the implicit start is recorded once in the audit log');
+
+select * from finish();
+rollback;

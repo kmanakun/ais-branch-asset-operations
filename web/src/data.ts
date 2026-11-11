@@ -1,4 +1,4 @@
-export type MenuKey = 'overview' | 'work_orders' | 'assets' | 'pending' | 'discovery' | 'imports' | 'people'
+export type MenuKey = 'overview' | 'work_orders' | 'assets' | 'pending' | 'completed' | 'discovery' | 'imports' | 'people'
 
 export const demoStats = [
   { label: 'สาขาในทะเบียน', value: '580', change: 'ข้อมูลตัวอย่าง', icon: 'branches', tone: 'blue' },
