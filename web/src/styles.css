@@ -1113,3 +1113,492 @@ tbody tr:last-child td { border-bottom: 0; }
   .pending-review-row > button { width: 100%; justify-content: center; white-space: normal; }
   .pending-review-title { align-items: flex-start; }
 }
+
+
+/* ==========================================================================
+   Barcode Scanner Modal & Viewfinder
+   ========================================================================== */
+.barcode-scanner-dialog {
+  width: min(92vw, 520px);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.barcode-scanner-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.scanner-viewfinder-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #111;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.scanner-video-preview {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.scanner-target-reticle {
+  position: absolute;
+  width: 70%;
+  height: 55%;
+  pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+}
+.reticle-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: #86cf4f;
+  border-style: solid;
+}
+.reticle-corner.top-left { top: 0; left: 0; border-width: 3px 0 0 3px; border-top-left-radius: 6px; }
+.reticle-corner.top-right { top: 0; right: 0; border-width: 3px 3px 0 0; border-top-right-radius: 6px; }
+.reticle-corner.bottom-left { bottom: 0; left: 0; border-width: 0 0 3px 3px; border-bottom-left-radius: 6px; }
+.reticle-corner.bottom-right { bottom: 0; right: 0; border-width: 0 3px 3px 0; border-bottom-right-radius: 6px; }
+.reticle-laser {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ff3b30, transparent);
+  box-shadow: 0 0 8px #ff3b30;
+  animation: scanLaser 2s linear infinite alternate;
+}
+@keyframes scanLaser {
+  0% { top: 5%; }
+  100% { top: 95%; }
+}
+.scanner-viewfinder-hint {
+  position: absolute;
+  bottom: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  backdrop-filter: blur(4px);
+}
+.barcode-scanner-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+.barcode-manual-form {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.barcode-manual-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.barcode-manual-row {
+  display: flex;
+  gap: 8px;
+}
+.barcode-manual-row input {
+  flex: 1;
+  height: 38px;
+  border: 1px solid #d5d9e0;
+  border-radius: 8px;
+  padding: 0 12px;
+}
+
+/* ==========================================================================
+   Handover Certificate & Print Styles
+   ========================================================================== */
+.certificate-dialog {
+  width: min(94vw, 860px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+}
+.certificate-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.printable-certificate-container {
+  padding: 24px;
+  overflow-y: auto;
+  background: #eceef1;
+}
+.printable-certificate {
+  background: #fff;
+  padding: 36px 40px;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  color: #1a1a1a;
+  font-family: 'IBM Plex Sans Thai', Tahoma, sans-serif;
+  line-height: 1.5;
+}
+.cert-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+}
+.cert-brand {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.cert-logo {
+  font-weight: 800;
+  font-size: 24px;
+  color: #fff;
+  background: #4f852b;
+  padding: 4px 14px;
+  border-radius: 8px;
+  letter-spacing: -0.5px;
+}
+.cert-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: #242934;
+}
+.cert-subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #666;
+}
+.cert-meta {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+}
+.cert-meta-item strong {
+  color: #4f852b;
+  font-size: 13px;
+  margin-left: 4px;
+}
+.cert-meta-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #eff7e9;
+  color: #3d6e21;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+.cert-divider {
+  border: 0;
+  border-top: 2px solid #242934;
+  margin: 18px 0;
+}
+.cert-section {
+  margin-bottom: 22px;
+}
+.cert-section-heading {
+  font-size: 13px;
+  font-weight: 700;
+  color: #242934;
+  background: #f4f6f8;
+  padding: 6px 10px;
+  border-left: 4px solid #4f852b;
+  margin: 0 0 12px;
+}
+.cert-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 0 6px;
+}
+.cert-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cert-field-label {
+  font-size: 10px;
+  color: #666;
+  font-weight: 600;
+}
+.cert-field-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #242934;
+}
+.cert-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cert-table th, .cert-table td {
+  border: 1px solid #d5d9e0;
+  padding: 8px 12px;
+  text-align: left;
+}
+.cert-table th {
+  background: #f9fafb;
+  font-weight: 600;
+}
+.cert-sn {
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 700;
+  background: #f1f3f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.cert-sn-new {
+  background: #e8f5e2;
+  color: #2e6918;
+}
+.cert-signatures-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 8px;
+}
+.cert-signature-box {
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.cert-signature-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 8px;
+}
+.cert-signature-canvas {
+  height: 80px;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px dashed #ccc;
+  margin-bottom: 8px;
+}
+.cert-signature-canvas img {
+  max-height: 70px;
+  max-width: 90%;
+  object-fit: contain;
+}
+.cert-sig-placeholder {
+  font-size: 10px;
+  color: #747b88;
+  font-style: italic;
+}
+.cert-signature-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: #555;
+  width: 100%;
+}
+.cert-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.cert-photo-card {
+  border: 1px solid #e1e4e8;
+  border-radius: 6px;
+  padding: 4px;
+  text-align: center;
+}
+.cert-photo-thumb {
+  height: 72px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cert-photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.cert-photo-empty {
+  font-size: 9px;
+  color: #999;
+}
+.cert-photo-label {
+  display: block;
+  font-size: 9px;
+  color: #555;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cert-footer {
+  margin-top: 24px;
+  border-top: 1px solid #e1e4e8;
+  padding-top: 12px;
+  font-size: 9px;
+  color: #888;
+  text-align: center;
+}
+.cert-loading-text {
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+  padding: 12px;
+}
+
+/* Print CSS */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .printable-certificate, .printable-certificate * {
+    visibility: visible;
+  }
+  .printable-certificate-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  .printable-certificate {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 10mm 12mm !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+  .no-print, .detail-overlay, .app-shell, .sidebar, .app-header {
+    background: transparent !important;
+  }
+}
+
+/* ==========================================================================
+   Inventory & Stock Management
+   ========================================================================== */
+.inventory-view-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.inventory-header-buttons {
+  display: flex;
+  gap: 10px;
+}
+.inventory-table-panel, .inventory-dispatch-panel {
+  padding: 18px 20px;
+}
+.inventory-search-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f5f6f8;
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  padding: 0 10px;
+  height: 36px;
+}
+.inventory-search-box input {
+  border: 0;
+  background: transparent;
+  outline: none;
+  font-size: 11px;
+  width: 200px;
+}
+.table-wrapper {
+  overflow-x: auto;
+  margin-top: 14px;
+}
+.inventory-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.inventory-table th, .inventory-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #eef0f3;
+  text-align: left;
+}
+.inventory-table th {
+  background: #fafbfc;
+  color: #656d77;
+  font-weight: 600;
+  font-size: 11px;
+}
+.stock-model-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #242934;
+}
+.stock-batch-tag {
+  font-size: 10px;
+  font-family: monospace;
+  background: #f1f3f5;
+  color: #495057;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.badge-damaged {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #ffebe9;
+  color: #cf222e;
+  font-weight: 600;
+  font-size: 10px;
+}
+.badge-usable {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #ddf4ff;
+  color: #0969da;
+  font-weight: 600;
+  font-size: 10px;
+}
+.stock-progress-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.stock-progress-bar {
+  flex: 1;
+  min-width: 60px;
+  height: 6px;
+  background: #e9ebef;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.stock-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+}
+.stock-progress-fill.normal {
+  background: #4f852b;
+}
+.stock-progress-fill.low {
+  background: #cf222e;
+}
+.text-danger { color: #cf222e; }
+.text-success { color: #2e6918; }

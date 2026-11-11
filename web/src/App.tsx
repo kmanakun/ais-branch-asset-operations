@@ -4,6 +4,7 @@ import {
   Activity,
   ArrowRight,
   Bell,
+  Boxes,
   ClipboardList,
   CheckCircle2,
   ChevronDown,
@@ -18,6 +19,8 @@ import {
   LogOut,
   MapPin,
   Menu,
+  Printer,
+  ScanLine,
   Search,
   ShieldCheck,
   Users,
@@ -31,6 +34,9 @@ import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot }
 import { groupRowsByBranch, groupRowsByProvince, ProvinceCardGroup } from './province'
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
+import { Inventory } from './Inventory'
+import { BarcodeScannerModal } from './BarcodeScannerModal'
+import { WorkOrderCertificateDialog } from './WorkOrderCertificateDialog'
 
 type UserContext = {
   role: string
@@ -49,6 +55,8 @@ type DashboardData = {
 const navigation: Array<{ key: MenuKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: 'overview', label: 'ภาพรวม', icon: LayoutDashboard },
   { key: 'work_orders', label: 'ใบงาน', icon: ClipboardList },
+  { key: 'assets', label: 'ทะเบียนอุปกรณ์', icon: HardDrive },
+  { key: 'inventory', label: 'สต็อกอุปกรณ์', icon: Boxes },
   { key: 'pending', label: 'รอตรวจรับ', icon: ShieldCheck },
   { key: 'completed', label: 'เสร็จแล้ว', icon: CheckCircle2 },
   { key: 'discovery', label: 'เครื่องนอกทะเบียน', icon: Search },
@@ -60,6 +68,7 @@ const pageCopy: Record<MenuKey, { title: string; subtitle: string }> = {
   overview: { title: 'ภาพรวมการปฏิบัติงาน', subtitle: 'สถานะสาขา อุปกรณ์ และใบงานเปลี่ยน Scanner' },
   work_orders: { title: 'ใบงานเปลี่ยน Scanner', subtitle: 'เปิดดูงานทุกใบและรายละเอียด Scanner ที่ต้องดำเนินการ' },
   assets: { title: 'ทะเบียนอุปกรณ์', subtitle: 'ดูข้อมูลสาขาและเครื่องสแกนที่ผูกกับแต่ละ LocationCode' },
+  inventory: { title: 'ระบบสต็อกและคลังอุปกรณ์', subtitle: 'ติดตามยอดเครื่องสแกนในคลัง การเบิกจ่ายให้ช่าง และเครื่องส่งคืน' },
   pending: { title: 'รายการ Pending รอตรวจ', subtitle: 'ตรวจผลหน้างาน รูปภาพ และลายเซ็นที่ช่างส่งมา' },
   completed: { title: 'ใบงานที่เสร็จแล้ว', subtitle: 'ดูงานที่ส่งมอบหรือปิดผลแล้ว พร้อมเปิดหลักฐานและประวัติย้อนหลัง' },
   discovery: { title: 'เครื่องนอกทะเบียน', subtitle: 'ตรวจรายการที่ช่างพบเพิ่ม โดยไม่ปะปนกับทะเบียนอุปกรณ์หลัก' },
@@ -899,6 +908,7 @@ function App() {
           {activeMenu === 'work_orders' && <WorkOrders role={role} demo={demoMode} onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'completed' && <WorkOrders role={role} demo={demoMode} view="completed" onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'assets' && <Assets role={role} demo={demoMode} items={demoMode ? demoAssets : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onTaskUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'refresh' ? 'กำลังโหลดสถานะ Scanner ล่าสุด' : action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'resolve_exception' ? 'Admin ตรวจ Pending และบันทึกผลพิจารณาแล้ว' : action === 'accept' ? 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} search={search} searchResultsReady={demoMode || loadedAssetSearch === search} setSearch={value => { clearAssetQueryResults(); resetAssetPages(); setSearch(value) }} provinceOptions={visibleProvinces} provinceFilter={activeProvince} setProvinceFilter={value => { clearAssetQueryResults(); resetAssetPages(); setActiveProvince(value) }} statusFilter={assetStatusFilter} setStatusFilter={value => { clearAssetQueryResults(); resetAssetPages(); setAssetStatusFilter(value) }} page={assetPage} pageOffset={assetPageOffsets.current[assetPage] || 0} total={assetTotal} provinceTotal={assetProvinceTotal} setPage={value => { setListData([]); setListError(''); setAssetPage(value) }} focusSerial={pendingAssetSerial} onFocusResolved={() => setPendingAssetSerial('')} />}
+          {activeMenu === 'inventory' && <Inventory role={role} />}
           {activeMenu === 'pending' && !demoMode && role === 'admin' && <PendingReviews onUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : action === 'resolve_exception' ? 'บันทึกผลตรวจ Pending แล้ว' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'discovery' && !demoMode && role === 'admin' && <ScannerDiscoveryQueue onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'รายการเครื่องนอกทะเบียนอัปเดตแล้ว' : action); void loadContext() }} />}
           {activeMenu === 'imports' && canUseAdminModules && <Imports role={role} onComplete={async () => {
@@ -1370,9 +1380,54 @@ function WorkOrders({ role, demo, onUpdated, view = 'all' }: { role?: string; de
   const pageCount = demo ? 1 : Math.ceil(totalOrders / pageSize)
   const submitSearch = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); setPage(0); setQuery(draft.trim()) }
 
+  const exportWorkOrdersCsv = () => {
+    if (!displayRows.length) return
+    const headers = ['เลขที่ใบงาน', 'ชื่อสาขา', 'LocationCode', 'จังหวัด', 'รุ่นอุปกรณ์', 'SN เดิม', 'SN ใหม่', 'สถานะ', 'ผู้ปฏิบัติงาน']
+    const csvRows = [
+      headers.join(','),
+      ...displayRows.map(row => [
+        `"${String(row.work_order_code || '').replace(/"/g, '""')}"`,
+        `"${String(row.branch_name || '').replace(/"/g, '""')}"`,
+        `"${String(row.location_code || '').replace(/"/g, '""')}"`,
+        `"${String(row.province || '').replace(/"/g, '""')}"`,
+        `"${String(row.scanner_model || '').replace(/"/g, '""')}"`,
+        `"${String(row.com_sn || row.serial || row.old_serial_snapshot || '').replace(/"/g, '""')}"`,
+        `"${String(row.new_serial || '').replace(/"/g, '""')}"`,
+        `"${getStatusPresentation(getTaskWorkflowStage(row)).label.replace(/"/g, '""')}"`,
+        `"${String(row.performed_by_name || '').replace(/"/g, '""')}"`,
+      ].join(','))
+    ]
+    const blob = new Blob(['\uFEFF' + csvRows.join('\r\n')], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `ais_work_orders_${completedView ? 'completed_' : ''}${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   return <>
     <section className="panel pending-review-panel">
-      <div className="panel-heading"><div><h2>{completedView ? 'ใบงานที่เสร็จแล้ว' : 'ใบงานทุกสถานะ'}</h2><p>{completedView ? 'รายการที่ส่งมอบแล้วหรือ Admin ปิดผลแล้ว เลือกเพื่อดูหลักฐานและประวัติย้อนหลัง' : 'เลือกใบงานเพื่อดู SN รูปภาพ ลายเซ็น และประวัติการดำเนินงาน'}</p></div><span className="pending-review-count">{demo ? displayRows.length.toLocaleString('th-TH') : totalOrders.toLocaleString('th-TH')} ใบงาน</span></div>
+      <div className="panel-heading">
+        <div>
+          <h2>{completedView ? 'ใบงานที่เสร็จแล้ว' : 'ใบงานทุกสถานะ'}</h2>
+          <p>{completedView ? 'รายการที่ส่งมอบแล้วหรือ Admin ปิดผลแล้ว เลือกเพื่อดูหลักฐานและประวัติย้อนหลัง' : 'เลือกใบงานเพื่อดู SN รูปภาพ ลายเซ็น และประวัติการดำเนินงาน'}</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span className="pending-review-count">{demo ? displayRows.length.toLocaleString('th-TH') : totalOrders.toLocaleString('th-TH')} ใบงาน</span>
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ minHeight: '30px', fontSize: '11px', padding: '0 10px' }}
+            onClick={exportWorkOrdersCsv}
+            title="ดาวน์โหลดไฟล์ CSV สำหรับเปิดใน Microsoft Excel"
+          >
+            <FileDown size={14} /> ส่งออก CSV
+          </button>
+        </div>
+      </div>
       <form className="pending-review-search" onSubmit={submitSearch}><label className="search-box"><Search size={17} /><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="ค้นหาใบงาน สาขา จังหวัด หรือ Serial" aria-label="ค้นหาใบงาน" /></label><button type="submit" className="secondary-button">ค้นหา</button><button type="button" className="text-button" disabled={loading || demo} onClick={() => setReload(value => value + 1)}>รีเฟรช</button></form>
       {loading ? <EmptyState compact loading /> : error ? <EmptyState compact title="โหลดใบงานไม่สำเร็จ" detail={error} onRetry={() => setReload(value => value + 1)} /> : displayRows.length ? <div className="pending-review-list">{displayRows.map((row, index) => {
         const id = String(row.id || row.task_id || `${row.work_order_code || 'order'}-${index}`)
@@ -1651,12 +1706,85 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
   const [blockReason, setBlockReason] = useState('')
   const [newSerialInput, setNewSerialInput] = useState('')
   const [observedSerialInput, setObservedSerialInput] = useState('')
+  const [showCertificate, setShowCertificate] = useState(false)
+  const [scanningField, setScanningField] = useState<'new_serial' | 'observed_serial' | null>(null)
   const [observedModelInput, setObservedModelInput] = useState('')
   const [exceptionReasonInput, setExceptionReasonInput] = useState('')
   const [installResultInput, setInstallResultInput] = useState('')
   const [oldStatusInput, setOldStatusInput] = useState('')
   const [oldStatusNote, setOldStatusNote] = useState('')
   const [registerObservedSerial, setRegisterObservedSerial] = useState(false)
+  const [draftRestoredNotice, setDraftRestoredNotice] = useState('')
+
+  // Check and restore draft on mount
+  useEffect(() => {
+    if (!taskId) return
+    try {
+      const rawDraft = localStorage.getItem(`ais_task_draft_${taskId}`)
+      if (rawDraft) {
+        const parsed = JSON.parse(rawDraft)
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.newSerialInput) setNewSerialInput(parsed.newSerialInput)
+          if (parsed.observedSerialInput) setObservedSerialInput(parsed.observedSerialInput)
+          if (parsed.observedModelInput) setObservedModelInput(parsed.observedModelInput)
+          if (parsed.installResultInput) setInstallResultInput(parsed.installResultInput)
+          if (parsed.oldStatusInput) setOldStatusInput(parsed.oldStatusInput)
+          if (parsed.oldStatusNote) setOldStatusNote(parsed.oldStatusNote)
+          if (parsed.exceptionReasonInput) setExceptionReasonInput(parsed.exceptionReasonInput)
+          if (parsed.outcomeInput) setOutcomeInput(parsed.outcomeInput)
+          const time = parsed.savedAt ? new Date(parsed.savedAt).toLocaleTimeString('th-TH') : ''
+          setDraftRestoredNotice(`กู้คืนข้อมูลร่างที่คุณกรอกค้างไว้หน้างานโดยอัตโนมัติ (${time})`)
+        }
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [taskId])
+
+  // Auto-save draft on changes while in progress
+  useEffect(() => {
+    if (!taskId || stage !== 'in_progress') return
+    const hasData = Boolean(
+      newSerialInput ||
+      observedSerialInput ||
+      observedModelInput ||
+      installResultInput ||
+      oldStatusInput ||
+      oldStatusNote ||
+      exceptionReasonInput
+    )
+    if (hasData) {
+      try {
+        localStorage.setItem(
+          `ais_task_draft_${taskId}`,
+          JSON.stringify({
+            newSerialInput,
+            observedSerialInput,
+            observedModelInput,
+            installResultInput,
+            oldStatusInput,
+            oldStatusNote,
+            exceptionReasonInput,
+            outcomeInput,
+            savedAt: Date.now(),
+          })
+        )
+      } catch {
+        // Ignore quota errors
+      }
+    }
+  }, [
+    taskId,
+    stage,
+    newSerialInput,
+    observedSerialInput,
+    observedModelInput,
+    installResultInput,
+    oldStatusInput,
+    oldStatusNote,
+    exceptionReasonInput,
+    outcomeInput,
+  ])
   const closeIfIdle = useCallback(() => { if (!busy && !evidenceBusy) onClose() }, [busy, evidenceBusy, onClose])
   const dialogRef = useDialogControls(closeIfIdle)
   const serverVersion = Number(task.version)
@@ -1752,6 +1880,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
         if (error.code === '40001') onUpdated('refresh')
         return
       }
+      try { localStorage.removeItem(`ais_task_draft_${taskId}`) } catch { /* ignore */ }
       onUpdated('closeout_pending')
       onClose()
     } catch {
@@ -1818,7 +1947,24 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
   const canEditEvidence = canEditTechnicianEvidence || canResolvePending
   return <div className="detail-overlay work-order-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeIfIdle() }}>
     <section ref={dialogRef} className="detail-dialog work-order-dialog" role="dialog" aria-modal="true" aria-labelledby="work-order-title" tabIndex={-1}>
-      <header className="detail-dialog-header"><button type="button" className="detail-back" aria-label="กลับไปรายการใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><ChevronLeft size={20} /></button><div><span className="detail-eyebrow">รายการ Scanner ในใบงาน</span><h2 id="work-order-title">รายละเอียดการเปลี่ยนเครื่อง</h2></div><button type="button" className="detail-close" aria-label="ปิดใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><X size={18} /></button></header>
+      <header className="detail-dialog-header">
+        <button type="button" className="detail-back" aria-label="กลับไปรายการใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><ChevronLeft size={20} /></button>
+        <div><span className="detail-eyebrow">รายการ Scanner ในใบงาน</span><h2 id="work-order-title">รายละเอียดการเปลี่ยนเครื่อง</h2></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
+          {['delivered', 'completed', 'legacy_completed', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage) && (
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ minHeight: '32px', fontSize: '11px', padding: '0 10px' }}
+              onClick={() => setShowCertificate(true)}
+              title="พิมพ์ใบส่งมอบและบันทึกผลการเปลี่ยนเครื่องสแกนบาร์โค้ด"
+            >
+              <Printer size={15} /> ใบส่งมอบงาน
+            </button>
+          )}
+          <button type="button" className="detail-close" aria-label="ปิดใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><X size={18} /></button>
+        </div>
+      </header>
       <div className="work-order-content">
       <div className="work-order-identity"><div><strong>{String(task.branch_name || task.branch || 'สาขาไม่ระบุ')}</strong><span>{String(task.province || 'ไม่ระบุจังหวัด')} · LocationCode {String(task.location_code || task.code || '—')}</span><small>{String(task.scanner_model || task.model || 'เครื่องสแกน')} · {String(serial)}</small></div><StatusPill label={presentation.label} tone={presentation.tone} /></div>
       <div className="work-order-steps" aria-label="ความคืบหน้าของรายการ Scanner">
@@ -1827,7 +1973,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
       <div className="work-order-layout">
         <div className="work-order-main">
           <section className="detail-section"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
-          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <label className="work-order-new-serial-input"><span>SN เครื่องใหม่ *</span><input aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่" /></label> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
+          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><span>SN เครื่องใหม่ *</span><div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}><input aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอกหรือสแกน Serial เครื่องใหม่" /><button type="button" className="secondary-button" style={{ minHeight: '34px', padding: '0 8px' }} onClick={() => setScanningField('new_serial')} title="สแกนบาร์โค้ด"><ScanLine size={16} /></button></div></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
           <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} /><DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} /><DetailField label="รุ่นเครื่องที่พบ" value={task.observed_model} /><DetailField label="ผลการติดตั้งและทดสอบ" value={installResult || 'ยังไม่มีข้อมูล'} /><DetailField label="สถานะเครื่องเดิม" value={recordedOldStatus ? oldStatusLabels[String(recordedOldStatus)] || String(recordedOldStatus) : 'ยังไม่มีข้อมูล'} /><DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || 'ยังไม่มีข้อมูล'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
           {((canViewEvidence && Boolean(taskId)) || demo) && <TaskEvidencePanel key={taskId || 'demo'} taskId={taskId || undefined} canEdit={canEditEvidence} editableSlots={editableSlots} requiredSlots={stageRequiredSlots} canView={canViewEvidence} previewOnly={demo} outcome={outcome || outcomeInput} onRequiredReady={setRequiredEvidenceReady} onBusyChange={setEvidenceBusy} onTaskStarted={nextVersion => {
@@ -1835,11 +1981,31 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
             onUpdated('evidence_started')
           }} />}
           {!demo && !canViewEvidence && <section className="detail-section"><h3>หลักฐานประกอบ</h3><p className="detail-empty-result">หลักฐานใบงานดูได้โดย Admin และช่างที่มีสิทธิ์เข้าระบบ</p></section>}
-          {canAct && stage === 'in_progress' && <section className="detail-section task-action-panel"><h3>บันทึกผลปฏิบัติงาน</h3><p>กรอกผลตรวจสอบและแนบหลักฐานตามหัวข้อในส่วนรูปภาพด้านบน ระบบจะตรวจรายการที่ยังขาดก่อนบันทึก</p><form className="task-action-form" onSubmit={submitCloseout}>
+          {canAct && stage === 'in_progress' && <section className="detail-section task-action-panel">
+            <h3>บันทึกผลปฏิบัติงาน</h3>
+            <p>กรอกผลตรวจสอบและแนบหลักฐานตามหัวข้อในส่วนรูปภาพด้านบน ระบบจะตรวจรายการที่ยังขาดก่อนบันทึก</p>
+            {draftRestoredNotice && (
+              <div className="detail-readonly-note" style={{ background: '#e8f5e2', borderColor: '#c2e3b4', margin: '8px 0 12px' }}>
+                <CheckCircle2 size={16} color="#3d6e21" />
+                <span style={{ color: '#2e6918', flex: 1 }}>{draftRestoredNotice}</span>
+                <button
+                  type="button"
+                  className="text-button"
+                  style={{ fontSize: '10px', color: '#666' }}
+                  onClick={() => {
+                    try { localStorage.removeItem(`ais_task_draft_${taskId}`) } catch { /* ignore */ }
+                    setDraftRestoredNotice('')
+                  }}
+                >
+                  ล้างข้อมูลร่าง
+                </button>
+              </div>
+            )}
+            <form className="task-action-form" onSubmit={submitCloseout}>
             <label>ผลการเข้าหน้างาน<select value={outcomeInput} onChange={event => { setOutcomeInput(event.target.value); setActionError('') }}><option value="replaced">เปลี่ยนเครื่องสำเร็จ</option><option value="no_damage_found">ไม่พบเครื่องชำรุด</option><option value="different_device_found">ไม่พบ SN ตามใบงาน แต่พบเครื่องอื่น</option><option value="target_device_not_found">ไม่พบ SN ตามใบงานและไม่พบเครื่องอื่น</option></select></label>
             {outcomeInput === 'different_device_found' && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>บันทึก SN ที่พบและเหตุผล รายการนี้จะเป็น Pending; ระบบยังไม่เพิ่มหรือเปลี่ยนข้อมูลทะเบียนจนกว่า Admin ตรวจ</span></p>}
             {outcomeInput === 'target_device_not_found' && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>บันทึกเหตุผล รายการนี้จะเป็น Pending เพื่อให้ Admin ตรวจ ไม่เพิ่ม SN ใหม่</span></p>}
-            {outcomeInput === 'different_device_found' && <><label>Serial ของอุปกรณ์ที่พบ<input value={observedSerialInput} onChange={event => setObservedSerialInput(event.target.value)} maxLength={100} required autoComplete="off" /></label><label>รุ่นของอุปกรณ์ที่พบ (ถ้าทราบ)<input value={observedModelInput} onChange={event => setObservedModelInput(event.target.value)} maxLength={100} autoComplete="off" /></label></>}
+            {outcomeInput === 'different_device_found' && <><label>Serial ของอุปกรณ์ที่พบ<div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}><input value={observedSerialInput} onChange={event => setObservedSerialInput(event.target.value)} maxLength={100} required autoComplete="off" placeholder="กรอกหรือสแกน Serial ที่พบ" /><button type="button" className="secondary-button" style={{ minHeight: '34px', padding: '0 8px' }} onClick={() => setScanningField('observed_serial')} title="สแกนบาร์โค้ด"><ScanLine size={16} /></button></div></label><label>รุ่นของอุปกรณ์ที่พบ (ถ้าทราบ)<input value={observedModelInput} onChange={event => setObservedModelInput(event.target.value)} maxLength={100} autoComplete="off" /></label></>}
             <label>ผลการติดตั้ง/ตรวจสอบ<textarea value={installResultInput} onChange={event => setInstallResultInput(event.target.value)} maxLength={500} required rows={3} /></label>
             {isReplacement && <label>สถานะเครื่องเดิม<select value={oldStatusInput} onChange={event => setOldStatusInput(event.target.value)} required><option value="" disabled>เลือกสถานะเครื่องเดิม</option>{Object.entries(oldStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
             {isReplacement && oldStatusInput === 'other' && <label>หมายเหตุเครื่องเดิม<textarea value={oldStatusNote} onChange={event => setOldStatusNote(event.target.value)} maxLength={1000} required rows={3} /></label>}
@@ -1854,6 +2020,45 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
         </div>
         <aside className="work-order-side" aria-label="ขั้นตอน สาขา และการจัดการใบงาน">
           <section className="detail-section"><h3>ข้อมูลการเปิดใบงาน</h3><div className="detail-grid"><DetailField label="เปิดใบงานเมื่อ" value={formatDate(task.created_at)} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="สถานะใบงาน" value={presentation.label} /><DetailField label="ผู้ปฏิบัติงาน" value={task.performed_by_name} /></div></section>
+          <section className="detail-section">
+            <h3>ลำดับเหตุการณ์การปฏิบัติงาน</h3>
+            <div className="task-timeline" style={{ display: 'grid', gap: '10px', marginTop: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4f852b', marginTop: '4px' }} />
+                <div style={{ display: 'grid', gap: '1px', fontSize: '11px' }}>
+                  <strong>เปิดใบงานปฏิบัติการ</strong>
+                  <span style={{ color: '#666', fontSize: '10px' }}>{formatDate(task.created_at) || 'เริ่มต้นงาน'}</span>
+                </div>
+              </div>
+              {Boolean(task.started_at || stage !== 'open') && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: stage === 'in_progress' ? '#e36209' : '#4f852b', marginTop: '4px' }} />
+                  <div style={{ display: 'grid', gap: '1px', fontSize: '11px' }}>
+                    <strong>ช่างเทคนิคเริ่มเข้าหน้างาน</strong>
+                    <span style={{ color: '#666', fontSize: '10px' }}>{formatDate(task.started_at) || 'กำลังดำเนินการ'}</span>
+                  </div>
+                </div>
+              )}
+              {Boolean(task.performed_at) && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4f852b', marginTop: '4px' }} />
+                  <div style={{ display: 'grid', gap: '1px', fontSize: '11px' }}>
+                    <strong>ส่งผลและรูปภาพหลักฐาน</strong>
+                    <span style={{ color: '#666', fontSize: '10px' }}>{formatDate(task.performed_at)} โดย {String(task.performed_by_name || 'ช่าง Onsite')}</span>
+                  </div>
+                </div>
+              )}
+              {['delivered', 'exception_resolved', 'legacy_completed', 'completed'].includes(stage) && (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#2e6918', marginTop: '4px' }} />
+                  <div style={{ display: 'grid', gap: '1px', fontSize: '11px' }}>
+                    <strong>ตรวจรับและส่งมอบสมบูรณ์</strong>
+                    <span style={{ color: '#666', fontSize: '10px' }}>Admin อนุมัติการปิดใบงาน</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </section>
           {canAct && stage === 'blocked' && <section className="detail-section task-action-panel"><h3>ดำเนินงานต่อ</h3><p>แก้สาเหตุที่พักงานแล้วจึงกลับมาทำรายการนี้ต่อ</p><button type="button" className="primary-button" disabled={busy} onClick={() => void submitAction('resume')}>{busy ? 'กำลังบันทึก…' : 'ดำเนินงานต่อ'}</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</section>}
           {canResolvePending && <section className="detail-section task-action-panel"><h3>{outcome === 'replaced' ? 'ตรวจรับและส่งมอบงาน' : 'พิจารณารายการ Pending'}</h3><p>ตรวจรูปและข้อมูลที่ช่างบันทึก แล้วลงลายเซ็นตรวจรับด้วยบัญชี Admin อีกบัญชีหนึ่ง สำหรับเครื่องอื่น ระบบจะเพิ่ม SN ได้เมื่อยืนยันแล้วว่าไม่ซ้ำกับทะเบียนทุกสาขา หากต้องกลับไปทำงานหน้างาน ให้ยกเลิกรายการนี้พร้อมเหตุผลแล้วเปิดใบงานใหม่</p>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<button type="button" className="primary-button task-action-submit" disabled={busy || evidenceBusy || !requiredEvidenceReady} onClick={() => void resolvePending()}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : outcome === 'replaced' ? 'ลงนามรับผ่านและส่งมอบงาน' : 'บันทึกผลตรวจ Pending'}</button></section>}
           {canManage && !['completed', 'cancelled'].includes(status) && <section className="detail-section task-action-panel"><h3>การจัดการรายการ Scanner</h3>{showCancelForm ? <form className="task-action-form" onSubmit={event => void submitCancel(event)}><label>เหตุผลที่ยกเลิก<textarea value={cancelReason} onChange={event => setCancelReason(event.target.value)} maxLength={500} rows={3} required /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(false); setCancelReason(''); setActionError('') }}>กลับ</button><button type="submit" className="primary-button" disabled={busy || !cancelReason.trim()}>{busy ? 'กำลังบันทึก…' : 'ยืนยันยกเลิกรายการนี้'}</button></div></form> : <><p>Admin ยกเลิกรายการเครื่องนี้แยกจากเครื่องอื่นในใบงานได้ โดยระบุเหตุผลและระบบจะเก็บประวัติไว้</p><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(true); setActionError('') }}>ยกเลิกรายการเครื่องนี้</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</>}</section>}
@@ -1863,6 +2068,29 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
       </div>
       </div>
     </section>
+
+    {showCertificate && (
+      <WorkOrderCertificateDialog
+        task={{
+          ...task,
+          new_serial: newSerialInput || newSerial,
+          workflow_outcome: outcomeInput || outcome,
+        }}
+        onClose={() => setShowCertificate(false)}
+      />
+    )}
+
+    {scanningField && (
+      <BarcodeScannerModal
+        title={scanningField === 'new_serial' ? 'สแกน Serial Number เครื่องใหม่' : 'สแกน Serial Number อุปกรณ์ที่พบ'}
+        onScan={code => {
+          if (scanningField === 'new_serial') setNewSerialInput(code)
+          else if (scanningField === 'observed_serial') setObservedSerialInput(code)
+          setScanningField(null)
+        }}
+        onClose={() => setScanningField(null)}
+      />
+    )}
   </div>
 }
 type ImportIssue = { row_number: number; field: string; code: string; message: string }

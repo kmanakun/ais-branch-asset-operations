@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { Check, ChevronLeft, ChevronRight, Plus, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Plus, ScanLine, X } from 'lucide-react'
 import { supabase } from './supabase'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
+import { BarcodeScannerModal } from './BarcodeScannerModal'
 
 export type BranchReference = { id: unknown; name: unknown; code: unknown; province: unknown }
 type DiscoveryReport = Record<string, unknown>
@@ -76,6 +77,7 @@ export function ScannerDiscoveryDialog({ branch, onClose, onReported }: { branch
   const [notes, setNotes] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [showScanner, setShowScanner] = useState(false)
   const dialogRef = useDialogRef(onClose, busy)
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -112,7 +114,20 @@ export function ScannerDiscoveryDialog({ branch, onClose, onReported }: { branch
       <header className="detail-dialog-header"><div><span className="detail-eyebrow">รายงานให้ Admin ตรวจสอบ</span><h2 id="scanner-discovery-title">พบ Scanner นอกทะเบียน</h2></div><button type="button" className="detail-close" aria-label="ปิดหน้ารายงาน" disabled={busy} onClick={onClose}><X size={18} /></button></header>
       <div className="detail-section scanner-discovery-branch"><strong>{String(branch.name || 'สาขา')}</strong><span>LocationCode {String(branch.code || '—')} · {String(branch.province || 'ไม่ระบุจังหวัด')}</span></div>
       <form className="scanner-discovery-form" onSubmit={submit}>
-        <label>Serial Number ที่พบ *<input value={serial} onChange={event => setSerial(event.target.value)} maxLength={100} required autoFocus autoComplete="off" /></label>
+        <label>Serial Number ที่พบ *
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <input value={serial} onChange={event => setSerial(event.target.value)} maxLength={100} required autoFocus autoComplete="off" placeholder="กรอกหรือสแกน Serial..." />
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ minHeight: '38px', padding: '0 10px' }}
+              onClick={() => setShowScanner(true)}
+              title="สแกนบาร์โค้ด"
+            >
+              <ScanLine size={16} />
+            </button>
+          </div>
+        </label>
         <label>รุ่น (ถ้าทราบ)<input value={model} onChange={event => setModel(event.target.value)} maxLength={160} autoComplete="off" /></label>
         <label>รายละเอียด/จุดที่พบ<textarea value={notes} onChange={event => setNotes(event.target.value)} maxLength={1000} rows={3} /></label>
         <p>รายงานนี้จะเข้าคิวให้ Admin ตรวจ SN และสาขาก่อนเพิ่มเข้าในทะเบียน ระบบจะไม่เพิ่มอุปกรณ์ซ้ำหรือย้ายเครื่องให้อัตโนมัติ</p>
@@ -120,6 +135,17 @@ export function ScannerDiscoveryDialog({ branch, onClose, onReported }: { branch
         <footer><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>ยกเลิก</button><button className="primary-button" disabled={busy}>{busy ? 'กำลังส่งรายงาน…' : 'ส่งให้ Admin ตรวจสอบ'}</button></footer>
       </form>
     </section>
+
+    {showScanner && (
+      <BarcodeScannerModal
+        title="สแกน Serial Number เครื่องนอกทะเบียน"
+        onScan={code => {
+          setSerial(code)
+          setShowScanner(false)
+        }}
+        onClose={() => setShowScanner(false)}
+      />
+    )}
   </div>
 }
 
