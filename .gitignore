@@ -43,3 +43,5 @@
 # Local production recovery helpers
 /web/Run AIS Backup.cmd
 /web/scripts/backup-production.ps1
+
+/docs/word-review-20261111/
