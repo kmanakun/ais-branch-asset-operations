@@ -1,0 +1,16 @@
+node_modules/
+dist/
+backups/
+.env
+.env.*
+!.env.example
+*.local
+.asset-completion.jwt
+npm-debug.log*
+supabase/.temp/
+.supabase-home/
+.tmp*/
+.wrangler/
+.wrangler-artifacts/
+.wrangler-logs/
+supabase/.branches/

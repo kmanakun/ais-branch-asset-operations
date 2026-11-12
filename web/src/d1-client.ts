@@ -1,0 +1,301 @@
+// Client library for Cloudflare D1 Native Hono API
+// Zero-Baht Architecture for AIS Scanner Replacement Project
+
+const DEV_EMAIL_KEY = 'ais_dev_user_email'
+
+export function getDevEmail(): string {
+  if (typeof window === 'undefined') return 'admin@sym.co.th'
+  return localStorage.getItem(DEV_EMAIL_KEY) || 'admin@sym.co.th'
+}
+
+export function setDevEmail(email: string): void {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(DEV_EMAIL_KEY, email)
+  }
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers || {})
+  headers.set('Content-Type', 'application/json')
+  
+  // แนบ Dev user email
+  const devEmail = getDevEmail()
+  if (devEmail) {
+    headers.set('x-dev-user-email', devEmail)
+  }
+
+  const response = await fetch(path, {
+    ...options,
+    headers,
+  })
+
+  if (!response.ok) {
+    let errorMessage = `HTTP Error ${response.status}`
+    try {
+      const errorJson = await response.json()
+      if (errorJson.error || errorJson.message) {
+        errorMessage = errorJson.error || errorJson.message
+      }
+    } catch {
+      // ignore
+    }
+    throw new Error(errorMessage)
+  }
+
+  return response.json() as Promise<T>
+}
+
+export const d1Api = {
+  // 1. ตรวจสอบสถานะ API
+  getHealth: () => request<{ status: string; database: string; stats: any }>('/api/health'),
+
+  // 2. ผู้ใช้ปัจจุบัน
+  getMe: () => request<{ email: string; role: string; full_name: string }>('/api/auth/me'),
+
+  // 3. Dashboard สรุปความคืบหน้า
+  getDashboard: () => request<{
+    summary: {
+      total_scanners: number
+      total_branches: number
+      open: number
+      on_process: number
+      awaiting_customer: number
+      delivered: number
+    }
+    provinces: Array<{
+      province: string
+      branch_count: number
+      scanner_count: number
+      delivered_count: number
+      awaiting_customer_count: number
+    }>
+    role: string
+  }>('/api/dashboard/summary'),
+
+  // 4. รายการสาขา (ค้นหา, กรองจังหวัด, กรองหมายเหตุที่อยู่)
+  getBranches: (params: { province?: string; search?: string; has_address_note?: boolean } = {}) => {
+    const q = new URLSearchParams()
+    if (params.province) q.set('province', params.province)
+    if (params.search) q.set('search', params.search)
+    if (params.has_address_note) q.set('has_address_note', 'true')
+    return request<{
+      branches: Array<{
+        id: string
+        location_code: string
+        loc_bld: string
+        address: string | null
+        province: string
+        district: string | null
+        subdistrict: string | null
+        postal_code: string | null
+        phone: string | null
+        install_type: string | null
+        address_note: string | null
+        scanner_count: number
+        delivered_count: number
+        awaiting_customer_count: number
+      }>
+      is_customer_reviewer: boolean
+    }>(`/api/branches?${q.toString()}`)
+  },
+
+  // 5. รายละเอียดสาขา & รายการเครื่อง
+  getBranchDetail: (branchId: string) => request<{
+    branch: any
+    scanners: Array<{
+      scanner_id: string
+      com_sn: string
+      hw_name: string | null
+      brand: string | null
+      model_name: string | null
+      com_id: string | null
+      model_id: string | null
+      com_years: string | null
+      task_id: string | null
+      task_status: string | null
+      outcome: string | null
+      observed_serial: string | null
+      new_serial_number: string | null
+      started_at: string | null
+      started_by?: string | null
+      closeout_submitted_at: string | null
+      admin_accepted_at: string | null
+      customer_accepted_at: string | null
+      customer_rejected_at: string | null
+      customer_reject_reason: string | null
+      version: number | null
+    }>
+  }>(`/api/branches/${branchId}`),
+
+  // 5.1 รายการเครื่องสแกนเนอร์ (Assets Register)
+  getScanners: (params: { province?: string; search?: string; status?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.province) q.set('province', params.province)
+    if (params.search) q.set('search', params.search)
+    if (params.status) q.set('status', params.status)
+    if (params.limit) q.set('limit', String(params.limit))
+    if (params.offset) q.set('offset', String(params.offset))
+    return request<{
+      rows: any[]
+      total: number
+      offset: number
+      limit: number
+    }>(`/api/scanners?${q.toString()}`)
+  },
+
+  // 5.2 รายการคิวรอตรวจรับ (Pending Reviews Queue)
+  getPendingTasks: (search?: string) => {
+    const q = new URLSearchParams()
+    if (search) q.set('search', search)
+    return request<{
+      tasks: any[]
+      role: string
+    }>(`/api/tasks/pending?${q.toString()}`)
+  },
+
+  // 6. นำเข้าทะเบียน Master Register จาก Detail1
+  importRegister: (rows: any[], sourceName = 'Detail1.xlsx') => request<{
+    success: boolean
+    message: string
+    branches_count: number
+    warnings_count: number
+  }>('/api/register/import', {
+    method: 'POST',
+    body: JSON.stringify({ rows, source_name: sourceName }),
+  }),
+
+  // 7. ช่างกดเริ่มงาน Onsite กับเครื่องสแกนเนอร์
+  startScannerWork: (scannerId: string) => request<{
+    success: boolean
+    task_id: string
+    status: string
+  }>('/api/tasks/start', {
+    method: 'POST',
+    body: JSON.stringify({ scanner_id: scannerId }),
+  }),
+
+  // 8. อัปโหลดรูปภาพหลักฐาน (Cloudflare R2)
+  uploadEvidence: (taskId: string, evidenceType: string, fileBase64: string, mimeType = 'image/jpeg') => request<{
+    success: boolean
+    evidence_id: string
+    storage_path: string
+    byte_size: number
+  }>(`/api/tasks/${taskId}/evidence`, {
+    method: 'POST',
+    body: JSON.stringify({ evidence_type: evidenceType, file_base64: fileBase64, mime_type: mimeType }),
+  }),
+
+  // 8.1 เรียกดูรายการหลักฐานภาพถ่าย
+  getTaskEvidence: (taskId: string) => request<{
+    evidence: Array<{
+      id: string
+      replacement_task_id: string
+      evidence_type: string
+      storage_path: string
+      byte_size: number
+      mime_type: string
+      role_assigned: string
+      created_at: string
+    }>
+  }>(`/api/tasks/${taskId}/evidence`),
+
+  // 9. ส่งมอบผลงาน Closeout
+  submitCloseout: (taskId: string, payload: {
+    new_serial_number?: string
+    observed_serial?: string
+    notes?: string
+    outcome: string
+    version: number
+  }) => request<{
+    success: boolean
+    status: string
+  }>(`/api/tasks/${taskId}/closeout`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // 10. ด่านที่ 1: SYM Admin ตรวจสอบผลงาน Onsite
+  symVerify: (taskId: string, decision: 'pass' | 'reject', reason?: string, version = 1) => request<{
+    success: boolean
+    status: string
+  }>('/api/review/sym-verify', {
+    method: 'POST',
+    body: JSON.stringify({ task_id: taskId, decision, reason, version }),
+  }),
+
+  // 11. ด่านที่ 2: Gable Customer ตรวจรับงานแบบ Batch รวมต่อสาขา (1 ลายเซ็นรับทั้ง Shop)
+  customerBatchAccept: (branchId: string, taskIds: string[], signatureBase64: string) => request<{
+    success: boolean
+    status: string
+    count: number
+    message: string
+  }>('/api/review/customer-batch-accept', {
+    method: 'POST',
+    body: JSON.stringify({ branch_id: branchId, task_ids: taskIds, signature_base64: signatureBase64 }),
+  }),
+
+  // 12. Gable ปฏิเสธงาน (ส่งตรงกลับช่าง)
+  customerReject: (taskId: string, reason: string) => request<{
+    success: boolean
+    status: string
+    message: string
+  }>('/api/review/customer-reject', {
+    method: 'POST',
+    body: JSON.stringify({ task_id: taskId, reason }),
+  }),
+
+  // 13. Export Raw Data ภาพรวมทั้งหมด
+  getExportRawData: () => request<{
+    export_timestamp: string
+    total_records: number
+    data: any[]
+  }>('/api/export/raw-data'),
+
+  // 13.1 ประวัติการนำเข้าไฟล์ทะเบียน
+  getImportHistory: () => request<{
+    rows: any[]
+  }>('/api/register/import/history'),
+
+  // 14. รายงานเครื่องนอกทะเบียน
+  reportDiscovery: (payload: { branch_id: string; serial_number: string; observed_model?: string; notes?: string }) => request<{
+    success: boolean
+    id: string
+  }>('/api/discovery', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // 15. คิวการตรวจรับเครื่องนอกทะเบียนสำหรับ Admin
+  getDiscoveryQueue: (limit = 50, offset = 0) => request<{
+    rows: any[]
+    total: number
+    offset: number
+    limit: number
+  }>(`/api/discovery/queue?limit=${limit}&offset=${offset}`),
+
+  // 16. Admin ตรวจสอบและอนุมัติ/ปฏิเสธเครื่องนอกทะเบียน
+  reviewDiscovery: (id: string, decision: 'approve' | 'reject', reviewNote?: string) => request<{
+    success: boolean
+    status: string
+  }>(`/api/discovery/${id}/review`, {
+    method: 'POST',
+    body: JSON.stringify({ decision, review_note: reviewNote }),
+  }),
+
+  // 17. ดำเนินการเกี่ยวกับสถานะงาน (start / block / resume / cancel)
+  taskAction: (taskId: string, action: 'start' | 'block' | 'resume' | 'cancel', reason?: string, version?: number) => request<{
+    success: boolean
+    status: string
+  }>(`/api/tasks/${taskId}/action`, {
+    method: 'POST',
+    body: JSON.stringify({ action, reason, version }),
+  }),
+
+  // 18. ลบภาพหลักฐานจาก Storage
+  deleteEvidence: (taskId: string, slot: string) => request<{
+    success: boolean
+    message: string
+  }>(`/api/tasks/${taskId}/evidence/${slot}`, {
+    method: 'DELETE',
+  }),
+}

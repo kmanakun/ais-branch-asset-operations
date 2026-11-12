@@ -1,0 +1,50 @@
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.local
+/web/wrangler.jsonc
+
+# Imported business data and backups
+*.xlsx
+*.xls
+*.csv
+*.7z
+*.dump
+*.backup
+*.sql.gz
+**/backups/
+
+# Generated and machine-specific files
+**/node_modules/
+**/dist/
+**/.wrangler/
+**/.wrangler-artifacts/
+**/.wrangler-logs/
+**/.tmp*/
+**/.supabase-home/
+**/supabase/.temp/
+**/supabase/.branches/
+**/telemetry.json
+*.log
+**/.asset-completion.jwt
+/.codex/
+/.agents/
+/ais-publish-stage.git/
+**/.deploy-main/
+**/.word-review-temp/
+**/.audit-*.png
+
+# Internal production evidence and recovery notes; never publish these locally maintained reports
+/docs/v1-release-acceptance.md
+/docs/security-review.md
+/docs/recovery-runbook.md
+
+# Local production recovery helpers
+/web/Run AIS Backup.cmd
+/web/scripts/backup-production.ps1
+
+/docs/word-review-20261111/

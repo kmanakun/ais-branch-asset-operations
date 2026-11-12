@@ -1,0 +1,5 @@
+create index task_evidence_delete_reservations_requested_by_idx
+  on app_private.task_evidence_delete_reservations (requested_by);
+
+create index task_evidence_removal_history_removed_by_idx
+  on app_private.task_evidence_removal_history (removed_by);
