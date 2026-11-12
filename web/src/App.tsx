@@ -19,6 +19,7 @@ import {
   MapPin,
   Menu,
   Printer,
+  ScanBarcode,
   Search,
   ShieldCheck,
   Users,
@@ -34,6 +35,7 @@ import { groupRowsByBranch, groupRowsByProvince, ProvinceCardGroup } from './pro
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
 import { d1Api, getDevEmail, setDevEmail } from './d1-client'
+import { BarcodeScannerModal } from './BarcodeScannerModal'
 
 type UserContext = {
   email?: string
@@ -1157,6 +1159,7 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
   const [selectedAsset, setSelectedAsset] = useState<Record<string, unknown> | null>(null)
   const [reportBranch, setReportBranch] = useState<BranchReference | null>(null)
   const [focusMessage, setFocusMessage] = useState('')
+  const [scanSearchOpen, setScanSearchOpen] = useState(false)
 
   useEffect(() => {
     if (!focusSerial || loading) return
@@ -1178,7 +1181,29 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
     <div className="asset-summary"><div><span>Scanner ในผลลัพธ์</span><strong>{demo ? filteredRows.length.toLocaleString('th-TH') : total.toLocaleString('th-TH')}</strong></div><div><span>จังหวัดในผลลัพธ์</span><strong>{demo ? new Set(filteredRows.map(row => String(row.province || '').trim()).filter(Boolean)).size.toLocaleString('th-TH') : provinceTotal.toLocaleString('th-TH')}</strong></div><div><span>หน้าปัจจุบัน</span><strong>{demo ? 'ตัวอย่าง' : (page + 1).toLocaleString('th-TH')}</strong></div></div>
     <section className="panel list-panel">
       <div className="asset-register-toolbar">
-        <label className="search-box"><Search size={17} /><input aria-label="ค้นหาสาขา LocationCode รุ่น หรือ Serial" value={search} onChange={event => { setFocusMessage(''); if (focusSerial) onFocusResolved(); setSearch(event.target.value) }} placeholder="ค้นหาสาขา LocationCode รุ่น หรือ Serial" /></label>
+        <label className="search-box">
+          <Search size={17} />
+          <input
+            aria-label="ค้นหาสาขา LocationCode รุ่น หรือ Serial"
+            value={search}
+            onChange={event => { setFocusMessage(''); if (focusSerial) onFocusResolved(); setSearch(event.target.value) }}
+            placeholder="ค้นหาสาขา LocationCode รุ่น หรือ Serial"
+          />
+          <button
+            type="button"
+            className="icon-button"
+            title="สแกนบาร์โค้ดค้นหา"
+            aria-label="สแกนบาร์โค้ดค้นหา"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setScanSearchOpen(true)
+            }}
+            style={{ padding: '4px', marginLeft: 'auto' }}
+          >
+            <ScanBarcode size={17} />
+          </button>
+        </label>
         <label className="asset-filter-field"><span>จังหวัด</span><select aria-label="กรองตามจังหวัด" value={provinceFilter} onChange={event => setProvinceFilter(event.target.value)}><option value="">ทุกจังหวัด</option>{provinceOptions.map(province => <option value={province} key={province}>{province}</option>)}</select></label>
         <label className="asset-filter-field"><span>สถานะงาน</span><select aria-label="กรองตามสถานะงาน" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">ทุกสถานะ</option><option value="open">รอเปิดใบงาน</option><option value="on_process">On Process · กำลังดำเนินการ</option><option value="complete">Complete · เสร็จสมบูรณ์</option></select></label>
         {(provinceFilter || statusFilter !== 'all' || search) && <button type="button" className="secondary-button asset-filter-reset" onClick={() => { setProvinceFilter(''); setStatusFilter('all'); setSearch(''); setPage(0) }}>ล้างตัวกรอง</button>}
@@ -1213,6 +1238,18 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
     </section>
     {selectedAsset && <AssetDetailDialog asset={selectedAsset} role={role} demo={demo} onClose={() => setSelectedAsset(null)} onUpdated={onTaskUpdated} />}
     {reportBranch && <ScannerDiscoveryDialog branch={reportBranch} onClose={() => setReportBranch(null)} onReported={() => { setReportBranch(null); onTaskUpdated('refresh') }} />}
+    <BarcodeScannerModal
+      isOpen={scanSearchOpen}
+      title="สแกนบาร์โค้ดค้นหาเครื่อง"
+      subtitle="สแกน Serial Number หรือ LocationCode เพื่อค้นหาในทะเบียน"
+      onScan={value => {
+        setFocusMessage('')
+        if (focusSerial) onFocusResolved()
+        setSearch(value)
+        setScanSearchOpen(false)
+      }}
+      onClose={() => setScanSearchOpen(false)}
+    />
   </>
 }
 
@@ -2272,6 +2309,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
   const [cancelReason, setCancelReason] = useState('')
   const [blockReason, setBlockReason] = useState('')
   const [newSerialInput, setNewSerialInput] = useState('')
+  const [showNewSnScanner, setShowNewSnScanner] = useState(false)
   const [observedSerialInput, setObservedSerialInput] = useState('')
   const [observedModelInput, setObservedModelInput] = useState('')
   const [exceptionReasonInput, setExceptionReasonInput] = useState('')
@@ -2412,7 +2450,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
       <div className="work-order-layout">
         <div className="work-order-main">
           <section className="detail-section"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
-          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <label className="work-order-new-serial-input"><span>SN เครื่องใหม่ *</span><input aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่" /></label> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
+          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span>SN เครื่องใหม่ *</span><button type="button" className="secondary-button" style={{ padding: '2px 8px', fontSize: '12px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' }} onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</button></div><input aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
           <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} /><DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} /><DetailField label="รุ่นเครื่องที่พบ" value={task.observed_model} /><DetailField label="ผลการติดตั้งและทดสอบ" value={installResult || 'ยังไม่มีข้อมูล'} /><DetailField label="สถานะเครื่องเดิม" value={recordedOldStatus ? oldStatusLabels[String(recordedOldStatus)] || String(recordedOldStatus) : 'ยังไม่มีข้อมูล'} /><DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || 'ยังไม่มีข้อมูล'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
           {reviews.length > 0 && (
@@ -2485,6 +2523,17 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
         </aside>
       </div>
       </div>
+      <BarcodeScannerModal
+        isOpen={showNewSnScanner}
+        title="สแกน Serial เครื่องใหม่"
+        subtitle="จัดบาร์โค้ดบนกล่องหรือเครื่องสแกนเนอร์ให้อยู่ในกรอบ"
+        onScan={value => {
+          setNewSerialInput(value)
+          setActionError('')
+          setShowNewSnScanner(false)
+        }}
+        onClose={() => setShowNewSnScanner(false)}
+      />
     </section>
   </div>
 }

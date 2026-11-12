@@ -164,19 +164,19 @@ app.get('/dashboard/summary', async (c) => {
     totalDelivered += Number(p.delivered_count) || 0
   }
 
-  // 7-day weekly activity
+  // 7-day weekly activity (จัดกลุ่มตามวันตามเวลาประเทศไทย UTC+7)
   const [openedRes, completedRes] = await Promise.all([
     c.env.DB.prepare(`
-      SELECT date(created_at) as date, COUNT(*) as count 
+      SELECT date(datetime(created_at, '+7 hours')) as date, COUNT(*) as count 
       FROM replacement_tasks 
-      WHERE created_at >= date('now', '-7 days') 
-      GROUP BY date(created_at)
+      WHERE created_at >= datetime('now', '-7 days') 
+      GROUP BY date(datetime(created_at, '+7 hours'))
     `).all<{ date: string; count: number }>(),
     c.env.DB.prepare(`
-      SELECT date(customer_accepted_at) as date, COUNT(*) as count 
+      SELECT date(datetime(customer_accepted_at, '+7 hours')) as date, COUNT(*) as count 
       FROM replacement_tasks 
-      WHERE customer_accepted_at IS NOT NULL AND customer_accepted_at >= date('now', '-7 days') 
-      GROUP BY date(customer_accepted_at)
+      WHERE customer_accepted_at IS NOT NULL AND customer_accepted_at >= datetime('now', '-7 days') 
+      GROUP BY date(datetime(customer_accepted_at, '+7 hours'))
     `).all<{ date: string; count: number }>()
   ])
 
@@ -184,9 +184,10 @@ app.get('/dashboard/summary', async (c) => {
   const completedMap = new Map((completedRes.results || []).map(r => [r.date, r.count]))
 
   const weeklyActivity: Array<{ date: string; opened: number; completed: number }> = []
+  const nowUtc = Date.now()
+  const bkkOffsetMs = 7 * 60 * 60 * 1000
   for (let i = 6; i >= 0; i--) {
-    const d = new Date()
-    d.setDate(d.getDate() - i)
+    const d = new Date(nowUtc + bkkOffsetMs - i * 24 * 60 * 60 * 1000)
     const dateStr = d.toISOString().slice(0, 10)
     weeklyActivity.push({
       date: dateStr,
