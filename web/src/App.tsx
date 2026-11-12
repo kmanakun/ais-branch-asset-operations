@@ -1285,6 +1285,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [selectedAdminTask, setSelectedAdminTask] = useState<Record<string, unknown> | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [actionError, setActionError] = useState('')
   const sigPadRef = useRef<SignaturePadHandle>(null)
 
   useEffect(() => {
@@ -1328,6 +1329,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
   }, [tasks, isCustomerReviewer])
 
   const handleOpenBatchAccept = (group: { id: string; name: string; code: string; province: string; tasks: any[] }) => {
+    setActionError('')
     setBatchBranch(group)
     setSelectedTaskIds(group.tasks.map(t => String(t.task_id || t.id)))
   }
@@ -1342,6 +1344,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
     if (!batchBranch || selectedTaskIds.length === 0) return
     if (!sigPadRef.current) return
     setSubmitting(true)
+    setActionError('')
     try {
       const blob = await sigPadRef.current.exportJpeg()
       const reader = new FileReader()
@@ -1358,7 +1361,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
       setReload(r => r + 1)
       onUpdated('accept')
     } catch (err: any) {
-      alert('ตรวจรับงานไม่สำเร็จ: ' + err.message)
+      setActionError(err.message || 'ตรวจรับงานไม่สำเร็จ')
     } finally {
       setSubmitting(false)
     }
@@ -1368,6 +1371,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
     if (!rejectingTask || !rejectReason.trim()) return
     const taskId = String(rejectingTask.task_id || rejectingTask.id)
     setSubmitting(true)
+    setActionError('')
     try {
       if (isCustomerReviewer) {
         await d1Api.customerReject(taskId, rejectReason.trim())
@@ -1379,7 +1383,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
       setReload(r => r + 1)
       onUpdated('reject')
     } catch (err: any) {
-      alert('ปฏิเสธงานไม่สำเร็จ: ' + err.message)
+      setActionError(err.message || 'ปฏิเสธงานไม่สำเร็จ')
     } finally {
       setSubmitting(false)
     }
@@ -1388,19 +1392,21 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
   const handleSymPass = async (task: Record<string, unknown>) => {
     const taskId = String(task.task_id || task.id)
     setSubmitting(true)
+    setActionError('')
     try {
       await d1Api.symVerify(taskId, 'pass', undefined, Number(task.version || 1))
       setSelectedAdminTask(null)
       setReload(r => r + 1)
       onUpdated('accept')
     } catch (err: any) {
-      alert('ตรวจรับงานไม่สำเร็จ: ' + err.message)
+      setActionError(err.message || 'ตรวจรับงานไม่สำเร็จ')
     } finally {
       setSubmitting(false)
     }
   }
 
   const handleOpenEvidence = async (task: Record<string, unknown>) => {
+    setActionError('')
     setViewingEvidenceTask(task)
     setEvidenceLoading(true)
     try {
@@ -1453,6 +1459,12 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
             รีเฟรช
           </button>
         </form>
+
+        {actionError && !batchBranch && !rejectingTask && !selectedAdminTask && !viewingEvidenceTask && (
+          <div className="form-error" role="alert" style={{ marginBottom: '12px' }}>
+            {actionError}
+          </div>
+        )}
 
         {loading ? (
           <EmptyState compact loading />
@@ -1574,15 +1586,20 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
 
       {/* Modal: Batch Acceptance by Gable */}
       {batchBranch && (
-        <div className="handover-modal-backdrop" onClick={() => setBatchBranch(null)}>
+        <div className="handover-modal-backdrop" onClick={() => { setBatchBranch(null); setActionError('') }}>
           <div className="handover-modal-content" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
             <div className="handover-modal-bar">
               <strong>ตรวจรับมอบงานแบบรวมทั้งสาขา (Batch Accept)</strong>
-              <button type="button" className="icon-button" onClick={() => setBatchBranch(null)}>
+              <button type="button" className="icon-button" onClick={() => { setBatchBranch(null); setActionError('') }}>
                 <X size={16} />
               </button>
             </div>
             <div style={{ padding: '20px' }}>
+              {actionError && (
+                <div className="form-error" role="alert" style={{ marginBottom: '14px' }}>
+                  {actionError}
+                </div>
+              )}
               <div style={{ marginBottom: '16px' }}>
                 <h3 style={{ margin: '0 0 4px', fontSize: '16px' }}>{batchBranch.name}</h3>
                 <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
@@ -1621,15 +1638,20 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
 
       {/* Modal: Rejection Reason */}
       {rejectingTask && (
-        <div className="handover-modal-backdrop" onClick={() => setRejectingTask(null)}>
+        <div className="handover-modal-backdrop" onClick={() => { setRejectingTask(null); setActionError('') }}>
           <div className="handover-modal-content" style={{ maxWidth: '500px' }} onClick={e => e.stopPropagation()}>
             <div className="handover-modal-bar">
               <strong>ระบุเหตุผลการปฏิเสธงาน (Reject)</strong>
-              <button type="button" className="icon-button" onClick={() => setRejectingTask(null)}>
+              <button type="button" className="icon-button" onClick={() => { setRejectingTask(null); setActionError('') }}>
                 <X size={16} />
               </button>
             </div>
             <div style={{ padding: '20px' }}>
+              {actionError && (
+                <div className="form-error" role="alert" style={{ marginBottom: '14px' }}>
+                  {actionError}
+                </div>
+              )}
               <p style={{ margin: '0 0 10px', fontSize: '13px', color: '#475569' }}>
                 ใบงานจะถูกส่งกลับไปให้ช่างแก้ไขหน้างานโดยตรง โปรดระบุข้อบกพร่องที่ต้องแก้ไข:
               </p>
@@ -1665,6 +1687,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
           onClick={() => {
             setViewingEvidenceTask(null)
             setSelectedAdminTask(null)
+            setActionError('')
           }}
         >
           <div className="handover-modal-content" style={{ maxWidth: '720px' }} onClick={e => e.stopPropagation()}>
@@ -1676,12 +1699,18 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                 onClick={() => {
                   setViewingEvidenceTask(null)
                   setSelectedAdminTask(null)
+                  setActionError('')
                 }}
               >
                 <X size={16} />
               </button>
             </div>
             <div style={{ padding: '20px' }}>
+              {actionError && (
+                <div className="form-error" role="alert" style={{ marginBottom: '14px' }}>
+                  {actionError}
+                </div>
+              )}
               {(() => {
                 const currentTask = selectedAdminTask || viewingEvidenceTask!
                 return (

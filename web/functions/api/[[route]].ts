@@ -41,9 +41,9 @@ app.use('*', async (c, next) => {
     email = authHeader.slice(7)
   }
 
-  // 3. ค่าเริ่มต้นสำหรับ Local Development ถ้าไม่ได้ส่งอะไรมา
+  // 3. ปฏิเสธคำขอที่ไม่มีข้อมูลผู้ใช้งาน (Authentication Required)
   if (!email) {
-    email = 'admin@sym.co.th'
+    return c.json({ error: 'กรุณาเข้าสู่ระบบ หรือเลือกสิทธิ์ผู้ใช้งาน (Authentication Required)' }, 401)
   }
 
   // 4. ตรวจสอบกับตาราง google_signin_allowlist ใน Cloudflare D1
@@ -106,12 +106,17 @@ app.get('/dashboard/summary', async (c) => {
     SELECT 
       COUNT(s.id) as total_scanners,
       COUNT(DISTINCT s.branch_id) as total_branches,
-      SUM(CASE WHEN t.status IS NULL OR t.status = 'open' THEN 1 ELSE 0 END) as open_count,
-      SUM(CASE WHEN t.status IN ('in_progress', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception') THEN 1 ELSE 0 END) as on_process_count,
+      SUM(CASE WHEN t.status IS NULL OR t.status = 'open' OR t.status = 'cancelled' THEN 1 ELSE 0 END) as open_count,
+      SUM(CASE WHEN t.status IN ('in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception') THEN 1 ELSE 0 END) as on_process_count,
       SUM(CASE WHEN t.status = 'awaiting_customer_acceptance' THEN 1 ELSE 0 END) as awaiting_customer_count,
       SUM(CASE WHEN t.status = 'delivered' THEN 1 ELSE 0 END) as delivered_count
     FROM scanner_assets s
-    LEFT JOIN replacement_tasks t ON t.scanner_asset_id = s.id
+    LEFT JOIN replacement_tasks t ON t.id = (
+      SELECT id FROM replacement_tasks 
+      WHERE scanner_asset_id = s.id 
+      ORDER BY created_at DESC, rowid DESC 
+      LIMIT 1
+    )
   `).first<{
     total_scanners: number
     total_branches: number
@@ -130,7 +135,12 @@ app.get('/dashboard/summary', async (c) => {
       SUM(CASE WHEN t.status = 'awaiting_customer_acceptance' THEN 1 ELSE 0 END) as awaiting_customer_count
     FROM branches b
     LEFT JOIN scanner_assets s ON s.branch_id = b.id
-    LEFT JOIN replacement_tasks t ON t.scanner_asset_id = s.id
+    LEFT JOIN replacement_tasks t ON t.id = (
+      SELECT id FROM replacement_tasks 
+      WHERE scanner_asset_id = s.id 
+      ORDER BY created_at DESC, rowid DESC 
+      LIMIT 1
+    )
     GROUP BY b.province
     ORDER BY b.province COLLATE NOCASE ASC
   `).all()
@@ -245,7 +255,12 @@ app.get('/branches/:id', async (c) => {
       t.customer_reject_reason,
       t.version
     FROM scanner_assets s
-    LEFT JOIN replacement_tasks t ON t.scanner_asset_id = s.id
+    LEFT JOIN replacement_tasks t ON t.id = (
+      SELECT id FROM replacement_tasks 
+      WHERE scanner_asset_id = s.id 
+      ORDER BY created_at DESC, rowid DESC 
+      LIMIT 1
+    )
     WHERE s.branch_id = ?
     ORDER BY s.com_sn ASC
   `
@@ -320,7 +335,12 @@ app.get('/scanners', async (c) => {
       COALESCE(t.version, 1) as version
     FROM scanner_assets s
     JOIN branches b ON b.id = s.branch_id
-    LEFT JOIN replacement_tasks t ON t.scanner_asset_id = s.id
+    LEFT JOIN replacement_tasks t ON t.id = (
+      SELECT id FROM replacement_tasks 
+      WHERE scanner_asset_id = s.id 
+      ORDER BY created_at DESC, rowid DESC 
+      LIMIT 1
+    )
     WHERE 1=1
   `
   const params: any[] = []
@@ -332,9 +352,9 @@ app.get('/scanners', async (c) => {
 
   if (status && status !== 'all') {
     if (status === 'open') {
-      sql += " AND (t.status IS NULL OR t.status = 'open')"
+      sql += " AND (t.status IS NULL OR t.status = 'open' OR t.status = 'cancelled')"
     } else if (status === 'on_process') {
-      sql += " AND t.status IN ('in_progress', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception')"
+      sql += " AND t.status IN ('in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception')"
     } else if (status === 'complete') {
       sql += " AND t.status = 'delivered'"
     }
@@ -698,29 +718,51 @@ app.post('/tasks/start', async (c) => {
   }
 
   // ค้นหาหรือสร้าง Replacement Task
-  let task = await c.env.DB.prepare('SELECT id, status, version FROM replacement_tasks WHERE scanner_asset_id = ?').bind(scanner.id).first<{ id: string; status: string; version: number }>()
+  let task = await c.env.DB.prepare(
+    'SELECT id, status, version FROM replacement_tasks WHERE scanner_asset_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
+  ).bind(scanner.id).first<{ id: string; status: string; version: number }>()
   
-  if (!task) {
-    const taskId = `tsk-${scanner.id}`
-    await c.env.DB.prepare(`
-      INSERT INTO replacement_tasks (
-        id, branch_work_order_id, scanner_asset_id, status, outcome, 
-        started_at, started_by, version
-      ) VALUES (?, ?, ?, 'in_progress', 'replaced', datetime('now'), ?, 1)
-    `).bind(taskId, workOrder.id, scanner.id, user.email).run()
-    
-    task = { id: taskId, status: 'in_progress', version: 1 }
-  } else if (task.status === 'open') {
-    await c.env.DB.prepare(`
-      UPDATE replacement_tasks 
-      SET status = 'in_progress', started_at = datetime('now'), started_by = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).bind(user.email, task.id).run()
+  if (task) {
+    if (task.status === 'delivered') {
+      return c.json({ error: 'เครื่องสแกนเนอร์นี้ได้รับการเปลี่ยนและตรวจรับเสร็จสมบูรณ์แล้ว' }, 400)
+    }
+    if (['awaiting_admin_acceptance', 'awaiting_customer_acceptance'].includes(task.status)) {
+      return c.json({ error: 'เครื่องสแกนเนอร์นี้อยู่ระหว่างขั้นตอนรอการตรวจรับ' }, 400)
+    }
+    if (['in_progress', 'blocked'].includes(task.status)) {
+      return c.json({
+        success: true,
+        task_id: task.id,
+        status: task.status
+      })
+    }
+    if (task.status === 'open') {
+      await c.env.DB.prepare(`
+        UPDATE replacement_tasks 
+        SET status = 'in_progress', started_at = datetime('now'), started_by = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).bind(user.email, task.id).run()
+
+      return c.json({
+        success: true,
+        task_id: task.id,
+        status: 'in_progress'
+      })
+    }
   }
+
+  // สร้าง Task ใหม่สำหรับกรณีที่ยังไม่มีงาน หรือกรณีงานเดิมถูกยกเลิก (cancelled)
+  const taskId = task ? `tsk-${scanner.id}-${Date.now()}` : `tsk-${scanner.id}`
+  await c.env.DB.prepare(`
+    INSERT INTO replacement_tasks (
+      id, branch_work_order_id, scanner_asset_id, status, outcome, 
+      started_at, started_by, version
+    ) VALUES (?, ?, ?, 'in_progress', 'replaced', datetime('now'), ?, 1)
+  `).bind(taskId, workOrder.id, scanner.id, user.email).run()
 
   return c.json({
     success: true,
-    task_id: task.id,
+    task_id: taskId,
     status: 'in_progress'
   })
 })
@@ -749,10 +791,15 @@ app.post('/tasks/:id/evidence', async (c) => {
     return c.json({ error: 'ข้อมูลภาพถ่ายหรือประเภทหลักฐานไม่ครบถ้วน' }, 400)
   }
 
-  const binaryString = atob(body.file_base64.replace(/^data:image\/\w+;base64,/, ''))
-  const bytes = new Uint8Array(binaryString.length)
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i)
+  let bytes: Uint8Array
+  try {
+    const binaryString = atob(body.file_base64.replace(/^data:image\/\w+;base64,/, ''))
+    bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+  } catch {
+    return c.json({ error: 'ข้อมูลภาพถ่าย Base64 ไม่ถูกต้อง' }, 400)
   }
 
   const storageKey = `tasks/${taskId}/${body.evidence_type}_${Date.now()}.jpg`
@@ -816,13 +863,25 @@ app.get('/evidence/:key{.*}', async (c) => {
     headers.set('etag', object.httpEtag)
     return new Response(object.body, { headers })
   }
-  return c.json({ error: 'Storage not enabled' }, 404)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="100%" height="100%" fill="#f1f5f9"/><text x="50%" y="45%" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="14" font-weight="600">บันทึกหลักฐานใน D1 แล้ว</text><text x="50%" y="60%" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="12">Cloudflare R2</text></svg>`
+  return new Response(svg, {
+    headers: {
+      'Content-Type': 'image/svg+xml; charset=utf-8',
+      'Cache-Control': 'public, max-age=60'
+    }
+  })
 })
 
 // 8.3 ลบภาพหลักฐานจาก Storage และ D1
 app.delete('/tasks/:id/evidence/:slot', async (c) => {
   const taskId = c.req.param('id')
   const slot = c.req.param('slot')
+
+  const task = await c.env.DB.prepare('SELECT id, status FROM replacement_tasks WHERE id = ?').bind(taskId).first<{ id: string; status: string }>()
+  if (!task) return c.json({ error: 'ไม่พบใบงาน' }, 404)
+  if (['awaiting_customer_acceptance', 'delivered', 'completed'].includes(task.status)) {
+    return c.json({ error: 'ใบงานนี้ได้รับการลงนามหรือตรวจรับแล้ว ระบบล็อกข้อมูลหลักฐานป้องกันการแก้ไข' }, 400)
+  }
 
   const existing = await c.env.DB.prepare(
     'SELECT id, storage_path FROM replacement_task_evidence WHERE replacement_task_id = ? AND evidence_type = ?'
@@ -934,11 +993,15 @@ app.post('/tasks/:id/action', async (c) => {
     return c.json({ error: 'Action ไม่ถูกต้อง' }, 400)
   }
 
-  await c.env.DB.prepare(`
+  const resAction = await c.env.DB.prepare(`
     UPDATE replacement_tasks
     SET status = ?, notes = ?, version = version + 1, updated_at = datetime('now')
-    WHERE id = ?
-  `).bind(nextStatus, notes, taskId).run()
+    WHERE id = ? AND (? IS NULL OR version = ?)
+  `).bind(nextStatus, notes, taskId, typeof version === 'number' ? version : null, typeof version === 'number' ? version : null).run()
+
+  if (resAction.meta.changes === 0) {
+    return c.json({ error: 'ไม่สามารถอัปเดตใบงานได้ ข้อมูลอาจถูกแก้ไขจากอีกหน้าจอ' }, 409)
+  }
 
   return c.json({ success: true, status: nextStatus })
 })
@@ -961,6 +1024,21 @@ app.post('/review/sym-verify', async (c) => {
     return c.json({ error: 'กรณีปฏิเสธงาน ต้องระบุเหตุผลข้อบกพร่อง' }, 400)
   }
 
+  // ตรวจสอบหลักการ 4-Eyes: ห้ามผู้อนุมัติเป็นคนเดียวกับผู้ปิดงานหรือผู้เริ่มงาน
+  const currentTask = await c.env.DB.prepare(
+    'SELECT started_by, closeout_submitted_by, status FROM replacement_tasks WHERE id = ?'
+  ).bind(task_id).first<{ started_by?: string; closeout_submitted_by?: string; status: string }>()
+
+  if (!currentTask) {
+    return c.json({ error: 'ไม่พบใบงาน' }, 404)
+  }
+
+  if (decision === 'pass') {
+    if (currentTask.closeout_submitted_by === user.email || currentTask.started_by === user.email) {
+      return c.json({ error: 'ตามหลักการตรวจสอบ 4-Eyes ผู้ปิดงานหรือเริ่มงานไม่สามารถเซ็นตรวจรับงานของตนเองได้ (Separation of Duties)' }, 403)
+    }
+  }
+
   const nextStatus = decision === 'pass' ? 'awaiting_customer_acceptance' : 'in_progress'
 
   const res = await c.env.DB.prepare(`
@@ -970,7 +1048,7 @@ app.post('/review/sym-verify', async (c) => {
       admin_accepted_by = CASE WHEN ? = 'pass' THEN ? ELSE NULL END,
       version = version + 1,
       updated_at = datetime('now')
-    WHERE id = ? AND version = ?
+    WHERE id = ? AND version = ? AND status IN ('awaiting_admin_acceptance', 'pending_exception')
   `).bind(
     nextStatus,
     decision,
@@ -1071,7 +1149,7 @@ app.post('/review/customer-reject', async (c) => {
     return c.json({ error: 'การปฏิเสธงานต้องระบุเหตุผลข้อบกพร่อง' }, 400)
   }
 
-  await c.env.DB.prepare(`
+  const res = await c.env.DB.prepare(`
     UPDATE replacement_tasks SET
       status = 'in_progress',
       customer_rejected_at = datetime('now'),
@@ -1080,8 +1158,12 @@ app.post('/review/customer-reject', async (c) => {
       closeout_submitted_at = NULL,
       version = version + 1,
       updated_at = datetime('now')
-    WHERE id = ?
+    WHERE id = ? AND status = 'awaiting_customer_acceptance'
   `).bind(reason.trim(), task_id).run()
+
+  if (res.meta.changes === 0) {
+    return c.json({ error: 'ใบงานนี้ไม่ได้อยู่ในสถานะรอ Gable ตรวจรับ หรือข้อมูลถูกแก้ไขไปแล้ว' }, 409)
+  }
 
   const revId = `rev-grj-${task_id}-${Date.now()}`
   await c.env.DB.prepare(`
@@ -1122,7 +1204,12 @@ app.get('/export/raw-data', async (c) => {
       t.customer_reject_reason
     FROM scanner_assets s
     JOIN branches b ON b.id = s.branch_id
-    LEFT JOIN replacement_tasks t ON t.scanner_asset_id = s.id
+    LEFT JOIN replacement_tasks t ON t.id = (
+      SELECT id FROM replacement_tasks 
+      WHERE scanner_asset_id = s.id 
+      ORDER BY created_at DESC, rowid DESC 
+      LIMIT 1
+    )
     ORDER BY b.province ASC, b.location_code ASC, s.com_sn ASC
   `).all()
 
