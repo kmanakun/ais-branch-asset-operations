@@ -22,6 +22,8 @@ import {
   Search,
   ShieldCheck,
   Users,
+  Wifi,
+  WifiOff,
   Wrench,
   X,
 } from 'lucide-react'
@@ -216,6 +218,27 @@ function App() {
   const [dashboardError, setDashboardError] = useState('')
   const [activeMenu, setActiveMenu] = useState<MenuKey>(getInitialMenu)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const [showOnlineRestored, setShowOnlineRestored] = useState(false)
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true)
+      setShowOnlineRestored(true)
+      const t = setTimeout(() => setShowOnlineRestored(false), 4000)
+      return () => clearTimeout(t)
+    }
+    const handleOffline = () => {
+      setIsOnline(false)
+      setShowOnlineRestored(false)
+    }
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
+    }
+  }, [])
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [provinceOptions, setProvinceOptions] = useState<string[]>([])
@@ -771,6 +794,42 @@ function App() {
   return (
     <>
     <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />
+    {!isOnline && (
+      <div style={{
+        background: '#b91c1c',
+        color: '#fff',
+        padding: '8px 16px',
+        fontSize: '13px',
+        fontWeight: 600,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '8px',
+        position: 'sticky',
+        top: 0,
+        zIndex: 9999
+      }}>
+        <WifiOff size={16} /> คุณกำลังออฟไลน์ (Offline) สัญญาณอินเทอร์เน็ตขาดหาย โปรดตรวจสอบสัญญาณก่อนทำรายการ
+      </div>
+    )}
+    {showOnlineRestored && isOnline && (
+      <div style={{
+        background: '#15803d',
+        color: '#fff',
+        padding: '8px 16px',
+        fontSize: '13px',
+        fontWeight: 600,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '8px',
+        position: 'sticky',
+        top: 0,
+        zIndex: 9999
+      }}>
+        <Wifi size={16} /> เชื่อมต่อสัญญาณอินเทอร์เน็ตเรียบร้อยแล้ว
+      </div>
+    )}
     <div className="app-shell" inert={reauthRequired}>
       <aside ref={mobileMenuRef} className={'sidebar' + (mobileMenuOpen ? ' open' : '')} role={mobileMenuOpen ? 'dialog' : undefined} aria-modal={mobileMenuOpen || undefined} aria-label="เมนูหลัก">
         <div className="brand">
@@ -1289,6 +1348,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
   const [selectedAdminTask, setSelectedAdminTask] = useState<Record<string, unknown> | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [zoomedEvidenceIndex, setZoomedEvidenceIndex] = useState<number | null>(null)
   const sigPadRef = useRef<SignaturePadHandle>(null)
 
   useEffect(() => {
@@ -1691,6 +1751,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
             setViewingEvidenceTask(null)
             setSelectedAdminTask(null)
             setActionError('')
+            setZoomedEvidenceIndex(null)
           }}
         >
           <div className="handover-modal-content" style={{ maxWidth: '720px' }} onClick={e => e.stopPropagation()}>
@@ -1703,6 +1764,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                   setViewingEvidenceTask(null)
                   setSelectedAdminTask(null)
                   setActionError('')
+                  setZoomedEvidenceIndex(null)
                 }}
               >
                 <X size={16} />
@@ -1729,13 +1791,26 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                       </div>
                     </div>
 
-                    <h4 style={{ margin: '0 0 10px', fontSize: '14px' }}>รูปถ่ายหลักฐาน 10 รูป & ลายเซ็น</h4>
+                    <h4 style={{ margin: '0 0 10px', fontSize: '14px' }}>รูปถ่ายหลักฐาน 10 รูป & ลายเซ็น (คลิกเพื่อขยายดูภาพเต็ม)</h4>
                     {evidenceLoading ? (
                       <div style={{ padding: '30px', textAlign: 'center' }}>กำลังโหลดหลักฐาน…</div>
                     ) : (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px', marginBottom: '20px' }}>
                         {evidenceList.map((ev, i) => (
-                          <div key={ev.id || i} style={{ border: '1px solid #e2e8f0', borderRadius: '6px', overflow: 'hidden', textAlign: 'center', fontSize: '11px', background: '#fafafa' }}>
+                          <div
+                            key={ev.id || i}
+                            style={{
+                              border: '1px solid #e2e8f0',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              textAlign: 'center',
+                              fontSize: '11px',
+                              background: '#fafafa',
+                              cursor: 'pointer',
+                              transition: 'transform 0.15s, box-shadow 0.15s'
+                            }}
+                            onClick={() => setZoomedEvidenceIndex(i)}
+                          >
                             <div style={{ height: '90px', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               <img
                                 src={`/api/evidence/${ev.storage_path}`}
@@ -1747,9 +1822,83 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                               />
                               <span style={{ fontSize: '10px', color: '#64748b' }}>{ev.evidence_type}</span>
                             </div>
-                            <div style={{ padding: '4px' }}>{ev.evidence_type}</div>
+                            <div style={{ padding: '4px', fontWeight: 500 }}>{ev.evidence_type}</div>
                           </div>
                         ))}
+                      </div>
+                    )}
+
+                    {/* Lightbox Modal */}
+                    {zoomedEvidenceIndex !== null && evidenceList[zoomedEvidenceIndex] && (
+                      <div
+                        className="handover-modal-backdrop"
+                        style={{ zIndex: 10000, background: 'rgba(0,0,0,0.88)' }}
+                        onClick={() => setZoomedEvidenceIndex(null)}
+                      >
+                        <div
+                          style={{
+                            position: 'relative',
+                            maxWidth: '92vw',
+                            maxHeight: '92vh',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <div style={{
+                            color: '#fff',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            width: '100%',
+                            marginBottom: '10px',
+                            alignItems: 'center'
+                          }}>
+                            <strong style={{ fontSize: '15px' }}>
+                              {evidenceList[zoomedEvidenceIndex].evidence_type} ({zoomedEvidenceIndex + 1}/{evidenceList.length})
+                            </strong>
+                            <button
+                              type="button"
+                              className="icon-button"
+                              style={{ color: '#fff', background: 'rgba(255,255,255,0.2)' }}
+                              onClick={() => setZoomedEvidenceIndex(null)}
+                            >
+                              <X size={18} />
+                            </button>
+                          </div>
+
+                          <img
+                            src={`/api/evidence/${evidenceList[zoomedEvidenceIndex].storage_path}`}
+                            alt={evidenceList[zoomedEvidenceIndex].evidence_type}
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '75vh',
+                              borderRadius: '8px',
+                              objectFit: 'contain',
+                              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
+                            }}
+                          />
+
+                          <div style={{ display: 'flex', gap: '12px', marginTop: '14px' }}>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={zoomedEvidenceIndex === 0}
+                              onClick={() => setZoomedEvidenceIndex(i => Math.max(0, (i || 0) - 1))}
+                            >
+                              <ChevronLeft size={16} /> ภาพก่อนหน้า
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-button"
+                              disabled={zoomedEvidenceIndex === evidenceList.length - 1}
+                              onClick={() => setZoomedEvidenceIndex(i => Math.min(evidenceList.length - 1, (i || 0) + 1))}
+                            >
+                              ภาพถัดไป <ChevronRight size={16} />
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     )}
 
