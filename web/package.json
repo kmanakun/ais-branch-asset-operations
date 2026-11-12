@@ -15,9 +15,7 @@
     "test:xlsx": "node --test scripts/xlsx-register.test.mjs",
     "test:d1": "node --test scripts/d1-api.test.mjs",
     "test:e2e": "node scripts/test-live-flow.mjs",
-    "test:app": "node --test scripts/app-flow.test.mjs",
-    "test:db": "supabase test db",
-    "test:all": "npm run test:xlsx && npm run test:d1",
+    "test:all": "npm run test:xlsx && npm run test:d1 && npm run test:e2e",
     "deploy": "wrangler pages deploy dist --project-name ais-branch-asset-operations --branch main"
   },
   "dependencies": {
@@ -34,7 +32,6 @@
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
-    "supabase": "^3.0.0",
     "typescript": "~5.8.3",
     "vite": "^7.1.0",
     "wrangler": "^4.158.0"
