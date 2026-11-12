@@ -18,6 +18,14 @@ export function BarcodeScannerModal({
   const streamRef = useRef<MediaStream | null>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
@@ -82,13 +90,30 @@ export function BarcodeScannerModal({
         },
         audio: false,
       })
+
+      // If user closed dialog while waiting for getUserMedia permission/hardware
+      if (!mountedRef.current) {
+        stream.getTracks().forEach(track => track.stop())
+        return
+      }
+
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        await videoRef.current.play()
-        setCameraActive(true)
+        try {
+          await videoRef.current.play()
+        } catch {
+          // Play was interrupted or video element unmounted
+        }
+        if (mountedRef.current) {
+          setCameraActive(true)
+        } else {
+          stream.getTracks().forEach(track => track.stop())
+          streamRef.current = null
+        }
       }
     } catch (err) {
+      if (!mountedRef.current) return
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('Permission') || msg.includes('NotAllowedError')) {
         setCameraError('ไม่ได้รับอนุญาตให้เข้าถึงกล้อง กรุณาเปิดสิทธิ์ในเบราว์เซอร์')
@@ -121,7 +146,7 @@ export function BarcodeScannerModal({
     let animationFrameId: number
 
     const scanFrame = async () => {
-      if (!active) return
+      if (!active || !mountedRef.current) return
       if (videoRef.current && videoRef.current.readyState >= 2 && detector) {
         try {
           const barcodes = await detector.detect(videoRef.current)
@@ -133,13 +158,13 @@ export function BarcodeScannerModal({
           // Frame error; continue scanning
         }
       }
-      if (active) {
+      if (active && mountedRef.current) {
         animationFrameId = requestAnimationFrame(scanFrame)
       }
     }
 
     void startCamera(facingMode).then(() => {
-      if (active && detector) {
+      if (active && mountedRef.current && detector) {
         animationFrameId = requestAnimationFrame(scanFrame)
       }
     })

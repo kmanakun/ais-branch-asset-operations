@@ -4,7 +4,6 @@ import {
   Activity,
   ArrowRight,
   Bell,
-  Boxes,
   ClipboardList,
   CheckCircle2,
   ChevronDown,
@@ -34,7 +33,6 @@ import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot }
 import { groupRowsByBranch, groupRowsByProvince, ProvinceCardGroup } from './province'
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
-import { Inventory } from './Inventory'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
 import { WorkOrderCertificateDialog } from './WorkOrderCertificateDialog'
 
@@ -56,7 +54,6 @@ const navigation: Array<{ key: MenuKey; label: string; icon: typeof LayoutDashbo
   { key: 'overview', label: 'ภาพรวม', icon: LayoutDashboard },
   { key: 'work_orders', label: 'ใบงาน', icon: ClipboardList },
   { key: 'assets', label: 'ทะเบียนอุปกรณ์', icon: HardDrive },
-  { key: 'inventory', label: 'สต็อกอุปกรณ์', icon: Boxes },
   { key: 'pending', label: 'รอตรวจรับ', icon: ShieldCheck },
   { key: 'completed', label: 'เสร็จแล้ว', icon: CheckCircle2 },
   { key: 'discovery', label: 'เครื่องนอกทะเบียน', icon: Search },
@@ -68,7 +65,6 @@ const pageCopy: Record<MenuKey, { title: string; subtitle: string }> = {
   overview: { title: 'ภาพรวมการปฏิบัติงาน', subtitle: 'สถานะสาขา อุปกรณ์ และใบงานเปลี่ยน Scanner' },
   work_orders: { title: 'ใบงานเปลี่ยน Scanner', subtitle: 'เปิดดูงานทุกใบและรายละเอียด Scanner ที่ต้องดำเนินการ' },
   assets: { title: 'ทะเบียนอุปกรณ์', subtitle: 'ดูข้อมูลสาขาและเครื่องสแกนที่ผูกกับแต่ละ LocationCode' },
-  inventory: { title: 'ระบบสต็อกและคลังอุปกรณ์', subtitle: 'ติดตามยอดเครื่องสแกนในคลัง การเบิกจ่ายให้ช่าง และเครื่องส่งคืน' },
   pending: { title: 'รายการ Pending รอตรวจ', subtitle: 'ตรวจผลหน้างาน รูปภาพ และลายเซ็นที่ช่างส่งมา' },
   completed: { title: 'ใบงานที่เสร็จแล้ว', subtitle: 'ดูงานที่ส่งมอบหรือปิดผลแล้ว พร้อมเปิดหลักฐานและประวัติย้อนหลัง' },
   discovery: { title: 'เครื่องนอกทะเบียน', subtitle: 'ตรวจรายการที่ช่างพบเพิ่ม โดยไม่ปะปนกับทะเบียนอุปกรณ์หลัก' },
@@ -908,7 +904,6 @@ function App() {
           {activeMenu === 'work_orders' && <WorkOrders role={role} demo={demoMode} onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'completed' && <WorkOrders role={role} demo={demoMode} view="completed" onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'assets' && <Assets role={role} demo={demoMode} items={demoMode ? demoAssets : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onTaskUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'refresh' ? 'กำลังโหลดสถานะ Scanner ล่าสุด' : action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'resolve_exception' ? 'Admin ตรวจ Pending และบันทึกผลพิจารณาแล้ว' : action === 'accept' ? 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} search={search} searchResultsReady={demoMode || loadedAssetSearch === search} setSearch={value => { clearAssetQueryResults(); resetAssetPages(); setSearch(value) }} provinceOptions={visibleProvinces} provinceFilter={activeProvince} setProvinceFilter={value => { clearAssetQueryResults(); resetAssetPages(); setActiveProvince(value) }} statusFilter={assetStatusFilter} setStatusFilter={value => { clearAssetQueryResults(); resetAssetPages(); setAssetStatusFilter(value) }} page={assetPage} pageOffset={assetPageOffsets.current[assetPage] || 0} total={assetTotal} provinceTotal={assetProvinceTotal} setPage={value => { setListData([]); setListError(''); setAssetPage(value) }} focusSerial={pendingAssetSerial} onFocusResolved={() => setPendingAssetSerial('')} />}
-          {activeMenu === 'inventory' && <Inventory role={role} />}
           {activeMenu === 'pending' && (demoMode || role === 'admin' ? <PendingReviews demo={demoMode} role={role} onUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : action === 'resolve_exception' ? 'บันทึกผลตรวจ Pending แล้ว' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} /> : <EmptyState title="ไม่มีสิทธิ์เข้าถึง" detail="เมนูนี้สำหรับ Admin Office ตรวจรับงานและพิจารณาข้อยกเว้น" />)}
           {activeMenu === 'discovery' && (demoMode || role === 'admin' ? <ScannerDiscoveryQueue onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'รายการเครื่องนอกทะเบียนอัปเดตแล้ว' : action); void loadContext() }} /> : <EmptyState title="ไม่มีสิทธิ์เข้าถึง" detail="เมนูนี้สำหรับ Admin Office จัดการเครื่องนอกทะเบียน" />)}
           {activeMenu === 'imports' && canUseAdminModules && <Imports role={role} onComplete={async () => {
@@ -1970,15 +1965,17 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
         <button type="button" className="detail-back" aria-label="กลับไปรายการใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><ChevronLeft size={20} /></button>
         <div><span className="detail-eyebrow">รายการ Scanner ในใบงาน</span><h2 id="work-order-title">รายละเอียดการเปลี่ยนเครื่อง</h2></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
-          <button
-            type="button"
-            className="secondary-button"
-            style={{ minHeight: '32px', fontSize: '11px', padding: '0 10px' }}
-            onClick={() => setShowCertificate(true)}
-            title="พิมพ์ใบส่งมอบและบันทึกผลการเปลี่ยนเครื่องสแกนบาร์โค้ด"
-          >
-            <Printer size={15} /> พิมพ์ใบส่งมอบ
-          </button>
+          {['delivered', 'completed', 'legacy_completed'].includes(stage) && (
+            <button
+              type="button"
+              className="secondary-button"
+              style={{ minHeight: '32px', fontSize: '11px', padding: '0 10px' }}
+              onClick={() => setShowCertificate(true)}
+              title="พิมพ์ใบส่งมอบและบันทึกผลการเปลี่ยนเครื่องสแกนบาร์โค้ด"
+            >
+              <Printer size={15} /> พิมพ์ใบส่งมอบ
+            </button>
+          )}
           <button type="button" className="detail-close" aria-label="ปิดใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><X size={18} /></button>
         </div>
       </header>

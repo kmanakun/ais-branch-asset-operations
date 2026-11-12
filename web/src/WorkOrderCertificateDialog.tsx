@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, Printer, ShieldCheck, X } from 'lucide-react'
+import { CheckCircle2, Clock3, Printer, ShieldCheck, X } from 'lucide-react'
 import { lockBodyScroll, registerActiveDialog } from './dialog'
 import { supabase } from './supabase'
 
@@ -73,6 +73,8 @@ export function WorkOrderCertificateDialog({
   const installResult = String(task.install_result || 'ติดตั้งและทดสอบสแกนสำเร็จ')
   const oldStatus = oldScannerStatusLabel(task.old_scanner_status)
   const notes = String(task.exception_reason || task.old_scanner_note || '—')
+  const stage = String(task.workflow_stage || task.task_status || task.status || 'open')
+  const isDelivered = ['delivered', 'completed', 'legacy_completed'].includes(stage)
 
   // Load evidence photos & signatures from Supabase Storage
   useEffect(() => {
@@ -103,13 +105,23 @@ export function WorkOrderCertificateDialog({
               if (!downloadError && fileBlob) {
                 photoUrl = URL.createObjectURL(fileBlob)
                 objectUrls.push(photoUrl)
+              } else {
+                // Explicit fallback when download returns error instead of throwing
+                const { data: urlData } = await supabase.storage
+                  .from('ais-task-evidence')
+                  .createSignedUrl(storagePath, 3600)
+                photoUrl = urlData?.signedUrl
               }
             } catch {
-              // Fallback to signed URL if direct download fails
-              const { data: urlData } = await supabase.storage
-                .from('ais-task-evidence')
-                .createSignedUrl(storagePath, 3600)
-              photoUrl = urlData?.signedUrl
+              // Fallback to signed URL if exception occurs
+              try {
+                const { data: urlData } = await supabase.storage
+                  .from('ais-task-evidence')
+                  .createSignedUrl(storagePath, 3600)
+                photoUrl = urlData?.signedUrl
+              } catch {
+                // Ignore
+              }
             }
 
             entries[slot] = {
@@ -228,8 +240,14 @@ export function WorkOrderCertificateDialog({
                   <span>วันที่พิมพ์:</span>
                   <span>{new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date())}</span>
                 </div>
-                <div className="cert-meta-badge">
-                  <CheckCircle2 size={14} /> ส่งมอบและตรวจรับสมบูรณ์
+                <div className={'cert-meta-badge' + (isDelivered && techSignature && userSignature && adminSignature ? ' is-delivered' : ' is-pending')}>
+                  {isDelivered && techSignature && userSignature && adminSignature ? (
+                    <><CheckCircle2 size={14} /> ส่งมอบและตรวจรับสมบูรณ์</>
+                  ) : isDelivered ? (
+                    <><ShieldCheck size={14} /> ส่งมอบแล้ว (รอลงนามสมบูรณ์)</>
+                  ) : (
+                    <><Clock3 size={14} /> เอกสารประกอบการปฏิบัติงาน ({outcomeLabel(outcome)})</>
+                  )}
                 </div>
               </div>
             </div>
@@ -307,11 +325,11 @@ export function WorkOrderCertificateDialog({
                     {techSignature ? (
                       <img src={techSignature} alt="ลายเซ็นช่างเทคนิค" />
                     ) : (
-                      <span className="cert-sig-placeholder">ลงนามระบบอิเล็กทรอนิกส์แล้ว</span>
+                      <span className="cert-sig-placeholder cert-sig-empty">(ยังไม่มีลายเซ็นช่างเทคนิคในระบบ)</span>
                     )}
                   </div>
                   <div className="cert-signature-name">
-                    <span>ลงชื่อ: ____________________________</span>
+                    <span>ลงชื่อ: {techSignature ? performedBy : '____________________________'}</span>
                     <small>({performedBy})</small>
                     <small>วันที่: {performedAt}</small>
                   </div>
@@ -324,13 +342,13 @@ export function WorkOrderCertificateDialog({
                     {userSignature ? (
                       <img src={userSignature} alt="ลายเซ็นผู้แทนสาขา" />
                     ) : (
-                      <span className="cert-sig-placeholder">ลงนามตรวจรับหน้างานแล้ว</span>
+                      <span className="cert-sig-placeholder cert-sig-empty">(ยังไม่มีลายเซ็นผู้แทนสาขาในระบบ)</span>
                     )}
                   </div>
                   <div className="cert-signature-name">
                     <span>ลงชื่อ: ____________________________</span>
                     <small>(ผู้แทนสาขา {branchName})</small>
-                    <small>วันที่: {performedAt}</small>
+                    <small>วันที่: {userSignature ? performedAt : '____/____/________'}</small>
                   </div>
                 </div>
 
@@ -341,17 +359,17 @@ export function WorkOrderCertificateDialog({
                     {adminSignature ? (
                       <img src={adminSignature} alt="ลายเซ็น Admin ผู้ตรวจรับ" />
                     ) : (
-                      <span className="cert-sig-placeholder">
+                      <span className="cert-sig-placeholder cert-sig-empty">
                         <ShieldCheck size={28} />
                         <br />
-                        ตรวจรับสมบูรณ์ผ่านระบบ
+                        (รอการตรวจรับและลงนามจาก Admin Office)
                       </span>
                     )}
                   </div>
                   <div className="cert-signature-name">
                     <span>ลงชื่อ: ____________________________</span>
                     <small>(Admin ประจำ Office)</small>
-                    <small>สถานะ: อนุมัติการส่งมอบ</small>
+                    <small>สถานะ: {adminSignature ? 'อนุมัติการส่งมอบ' : 'รอการตรวจรับ'}</small>
                   </div>
                 </div>
               </div>
