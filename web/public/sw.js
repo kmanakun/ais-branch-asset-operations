@@ -38,10 +38,12 @@ self.addEventListener('fetch', event => {
   if (url.origin !== self.location.origin) return
 
   // Never intercept or cache API or auth endpoints
-  if (url.pathname.startsWith('/rest/') || url.pathname.startsWith('/auth/')) return
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/rest/') || url.pathname.startsWith('/auth/')) return
 
   const isStaticAsset = url.pathname.startsWith('/assets/') ||
-    /\.(?:js|css|png|jpg|jpeg|svg|ico|woff2?|json)$/i.test(url.pathname)
+    ['script', 'style', 'image', 'font'].includes(event.request.destination) ||
+    url.pathname === '/manifest.json' ||
+    url.pathname === '/favicon.ico'
   const isNavigation = event.request.mode === 'navigate'
 
   if (!isStaticAsset && !isNavigation) return
