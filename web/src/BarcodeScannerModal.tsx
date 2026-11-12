@@ -19,6 +19,7 @@ export function BarcodeScannerModal({
   const dialogRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const mountedRef = useRef(true)
+  const cameraRequestIdRef = useRef(0)
 
   useEffect(() => {
     mountedRef.current = true
@@ -65,6 +66,8 @@ export function BarcodeScannerModal({
 
   // Stop camera helper
   const stopCamera = useCallback(() => {
+    // Invalidate any getUserMedia request that has not resolved yet.
+    cameraRequestIdRef.current += 1
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop())
       streamRef.current = null
@@ -75,6 +78,7 @@ export function BarcodeScannerModal({
   // Start camera stream
   const startCamera = useCallback(async (mode: 'environment' | 'user') => {
     stopCamera()
+    const requestId = cameraRequestIdRef.current
     setCameraError('')
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraError('เบราว์เซอร์ไม่รองรับการเปิดกล้องโดยตรง กรุณาใช้การถ่ายรูปหรือกรอกด้วยตนเอง')
@@ -91,8 +95,8 @@ export function BarcodeScannerModal({
         audio: false,
       })
 
-      // If user closed dialog while waiting for getUserMedia permission/hardware
-      if (!mountedRef.current) {
+      // Discard streams from a closed dialog or superseded camera request.
+      if (!mountedRef.current || requestId !== cameraRequestIdRef.current) {
         stream.getTracks().forEach(track => track.stop())
         return
       }
@@ -105,15 +109,15 @@ export function BarcodeScannerModal({
         } catch {
           // Play was interrupted or video element unmounted
         }
-        if (mountedRef.current) {
+        if (mountedRef.current && requestId === cameraRequestIdRef.current && streamRef.current === stream) {
           setCameraActive(true)
         } else {
           stream.getTracks().forEach(track => track.stop())
-          streamRef.current = null
+          if (streamRef.current === stream) streamRef.current = null
         }
       }
     } catch (err) {
-      if (!mountedRef.current) return
+      if (!mountedRef.current || requestId !== cameraRequestIdRef.current) return
       const msg = err instanceof Error ? err.message : String(err)
       if (msg.includes('Permission') || msg.includes('NotAllowedError')) {
         setCameraError('ไม่ได้รับอนุญาตให้เข้าถึงกล้อง กรุณาเปิดสิทธิ์ในเบราว์เซอร์')
