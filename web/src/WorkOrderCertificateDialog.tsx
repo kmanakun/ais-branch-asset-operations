@@ -12,6 +12,7 @@ type EvidenceEntry = {
 
 type WorkOrderCertificateDialogProps = {
   task: Record<string, unknown>
+  demo?: boolean
   onClose: () => void
 }
 
@@ -50,6 +51,7 @@ function outcomeLabel(value: unknown) {
 
 export function WorkOrderCertificateDialog({
   task,
+  demo = false,
   onClose,
 }: WorkOrderCertificateDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null)
@@ -57,6 +59,7 @@ export function WorkOrderCertificateDialog({
   const [loadingEvidence, setLoadingEvidence] = useState(false)
 
   const taskId = String(task.id || '').trim()
+  const isDemo = demo || taskId.startsWith('demo-')
   const branchName = String(task.branch_name || task.branch || 'สาขาไม่ระบุ')
   const locationCode = String(task.location_code || task.code || '—')
   const province = String(task.province || '—')
@@ -71,10 +74,11 @@ export function WorkOrderCertificateDialog({
   const oldStatus = oldScannerStatusLabel(task.old_scanner_status)
   const notes = String(task.exception_reason || task.old_scanner_note || '—')
 
-  // Load evidence photos & signatures from Supabase
+  // Load evidence photos & signatures from Supabase Storage
   useEffect(() => {
-    if (!taskId || !supabase) return
+    if (!taskId || !supabase || isDemo) return
     let active = true
+    const objectUrls: string[] = []
     setLoadingEvidence(true)
 
     void (async () => {
@@ -88,23 +92,36 @@ export function WorkOrderCertificateDialog({
         const rows = Array.isArray(data) ? data : []
 
         for (const row of rows) {
-          const slot = String(row.slot)
-          const storagePath = String(row.storage_path || '')
-          if (storagePath) {
-            // Get public or signed url
-            const { data: urlData } = await supabase.storage
-              .from('ais-task-evidence')
-              .createSignedUrl(storagePath, 3600)
+          const slot = String(row.slot || '')
+          const storagePath = String(row.path || row.storage_path || '')
+          if (slot && storagePath) {
+            let photoUrl: string | undefined
+            try {
+              const { data: fileBlob, error: downloadError } = await supabase.storage
+                .from('ais-task-evidence')
+                .download(storagePath)
+              if (!downloadError && fileBlob) {
+                photoUrl = URL.createObjectURL(fileBlob)
+                objectUrls.push(photoUrl)
+              }
+            } catch {
+              // Fallback to signed URL if direct download fails
+              const { data: urlData } = await supabase.storage
+                .from('ais-task-evidence')
+                .createSignedUrl(storagePath, 3600)
+              photoUrl = urlData?.signedUrl
+            }
+
             entries[slot] = {
               slot,
               storage_path: storagePath,
-              signed_url: urlData?.signedUrl || undefined,
+              signed_url: photoUrl,
             }
           }
         }
         if (active) setEvidenceList(entries)
       } catch {
-        // Failed loading evidence
+        // Handled silently
       } finally {
         if (active) setLoadingEvidence(false)
       }
@@ -112,8 +129,9 @@ export function WorkOrderCertificateDialog({
 
     return () => {
       active = false
+      objectUrls.forEach(url => URL.revokeObjectURL(url))
     }
-  }, [taskId])
+  }, [isDemo, taskId])
 
   // Dialog scroll lock
   useEffect(() => {
@@ -134,16 +152,16 @@ export function WorkOrderCertificateDialog({
   const adminSignature = evidenceList['inspector_signature']?.signed_url
 
   const photoSlots = [
-    { key: 'old_scanner_front', label: 'เครื่องเดิม: ด้านหน้า/รวม' },
-    { key: 'old_scanner_serial', label: 'เครื่องเดิม: ป้าย Serial Number' },
-    { key: 'old_scanner_defect', label: 'เครื่องเดิม: จุดชำรุด/สภาพ' },
-    { key: 'old_scanner_placement', label: 'เครื่องเดิม: จุดติดตั้งเดิม' },
-    { key: 'new_scanner_box', label: 'เครื่องใหม่: กล่องบรรจุภัณฑ์' },
-    { key: 'new_scanner_serial', label: 'เครื่องใหม่: ป้าย Serial Number' },
-    { key: 'new_scanner_installed', label: 'เครื่องใหม่: ติดตั้งเข้าที่' },
-    { key: 'new_scanner_test_scan', label: 'เครื่องใหม่: ทดสอบการสแกน' },
-    { key: 'new_scanner_ready', label: 'เครื่องใหม่: สภาพพร้อมใช้งาน' },
-    { key: 'new_scanner_wide', label: 'เครื่องใหม่: ภาพรวมเคาน์เตอร์' },
+    { key: 'old_serial_photo', label: 'เครื่องเดิม: ป้าย Serial Number' },
+    { key: 'old_device_photo', label: 'เครื่องเดิม: ภาพรวมเครื่อง' },
+    { key: 'old_condition_photo', label: 'เครื่องเดิม: สภาพ/ตำหนิ' },
+    { key: 'old_branch_sticker_photo', label: 'เครื่องเดิม: สติกเกอร์สาขา' },
+    { key: 'new_serial_photo', label: 'เครื่องใหม่: ป้าย Serial Number' },
+    { key: 'new_front_photo', label: 'เครื่องใหม่: ภาพด้านหน้า' },
+    { key: 'new_side_photo', label: 'เครื่องใหม่: ภาพด้านข้าง' },
+    { key: 'new_com_serial_photo', label: 'เครื่องใหม่: ป้าย Com SN' },
+    { key: 'new_device_photo', label: 'เครื่องใหม่: ภาพรวมเครื่อง' },
+    { key: 'new_cable_management_photo', label: 'เครื่องใหม่: การจัดสาย' },
   ]
 
   return (

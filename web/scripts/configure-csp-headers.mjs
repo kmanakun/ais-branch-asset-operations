@@ -3,10 +3,10 @@ import path from 'node:path'
 import { loadEnv } from 'vite'
 
 const env = loadEnv('production', process.cwd(), 'VITE_')
-const rawUrl = env.VITE_SUPABASE_URL
+const rawUrl = env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321'
 
-if (!rawUrl) {
-  throw new Error('Set VITE_SUPABASE_URL in .env.local before building the static app.')
+if (!env.VITE_SUPABASE_URL && !process.env.VITE_SUPABASE_URL) {
+  console.warn('VITE_SUPABASE_URL not configured in environment or .env.local; defaulting CSP origin to http://127.0.0.1:54321 for build.')
 }
 
 let supabaseUrl

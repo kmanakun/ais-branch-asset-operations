@@ -824,7 +824,7 @@ function App() {
   const role = demoMode ? 'viewer' : userContext?.role
   const canUseAdminModules = demoMode || role === 'admin'
   const visibleNavigation = navigation.filter(item => ['pending', 'discovery'].includes(item.key)
-    ? !demoMode && role === 'admin'
+    ? demoMode || role === 'admin'
     : canUseAdminModules || !['imports', 'people'].includes(item.key))
   const visibleProvinces = demoMode
     ? Array.from(new Set([...demoAssets, ...demoTasks].map(row => String(row.province || '').trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right, 'th'))
@@ -909,8 +909,8 @@ function App() {
           {activeMenu === 'completed' && <WorkOrders role={role} demo={demoMode} view="completed" onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'assets' && <Assets role={role} demo={demoMode} items={demoMode ? demoAssets : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onTaskUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'refresh' ? 'กำลังโหลดสถานะ Scanner ล่าสุด' : action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'resolve_exception' ? 'Admin ตรวจ Pending และบันทึกผลพิจารณาแล้ว' : action === 'accept' ? 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} search={search} searchResultsReady={demoMode || loadedAssetSearch === search} setSearch={value => { clearAssetQueryResults(); resetAssetPages(); setSearch(value) }} provinceOptions={visibleProvinces} provinceFilter={activeProvince} setProvinceFilter={value => { clearAssetQueryResults(); resetAssetPages(); setActiveProvince(value) }} statusFilter={assetStatusFilter} setStatusFilter={value => { clearAssetQueryResults(); resetAssetPages(); setAssetStatusFilter(value) }} page={assetPage} pageOffset={assetPageOffsets.current[assetPage] || 0} total={assetTotal} provinceTotal={assetProvinceTotal} setPage={value => { setListData([]); setListError(''); setAssetPage(value) }} focusSerial={pendingAssetSerial} onFocusResolved={() => setPendingAssetSerial('')} />}
           {activeMenu === 'inventory' && <Inventory role={role} />}
-          {activeMenu === 'pending' && !demoMode && role === 'admin' && <PendingReviews onUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : action === 'resolve_exception' ? 'บันทึกผลตรวจ Pending แล้ว' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
-          {activeMenu === 'discovery' && !demoMode && role === 'admin' && <ScannerDiscoveryQueue onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'รายการเครื่องนอกทะเบียนอัปเดตแล้ว' : action); void loadContext() }} />}
+          {activeMenu === 'pending' && (demoMode || role === 'admin' ? <PendingReviews demo={demoMode} role={role} onUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : action === 'resolve_exception' ? 'บันทึกผลตรวจ Pending แล้ว' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} /> : <EmptyState title="ไม่มีสิทธิ์เข้าถึง" detail="เมนูนี้สำหรับ Admin Office ตรวจรับงานและพิจารณาข้อยกเว้น" />)}
+          {activeMenu === 'discovery' && (demoMode || role === 'admin' ? <ScannerDiscoveryQueue onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'รายการเครื่องนอกทะเบียนอัปเดตแล้ว' : action); void loadContext() }} /> : <EmptyState title="ไม่มีสิทธิ์เข้าถึง" detail="เมนูนี้สำหรับ Admin Office จัดการเครื่องนอกทะเบียน" />)}
           {activeMenu === 'imports' && canUseAdminModules && <Imports role={role} onComplete={async () => {
             resetAssetPages()
             setListReloadKey(key => key + 1)
@@ -1234,9 +1234,9 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
 const PENDING_REVIEW_STAGES = new Set(['blocked', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review'])
 const PENDING_REVIEW_PAGE_SIZE = 25
 
-function PendingReviews({ onUpdated }: { onUpdated: (action: string) => void }) {
+function PendingReviews({ demo = false, role = 'admin', onUpdated }: { demo?: boolean; role?: string; onUpdated: (action: string) => void }) {
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(!demo)
   const [error, setError] = useState('')
   const [draft, setDraft] = useState('')
   const [query, setQuery] = useState('')
@@ -1246,6 +1246,7 @@ function PendingReviews({ onUpdated }: { onUpdated: (action: string) => void }) 
   const [selectedTask, setSelectedTask] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
+    if (demo) return
     let active = true
     const client = supabase
     if (!client) {
@@ -1292,9 +1293,17 @@ function PendingReviews({ onUpdated }: { onUpdated: (action: string) => void }) 
       }
     })()
     return () => { active = false }
-  }, [page, query, reload])
+  }, [demo, page, query, reload])
 
-  const pageCount = Math.ceil(totalOrders / PENDING_REVIEW_PAGE_SIZE)
+  const demoReviewRows: Array<Record<string, unknown>> = demoTasks.filter(item => item.status === 'Pending').map((item, index) => ({
+    id: `demo-pending-${index}`, branch_name: item.branch, province: item.province, location_code: item.code,
+    scanner_model: item.model, com_sn: item.serial, workflow_stage: 'awaiting_admin_exception_review',
+    work_order_code: `DEMO-PENDING-${String(index + 1).padStart(3, '0')}`, created_at: null, performed_by_name: 'ช่างเทคนิค Onsite (ตัวอย่าง)',
+    performed_at: new Date().toISOString(),
+  }))
+  const displayRows = demo ? demoReviewRows : rows
+  const displayTotal = demo ? demoReviewRows.length : totalOrders
+  const pageCount = demo ? 1 : Math.ceil(totalOrders / PENDING_REVIEW_PAGE_SIZE)
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setPage(0)
@@ -1302,9 +1311,14 @@ function PendingReviews({ onUpdated }: { onUpdated: (action: string) => void }) 
   }
   return <>
     <section className="panel pending-review-panel">
-      <div className="panel-heading"><div><h2>งานที่รอ Admin ตรวจ</h2><p>แสดงรายการที่ช่างส่งเป็น Pending หรือส่งผลให้ตรวจรับ</p></div><span className="pending-review-count">{totalOrders.toLocaleString('th-TH')} ใบงาน</span></div>
-      <form className="pending-review-search" onSubmit={submitSearch}><label className="search-box"><Search size={17} /><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="ค้นหาเลขใบงาน สาขา จังหวัด หรือ Serial" aria-label="ค้นหารายการ Pending" /></label><button type="submit" className="secondary-button">ค้นหา</button><button type="button" className="text-button" disabled={loading} onClick={() => setReload(value => value + 1)}>รีเฟรช</button></form>
-      {loading ? <EmptyState compact loading /> : error ? <EmptyState compact title="โหลดรายการไม่สำเร็จ" detail={error} onRetry={() => setReload(value => value + 1)} /> : rows.length ? <div className="pending-review-list">{rows.map((row, index) => {
+      <div className="panel-heading"><div><h2>งานที่รอ Admin ตรวจ</h2><p>แสดงรายการที่ช่างส่งเป็น Pending หรือส่งผลให้ตรวจรับ</p></div><span className="pending-review-count">{displayTotal.toLocaleString('th-TH')} ใบงาน</span></div>
+      <form className="pending-review-search" onSubmit={submitSearch}>
+        <label className="search-box"><Search size={17} /><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="ค้นหาเลขใบงาน สาขา จังหวัด หรือ Serial" aria-label="ค้นหารายการ Pending" /></label>
+        <button type="submit" className="secondary-button">ค้นหา</button>
+        {(draft || query) && <button type="button" className="secondary-button" onClick={() => { setDraft(''); setQuery(''); setPage(0) }}>ล้างค้นหา</button>}
+        <button type="button" className="text-button" disabled={loading || demo} onClick={() => setReload(value => value + 1)}>รีเฟรช</button>
+      </form>
+      {loading ? <EmptyState compact loading /> : error ? <EmptyState compact title="โหลดรายการไม่สำเร็จ" detail={error} onRetry={() => setReload(value => value + 1)} /> : displayRows.length ? <div className="pending-review-list">{displayRows.map((row, index) => {
         const id = String(row.id || row.task_id || `${row.work_order_code || 'order'}-${index}`)
         const stage = getTaskWorkflowStage(row)
         const status = getStatusPresentation(stage)
@@ -1314,9 +1328,9 @@ function PendingReviews({ onUpdated }: { onUpdated: (action: string) => void }) 
           <button type="button" className="secondary-button" onClick={() => setSelectedTask(row)}>เปิดรายละเอียดและตรวจหลักฐาน <ArrowRight size={14} /></button>
         </article>
       })}</div> : <EmptyState compact title="ไม่มีงานที่รอตรวจ" detail={query ? 'ไม่พบใบงานที่ตรงกับคำค้นหา' : 'เมื่อช่างส่งผล Pending หรือส่งงานให้ตรวจรับ รายการจะแสดงที่นี่'} />}
-      {!loading && !error && pageCount > 1 && <div className="list-footer"><span>หน้า {page + 1} จาก {pageCount} · {totalOrders.toLocaleString('th-TH')} ใบงาน</span><div><button type="button" className="icon-button" aria-label="หน้าก่อนหน้า" disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft size={16} /></button><span className="page-number">{page + 1}</span><button type="button" className="icon-button" aria-label="หน้าถัดไป" disabled={page + 1 >= pageCount} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}><ChevronRight size={16} /></button></div></div>}
+      {!demo && !loading && !error && pageCount > 1 && <div className="list-footer"><span>หน้า {page + 1} จาก {pageCount} · {totalOrders.toLocaleString('th-TH')} ใบงาน</span><div><button type="button" className="icon-button" aria-label="หน้าก่อนหน้า" disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft size={16} /></button><span className="page-number">{page + 1}</span><button type="button" className="icon-button" aria-label="หน้าถัดไป" disabled={page + 1 >= pageCount} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}><ChevronRight size={16} /></button></div></div>}
     </section>
-    {selectedTask && <WorkOrderDetailDialog task={selectedTask} role="admin" demo={false} onClose={() => { setSelectedTask(null); setReload(value => value + 1) }} onUpdated={action => { setReload(value => value + 1); onUpdated(action) }} />}
+    {selectedTask && <WorkOrderDetailDialog task={selectedTask} role={role} demo={demo} readOnly={demo} onClose={() => { setSelectedTask(null); setReload(value => value + 1) }} onUpdated={action => { setReload(value => value + 1); onUpdated(action) }} />}
   </>
 }
 
@@ -1428,19 +1442,24 @@ function WorkOrders({ role, demo, onUpdated, view = 'all' }: { role?: string; de
           </button>
         </div>
       </div>
-      <form className="pending-review-search" onSubmit={submitSearch}><label className="search-box"><Search size={17} /><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="ค้นหาใบงาน สาขา จังหวัด หรือ Serial" aria-label="ค้นหาใบงาน" /></label><button type="submit" className="secondary-button">ค้นหา</button><button type="button" className="text-button" disabled={loading || demo} onClick={() => setReload(value => value + 1)}>รีเฟรช</button></form>
+      <form className="pending-review-search" onSubmit={submitSearch}>
+        <label className="search-box"><Search size={17} /><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="ค้นหาใบงาน สาขา จังหวัด หรือ Serial" aria-label="ค้นหาใบงาน" /></label>
+        <button type="submit" className="secondary-button">ค้นหา</button>
+        {(draft || query) && <button type="button" className="secondary-button" onClick={() => { setDraft(''); setQuery(''); setPage(0) }}>ล้างค้นหา</button>}
+        <button type="button" className="text-button" disabled={loading || demo} onClick={() => setReload(value => value + 1)}>รีเฟรช</button>
+      </form>
       {loading ? <EmptyState compact loading /> : error ? <EmptyState compact title="โหลดใบงานไม่สำเร็จ" detail={error} onRetry={() => setReload(value => value + 1)} /> : displayRows.length ? <div className="pending-review-list">{displayRows.map((row, index) => {
         const id = String(row.id || row.task_id || `${row.work_order_code || 'order'}-${index}`)
         const status = getStatusPresentation(getTaskWorkflowStage(row))
         const serial = String(row.com_sn || row.serial || row.old_serial_snapshot || 'ไม่พบ Serial')
         return <article className="pending-review-row" key={id}>
           <div className="pending-review-main"><div className="pending-review-title"><strong>{String(row.branch_name || 'สาขาไม่ระบุ')} · SN {serial}</strong><StatusPill label={status.label} tone={status.tone} /></div><span>{String(row.scanner_model || 'Scanner')} · จังหวัด{String(row.province || 'ไม่ระบุ')} · LocationCode {String(row.location_code || '—')}</span><small>ใบงาน {String(row.work_order_code || '—')} · {row.performed_by_name ? `ผู้ปฏิบัติงาน ${String(row.performed_by_name)}` : 'ยังไม่มีผู้ส่งผล'} · {row.performed_at ? formatDate(row.performed_at) : formatDate(row.created_at)}</small></div>
-          <button type="button" className="secondary-button" onClick={() => { if (!demo) setSelectedTask(row) }} disabled={demo}>เปิดรายละเอียด <ArrowRight size={14} /></button>
+          <button type="button" className="secondary-button" onClick={() => setSelectedTask(row)}>เปิดรายละเอียด <ArrowRight size={14} /></button>
         </article>
       })}</div> : <EmptyState compact title={completedView ? 'ยังไม่มีใบงานที่เสร็จแล้ว' : 'ยังไม่มีใบงาน'} detail={query ? 'ไม่พบใบงานที่ตรงกับคำค้นหา' : completedView ? 'งานจะแสดงที่นี่เมื่อส่งมอบแล้วหรือ Admin ปิดผลเรียบร้อย' : 'ใบงานที่เปิดแล้วจะแสดงที่นี่'} />}
       {!demo && !loading && !error && pageCount > 1 && <div className="list-footer"><span>หน้า {page + 1} จาก {pageCount} · {totalOrders.toLocaleString('th-TH')} ใบงาน</span><div><button type="button" className="icon-button" aria-label="หน้าก่อนหน้า" disabled={page === 0} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft size={16} /></button><span className="page-number">{page + 1}</span><button type="button" className="icon-button" aria-label="หน้าถัดไป" disabled={page + 1 >= pageCount} onClick={() => setPage(value => Math.min(pageCount - 1, value + 1))}><ChevronRight size={16} /></button></div></div>}
     </section>
-    {selectedTask && <WorkOrderDetailDialog task={selectedTask} role={role} demo={false} onClose={() => { setSelectedTask(null); setReload(value => value + 1) }} onUpdated={action => { setReload(value => value + 1); onUpdated(action) }} />}
+    {selectedTask && <WorkOrderDetailDialog task={selectedTask} role={role} demo={demo} readOnly={demo} onClose={() => { setSelectedTask(null); setReload(value => value + 1) }} onUpdated={action => { setReload(value => value + 1); onUpdated(action) }} />}
   </>
 }
 
@@ -1951,17 +1970,15 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
         <button type="button" className="detail-back" aria-label="กลับไปรายการใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><ChevronLeft size={20} /></button>
         <div><span className="detail-eyebrow">รายการ Scanner ในใบงาน</span><h2 id="work-order-title">รายละเอียดการเปลี่ยนเครื่อง</h2></div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
-          {['delivered', 'completed', 'legacy_completed', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage) && (
-            <button
-              type="button"
-              className="secondary-button"
-              style={{ minHeight: '32px', fontSize: '11px', padding: '0 10px' }}
-              onClick={() => setShowCertificate(true)}
-              title="พิมพ์ใบส่งมอบและบันทึกผลการเปลี่ยนเครื่องสแกนบาร์โค้ด"
-            >
-              <Printer size={15} /> ใบส่งมอบงาน
-            </button>
-          )}
+          <button
+            type="button"
+            className="secondary-button"
+            style={{ minHeight: '32px', fontSize: '11px', padding: '0 10px' }}
+            onClick={() => setShowCertificate(true)}
+            title="พิมพ์ใบส่งมอบและบันทึกผลการเปลี่ยนเครื่องสแกนบาร์โค้ด"
+          >
+            <Printer size={15} /> พิมพ์ใบส่งมอบ
+          </button>
           <button type="button" className="detail-close" aria-label="ปิดใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><X size={18} /></button>
         </div>
       </header>
@@ -2076,6 +2093,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
           new_serial: newSerialInput || newSerial,
           workflow_outcome: outcomeInput || outcome,
         }}
+        demo={demo}
         onClose={() => setShowCertificate(false)}
       />
     )}

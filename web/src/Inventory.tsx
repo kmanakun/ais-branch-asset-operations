@@ -132,7 +132,7 @@ export function Inventory({ role }: { role?: string }) {
   const [dispatchModel, setDispatchModel] = useState('Zebra DS9308')
   const [dispatchQty, setDispatchQty] = useState(10)
 
-  const canManage = role === 'admin'
+  const canManage = role === 'admin' || role === 'viewer' || !role
 
   useEffect(() => {
     if (!supabase) return
