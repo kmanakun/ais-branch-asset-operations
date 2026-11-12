@@ -102,59 +102,112 @@ app.get('/auth/me', (c) => {
 app.get('/dashboard/summary', async (c) => {
   const user = c.get('user')
 
-  const stats = await c.env.DB.prepare(`
-    SELECT 
-      COUNT(s.id) as total_scanners,
-      COUNT(DISTINCT s.branch_id) as total_branches,
-      SUM(CASE WHEN t.status IS NULL OR t.status = 'open' OR t.status = 'cancelled' THEN 1 ELSE 0 END) as open_count,
-      SUM(CASE WHEN t.status IN ('in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception') THEN 1 ELSE 0 END) as on_process_count,
-      SUM(CASE WHEN t.status = 'awaiting_customer_acceptance' THEN 1 ELSE 0 END) as awaiting_customer_count,
-      SUM(CASE WHEN t.status = 'delivered' THEN 1 ELSE 0 END) as delivered_count
-    FROM scanner_assets s
-    LEFT JOIN replacement_tasks t ON t.id = (
-      SELECT id FROM replacement_tasks 
-      WHERE scanner_asset_id = s.id 
-      ORDER BY created_at DESC, rowid DESC 
-      LIMIT 1
+  const provinceRows = await c.env.DB.prepare(`
+    WITH branch_stats AS (
+      SELECT 
+        b.id as branch_id,
+        b.province,
+        COUNT(s.id) as scanner_count,
+        SUM(CASE WHEN t.status = 'delivered' THEN 1 ELSE 0 END) as delivered_count,
+        SUM(CASE WHEN t.status IN ('in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception') THEN 1 ELSE 0 END) as on_process_count,
+        SUM(CASE WHEN t.status IS NULL OR t.status = 'open' OR t.status = 'cancelled' THEN 1 ELSE 0 END) as open_count
+      FROM branches b
+      LEFT JOIN scanner_assets s ON s.branch_id = b.id
+      LEFT JOIN replacement_tasks t ON t.id = (
+        SELECT id FROM replacement_tasks 
+        WHERE scanner_asset_id = s.id 
+        ORDER BY created_at DESC, rowid DESC 
+        LIMIT 1
+      )
+      GROUP BY b.id
     )
-  `).first<{
-    total_scanners: number
-    total_branches: number
-    open_count: number
-    on_process_count: number
-    awaiting_customer_count: number
+    SELECT 
+      province,
+      COUNT(branch_id) as branch_count,
+      SUM(CASE WHEN scanner_count > 0 AND delivered_count = scanner_count THEN 1 ELSE 0 END) as branches_complete,
+      SUM(CASE WHEN scanner_count = 0 OR delivered_count < scanner_count THEN 1 ELSE 0 END) as branches_remaining,
+      SUM(scanner_count) as scanner_count,
+      SUM(delivered_count) as delivered_count,
+      SUM(on_process_count) as on_process_count,
+      SUM(open_count) as open_count
+    FROM branch_stats
+    GROUP BY province
+    ORDER BY province COLLATE NOCASE ASC
+  `).all<{
+    province: string
+    branch_count: number
+    branches_complete: number
+    branches_remaining: number
+    scanner_count: number
     delivered_count: number
+    on_process_count: number
+    open_count: number
   }>()
 
-  const provinceRows = await c.env.DB.prepare(`
-    SELECT 
-      b.province,
-      COUNT(DISTINCT b.id) as branch_count,
-      COUNT(s.id) as scanner_count,
-      SUM(CASE WHEN t.status = 'delivered' THEN 1 ELSE 0 END) as delivered_count,
-      SUM(CASE WHEN t.status = 'awaiting_customer_acceptance' THEN 1 ELSE 0 END) as awaiting_customer_count
-    FROM branches b
-    LEFT JOIN scanner_assets s ON s.branch_id = b.id
-    LEFT JOIN replacement_tasks t ON t.id = (
-      SELECT id FROM replacement_tasks 
-      WHERE scanner_asset_id = s.id 
-      ORDER BY created_at DESC, rowid DESC 
-      LIMIT 1
-    )
-    GROUP BY b.province
-    ORDER BY b.province COLLATE NOCASE ASC
-  `).all()
+  const provinces = provinceRows.results || []
+
+  let totalScanners = 0
+  let totalBranches = 0
+  let totalBranchesComplete = 0
+  let totalBranchesRemaining = 0
+  let totalOpen = 0
+  let totalOnProcess = 0
+  let totalDelivered = 0
+
+  for (const p of provinces) {
+    totalBranches += Number(p.branch_count) || 0
+    totalBranchesComplete += Number(p.branches_complete) || 0
+    totalBranchesRemaining += Number(p.branches_remaining) || 0
+    totalScanners += Number(p.scanner_count) || 0
+    totalOpen += Number(p.open_count) || 0
+    totalOnProcess += Number(p.on_process_count) || 0
+    totalDelivered += Number(p.delivered_count) || 0
+  }
+
+  // 7-day weekly activity
+  const [openedRes, completedRes] = await Promise.all([
+    c.env.DB.prepare(`
+      SELECT date(created_at) as date, COUNT(*) as count 
+      FROM replacement_tasks 
+      WHERE created_at >= date('now', '-7 days') 
+      GROUP BY date(created_at)
+    `).all<{ date: string; count: number }>(),
+    c.env.DB.prepare(`
+      SELECT date(customer_accepted_at) as date, COUNT(*) as count 
+      FROM replacement_tasks 
+      WHERE customer_accepted_at IS NOT NULL AND customer_accepted_at >= date('now', '-7 days') 
+      GROUP BY date(customer_accepted_at)
+    `).all<{ date: string; count: number }>()
+  ])
+
+  const openedMap = new Map((openedRes.results || []).map(r => [r.date, r.count]))
+  const completedMap = new Map((completedRes.results || []).map(r => [r.date, r.count]))
+
+  const weeklyActivity: Array<{ date: string; opened: number; completed: number }> = []
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date()
+    d.setDate(d.getDate() - i)
+    const dateStr = d.toISOString().slice(0, 10)
+    weeklyActivity.push({
+      date: dateStr,
+      opened: openedMap.get(dateStr) || 0,
+      completed: completedMap.get(dateStr) || 0
+    })
+  }
 
   return c.json({
     summary: {
-      total_scanners: stats?.total_scanners || 0,
-      total_branches: stats?.total_branches || 0,
-      open: stats?.open_count || 0,
-      on_process: stats?.on_process_count || 0,
-      awaiting_customer: stats?.awaiting_customer_count || 0,
-      delivered: stats?.delivered_count || 0
+      total_scanners: totalScanners,
+      total_branches: totalBranches,
+      branches_complete: totalBranchesComplete,
+      branches_remaining: totalBranchesRemaining,
+      open: totalOpen,
+      on_process: totalOnProcess,
+      awaiting_customer: 0,
+      delivered: totalDelivered
     },
-    provinces: provinceRows.results,
+    provinces,
+    weekly_activity: weeklyActivity,
     role: user.role
   })
 })

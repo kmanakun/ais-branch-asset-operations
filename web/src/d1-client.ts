@@ -58,6 +58,8 @@ export const d1Api = {
     summary: {
       total_scanners: number
       total_branches: number
+      branches_complete: number
+      branches_remaining: number
       open: number
       on_process: number
       awaiting_customer: number
@@ -66,9 +68,17 @@ export const d1Api = {
     provinces: Array<{
       province: string
       branch_count: number
+      branches_complete: number
+      branches_remaining: number
       scanner_count: number
       delivered_count: number
-      awaiting_customer_count: number
+      on_process_count: number
+      open_count: number
+    }>
+    weekly_activity: Array<{
+      date: string
+      opened: number
+      completed: number
     }>
     role: string
   }>('/api/dashboard/summary'),

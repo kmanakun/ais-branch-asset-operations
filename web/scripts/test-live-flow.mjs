@@ -153,6 +153,13 @@ async function main() {
   console.log('\n[10/12] Testing /api/dashboard/summary...')
   const summary = await req('/api/dashboard/summary', 'GET', null, 'admin@sym.co.th')
   console.log('  ✔ Dashboard Summary Stats:', summary.summary)
+  if (!Array.isArray(summary.weekly_activity) || summary.weekly_activity.length !== 7) {
+    throw new Error('Dashboard weekly_activity should contain 7 days')
+  }
+  if (typeof summary.summary.branches_complete !== 'number') {
+    throw new Error('Dashboard summary missing branches_complete')
+  }
+  console.log('  ✔ Dashboard Weekly Activity verified (7 days):', summary.weekly_activity.map(d => `${d.date}: ${d.opened}/${d.completed}`).join(', '))
 
   // 11. Task Review Audit Trail
   console.log('\n[11/12] Testing /api/tasks/:id/reviews (Governance Audit Trail)...')

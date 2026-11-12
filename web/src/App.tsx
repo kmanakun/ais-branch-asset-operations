@@ -464,19 +464,28 @@ function App() {
             active_tasks: d1Dash.summary.on_process,
             completed_tasks: d1Dash.summary.delivered
           },
+          weekly_activity: d1Dash.weekly_activity || [],
           province_summary: {
             totals: {
-              total_scanners: d1Dash.summary.total_scanners,
+              branches_total: d1Dash.summary.total_branches,
+              branches_complete: d1Dash.summary.branches_complete,
+              branches_remaining: d1Dash.summary.branches_remaining,
+              scanners_total: d1Dash.summary.total_scanners,
+              scanners_on_process: d1Dash.summary.on_process,
+              scanners_complete: d1Dash.summary.delivered,
               open: d1Dash.summary.open,
               on_process: d1Dash.summary.on_process,
               delivered: d1Dash.summary.delivered,
             },
             provinces: d1Dash.provinces.map(p => ({
               province: p.province,
-              total_scanners: p.scanner_count,
-              open: p.scanner_count - p.delivered_count - p.awaiting_customer_count,
-              on_process: p.awaiting_customer_count,
-              delivered: p.delivered_count,
+              branches_total: p.branch_count,
+              branches_complete: p.branches_complete,
+              branches_remaining: p.branches_remaining,
+              scanners_total: p.scanner_count,
+              scanners_open: p.open_count,
+              scanners_on_process: p.on_process_count,
+              scanners_complete: p.delivered_count,
               progress_percent: p.scanner_count > 0 ? Math.round((p.delivered_count / p.scanner_count) * 100) : 0
             }))
           }
