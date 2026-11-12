@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS replacement_tasks (
     branch_work_order_id TEXT NOT NULL REFERENCES branch_work_orders(id) ON DELETE RESTRICT,
     scanner_asset_id TEXT NOT NULL REFERENCES scanner_assets(id) ON DELETE RESTRICT,
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'delivered', 'pending_exception', 'cancelled')),
-    outcome TEXT DEFAULT 'replaced' CHECK (outcome IN ('replaced', 'scanner_missing', 'different_device_found', 'aborted')),
+    outcome TEXT DEFAULT 'replaced' CHECK (outcome IN ('replaced', 'scanner_missing', 'different_device_found', 'aborted', 'no_damage_found', 'target_device_not_found')),
     observed_serial TEXT,
     new_serial_number TEXT,
     new_model_name TEXT,

@@ -110,6 +110,7 @@ const statusPresentation: Record<string, { label: string; tone: string }> = {
   in_progress: { label: 'กำลังดำเนินการ', tone: 'progress' },
   awaiting_admin_acceptance: { label: 'Pending · งานเดิมรอ Admin', tone: 'blocked' },
   awaiting_admin_exception_review: { label: 'Pending · รอ Admin ตรวจ', tone: 'blocked' },
+  pending_exception: { label: 'Pending · รอ Admin พิจารณา', tone: 'blocked' },
   replaced: { label: 'เปลี่ยนเครื่องสำเร็จ', tone: 'done' },
   no_damage_found: { label: 'ไม่พบเครื่องชำรุด', tone: 'neutral' },
   different_device_found: { label: 'ไม่พบ SN ตามใบงาน · พบเครื่องอื่น', tone: 'blocked' },
@@ -1954,11 +1955,14 @@ function AssetDetailDialog({ asset, role, demo, onClose, onUpdated }: { asset: R
             started_at: found.started_at,
             started_by: found.started_by,
             closeout_submitted_at: found.closeout_submitted_at,
+            closeout_submitted_by: (found as any).closeout_submitted_by,
             admin_accepted_at: found.admin_accepted_at,
             customer_accepted_at: found.customer_accepted_at,
             customer_rejected_at: found.customer_rejected_at,
             customer_reject_reason: found.customer_reject_reason,
             version: found.version || 1,
+            can_admin_accept: role === 'admin',
+            can_resolve_pending: role === 'admin',
           }
           setWorkHistory([row])
           setSelectedHistoryTaskId(found.task_id)
@@ -2081,15 +2085,15 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
     lost: 'สูญหาย',
     other: 'อื่น ๆ',
   }
-  const isPendingStage = ['blocked', 'pending', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage)
+  const isPendingStage = ['blocked', 'pending', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review', 'pending_exception'].includes(stage)
   const currentStep = stage === 'open' ? 0
     : stage === 'in_progress' ? 1
-    : ['blocked', 'pending', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage) ? 2
+    : ['blocked', 'pending', 'awaiting_admin_acceptance', 'awaiting_admin_exception_review', 'pending_exception'].includes(stage) ? 2
     : ['delivered', 'exception_resolved', 'legacy_completed', 'completed'].includes(stage) ? 3 : -1
   const canAct = !demo && !readOnly && ['field_technician', 'admin'].includes(String(role))
   const canManage = !demo && !readOnly && role === 'admin' && !['completed', 'cancelled'].includes(status)
-  const isPendingReview = canManage && ['awaiting_admin_acceptance', 'awaiting_admin_exception_review'].includes(stage)
-  const canResolvePending = isPendingReview && (task.can_resolve_pending === true || task.can_admin_accept === true)
+  const isPendingReview = canManage && ['awaiting_admin_acceptance', 'awaiting_admin_exception_review', 'pending_exception'].includes(stage)
+  const canResolvePending = isPendingReview && (task.can_resolve_pending === true || task.can_admin_accept === true || (!demo && role === 'admin'))
   const canEditTechnicianEvidence = canAct && ['open', 'in_progress'].includes(stage)
   const editableSlots = useMemo<EvidenceSlot[]>(() => canResolvePending
     ? adminReviewEvidenceSlots

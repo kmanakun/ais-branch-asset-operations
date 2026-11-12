@@ -184,7 +184,12 @@ app.get('/branches', async (c) => {
       SUM(CASE WHEN t.status = 'awaiting_customer_acceptance' THEN 1 ELSE 0 END) as awaiting_customer_count
     FROM branches b
     LEFT JOIN scanner_assets s ON s.branch_id = b.id
-    LEFT JOIN replacement_tasks t ON t.scanner_asset_id = s.id
+    LEFT JOIN replacement_tasks t ON t.id = (
+      SELECT id FROM replacement_tasks 
+      WHERE scanner_asset_id = s.id 
+      ORDER BY created_at DESC, rowid DESC 
+      LIMIT 1
+    )
     WHERE 1=1
   `
   const params: any[] = []
@@ -243,12 +248,17 @@ app.get('/branches/:id', async (c) => {
       s.com_years,
       t.id as task_id,
       t.status as task_status,
-      t.outcome,
+      CASE 
+        WHEN t.outcome = 'aborted' THEN 'no_damage_found'
+        WHEN t.outcome = 'scanner_missing' THEN 'target_device_not_found'
+        ELSE t.outcome 
+      END as outcome,
       t.observed_serial,
       t.new_serial_number,
       t.started_at,
       t.started_by,
       t.closeout_submitted_at,
+      t.closeout_submitted_by,
       t.admin_accepted_at,
       t.customer_accepted_at,
       t.customer_rejected_at,
@@ -269,7 +279,7 @@ app.get('/branches/:id', async (c) => {
   // ซ่อนข้อมูลภายใน SYM หากเป็น Gable Customer Reviewer
   const sanitizedScanners = scanners.results.map((row: any) => {
     if (user.role === 'customer_reviewer') {
-      const { started_by, ...rest } = row
+      const { started_by, closeout_submitted_by, ...rest } = row
       return rest
     }
     return row
@@ -320,7 +330,11 @@ app.get('/scanners', async (c) => {
       t.id as task_id,
       COALESCE(t.status, 'open') as status,
       t.status as task_status,
-      t.outcome,
+      CASE 
+        WHEN t.outcome = 'aborted' THEN 'no_damage_found'
+        WHEN t.outcome = 'scanner_missing' THEN 'target_device_not_found'
+        ELSE t.outcome 
+      END as outcome,
       t.observed_serial,
       t.new_serial_number,
       t.new_serial_number as new_serial,
@@ -328,6 +342,7 @@ app.get('/scanners', async (c) => {
       t.started_at,
       t.started_by,
       t.closeout_submitted_at,
+      t.closeout_submitted_by,
       t.admin_accepted_at,
       t.customer_accepted_at,
       t.customer_rejected_at,
@@ -383,7 +398,12 @@ app.get('/scanners', async (c) => {
     SELECT COUNT(*) as count 
     FROM scanner_assets s 
     JOIN branches b ON b.id = s.branch_id 
-    LEFT JOIN replacement_tasks t ON t.scanner_asset_id = s.id
+    LEFT JOIN replacement_tasks t ON t.id = (
+      SELECT id FROM replacement_tasks 
+      WHERE scanner_asset_id = s.id 
+      ORDER BY created_at DESC, rowid DESC 
+      LIMIT 1
+    )
     WHERE 1=1
   `
   const countParams: any[] = []
@@ -393,9 +413,9 @@ app.get('/scanners', async (c) => {
   }
   if (status && status !== 'all') {
     if (status === 'open') {
-      countSql += " AND (t.status IS NULL OR t.status = 'open')"
+      countSql += " AND (t.status IS NULL OR t.status = 'open' OR t.status = 'cancelled')"
     } else if (status === 'on_process') {
-      countSql += " AND t.status IN ('in_progress', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception')"
+      countSql += " AND t.status IN ('in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception')"
     } else if (status === 'complete') {
       countSql += " AND t.status = 'delivered'"
     }
@@ -417,7 +437,7 @@ app.get('/scanners', async (c) => {
 
   const sanitizedRows = rows.results.map((r: any) => {
     if (user.role === 'customer_reviewer') {
-      const { started_by, ...rest } = r
+      const { started_by, closeout_submitted_by, ...rest } = r
       return rest
     }
     return r
@@ -451,7 +471,11 @@ app.get('/tasks/pending', async (c) => {
       t.id,
       t.status as task_status,
       t.status,
-      t.outcome,
+      CASE 
+        WHEN t.outcome = 'aborted' THEN 'no_damage_found'
+        WHEN t.outcome = 'scanner_missing' THEN 'target_device_not_found'
+        ELSE t.outcome 
+      END as outcome,
       t.observed_serial,
       t.new_serial_number,
       t.notes,
@@ -915,9 +939,39 @@ app.post('/tasks/:id/closeout', async (c) => {
     version: number
   }>()
 
-  const task = await c.env.DB.prepare('SELECT id, status, version FROM replacement_tasks WHERE id = ?').bind(taskId).first<{ id: string; status: string; version: number }>()
+  const task = await c.env.DB.prepare(
+    'SELECT id, status, version, scanner_asset_id FROM replacement_tasks WHERE id = ?'
+  ).bind(taskId).first<{ id: string; status: string; version: number; scanner_asset_id: string }>()
   if (!task) return c.json({ error: 'ไม่พบใบงาน' }, 404)
+  if (['delivered', 'awaiting_customer_acceptance'].includes(task.status)) {
+    return c.json({ error: 'ใบงานนี้ได้รับการตรวจรับแล้ว ไม่สามารถส่งผลซ้ำได้' }, 400)
+  }
   if (task.version !== version) return c.json({ error: 'ข้อมูลมีการเปลี่ยนแปลง กรุณารีเฟรชหน้าจอ (Optimistic Lock Error)' }, 409)
+
+  const cleanOutcome = outcome || 'replaced'
+  const cleanNewSn = new_serial_number?.trim() || null
+  const cleanObservedSn = observed_serial?.trim() || null
+
+  if (cleanOutcome === 'replaced') {
+    if (!cleanNewSn) {
+      return c.json({ error: 'กรณีเปลี่ยนเครื่องสำเร็จ กรุณาระบุหมายเลขเครื่องใหม่ (New Serial Number)' }, 400)
+    }
+    const dup = await c.env.DB.prepare(
+      'SELECT id FROM scanner_assets WHERE com_sn = ? AND id != ?'
+    ).bind(cleanNewSn, task.scanner_asset_id).first()
+    if (dup) {
+      return c.json({ error: `หมายเลขเครื่องใหม่ ${cleanNewSn} ซ้ำกับอุปกรณ์ที่มีอยู่แล้วในระบบ` }, 409)
+    }
+  }
+
+  let dbOutcome = cleanOutcome
+  if (cleanOutcome === 'no_damage_found') {
+    dbOutcome = 'aborted'
+  } else if (cleanOutcome === 'target_device_not_found') {
+    dbOutcome = 'scanner_missing'
+  }
+
+  const nextStatus = cleanOutcome === 'replaced' ? 'awaiting_admin_acceptance' : 'pending_exception'
 
   await c.env.DB.prepare(`
     UPDATE replacement_tasks SET
@@ -925,17 +979,18 @@ app.post('/tasks/:id/closeout', async (c) => {
       observed_serial = ?,
       notes = ?,
       outcome = ?,
-      status = 'awaiting_admin_acceptance',
+      status = ?,
       closeout_submitted_at = datetime('now'),
       closeout_submitted_by = ?,
       version = version + 1,
       updated_at = datetime('now')
     WHERE id = ? AND version = ?
   `).bind(
-    new_serial_number || null,
-    observed_serial || null,
+    cleanNewSn,
+    cleanObservedSn,
     notes || null,
-    outcome || 'replaced',
+    dbOutcome,
+    nextStatus,
     user.email,
     taskId,
     version
@@ -943,7 +998,7 @@ app.post('/tasks/:id/closeout', async (c) => {
 
   return c.json({
     success: true,
-    status: 'awaiting_admin_acceptance'
+    status: nextStatus
   })
 })
 
@@ -1196,7 +1251,11 @@ app.get('/export/raw-data', async (c) => {
       s.model_name as old_model,
       t.status as task_status,
       t.new_serial_number,
-      t.outcome,
+      CASE 
+        WHEN t.outcome = 'aborted' THEN 'no_damage_found'
+        WHEN t.outcome = 'scanner_missing' THEN 'target_device_not_found'
+        ELSE t.outcome 
+      END as outcome,
       t.started_at,
       t.closeout_submitted_at,
       t.admin_accepted_at,

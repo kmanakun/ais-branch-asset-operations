@@ -120,6 +120,7 @@ export const d1Api = {
       started_at: string | null
       started_by?: string | null
       closeout_submitted_at: string | null
+      closeout_submitted_by?: string | null
       admin_accepted_at: string | null
       customer_accepted_at: string | null
       customer_rejected_at: string | null
