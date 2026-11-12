@@ -50,3 +50,11 @@ test('Edge API routes contain discovery, action, and evidence delete endpoints',
   assert.match(routeCode, /app\.post\('\/tasks\/:id\/action'/)
   assert.match(routeCode, /app\.delete\('\/tasks\/:id\/evidence\/:slot'/)
 })
+
+test('Edge API routes contain allowlist user management and review audit trail', () => {
+  const routeCode = readFileSync('functions/api/[[route]].ts', 'utf-8')
+  assert.match(routeCode, /app\.get\('\/tasks\/:id\/reviews'/)
+  assert.match(routeCode, /app\.get\('\/allowlist'/)
+  assert.match(routeCode, /app\.post\('\/allowlist'/)
+  assert.match(routeCode, /app\.post\('\/allowlist\/:id\/toggle'/)
+})

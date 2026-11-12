@@ -300,4 +300,47 @@ export const d1Api = {
   }>(`/api/tasks/${taskId}/evidence/${slot}`, {
     method: 'DELETE',
   }),
+
+  // 19. ประวัติการตรวจรับของใบงาน (Task Review Audit Trail)
+  getTaskReviews: (taskId: string) => request<{
+    reviews: Array<{
+      id: string
+      task_id: string
+      stage: 'sym' | 'customer'
+      decision: 'pass' | 'reject'
+      reason: string | null
+      reviewer_email: string
+      created_at: string
+    }>
+  }>(`/api/tasks/${taskId}/reviews`),
+
+  // 20. รายชื่อผู้ใช้งานใน Allowlist (Admin Only)
+  getAllowlistUsers: () => request<{
+    users: Array<{
+      id: string
+      email: string
+      role: string
+      full_name: string | null
+      is_active: number
+      created_at: string
+    }>
+  }>('/api/allowlist'),
+
+  // 21. เพิ่ม/อัปเดตผู้ใช้งานใน Allowlist
+  addAllowlistUser: (payload: { email: string; role: string; full_name?: string }) => request<{
+    success: boolean
+    message: string
+  }>('/api/allowlist', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // 22. เปิด/ปิดการใช้งานผู้ใช้ใน Allowlist
+  toggleAllowlistUser: (id: string) => request<{
+    success: boolean
+    is_active: number
+    message: string
+  }>(`/api/allowlist/${id}/toggle`, {
+    method: 'POST',
+  }),
 }

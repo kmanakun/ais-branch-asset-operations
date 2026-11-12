@@ -34,6 +34,7 @@ import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, register
 import { d1Api, getDevEmail, setDevEmail } from './d1-client'
 
 type UserContext = {
+  email?: string
   role: string
   display_name?: string
   teams?: string[]
@@ -421,6 +422,7 @@ function App() {
       const me = await d1Api.getMe()
       if (requestId !== authRequestId.current) return
       setUserContext({
+        email: me.email,
         role: me.role,
         display_name: me.full_name,
         teams: []
@@ -854,7 +856,7 @@ function App() {
             setListReloadKey(key => key + 1)
             await loadContext()
           }} />}
-          {activeMenu === 'people' && canUseAdminModules && <People />}
+          {activeMenu === 'people' && canUseAdminModules && <People currentEmail={userContext?.email} role={role} />}
           <footer className="page-footer"><span>© 2026 AIS Branch & Asset Operations</span><span>V1 · ระบบนำร่อง</span></footer>
         </div>
       </main>
@@ -2127,6 +2129,21 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
     : serverVersion
   const validTaskVersion = Boolean(taskId) && Number.isInteger(version) && version > 0
   const canViewEvidence = !demo && ['admin', 'field_technician'].includes(String(role))
+  const [reviews, setReviews] = useState<Array<any>>([])
+
+  useEffect(() => {
+    if (demo || !taskId) return
+    let active = true
+    void (async () => {
+      try {
+        const res = await d1Api.getTaskReviews(taskId)
+        if (active) setReviews(res.reviews || [])
+      } catch {
+        if (active) setReviews([])
+      }
+    })()
+    return () => { active = false }
+  }, [taskId, demo])
 
   const submitAction = async (action: 'start' | 'block' | 'resume', reason?: string) => {
     setActionError('')
@@ -2240,6 +2257,44 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
           <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <label className="work-order-new-serial-input"><span>SN เครื่องใหม่ *</span><input aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่" /></label> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
           <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} /><DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} /><DetailField label="รุ่นเครื่องที่พบ" value={task.observed_model} /><DetailField label="ผลการติดตั้งและทดสอบ" value={installResult || 'ยังไม่มีข้อมูล'} /><DetailField label="สถานะเครื่องเดิม" value={recordedOldStatus ? oldStatusLabels[String(recordedOldStatus)] || String(recordedOldStatus) : 'ยังไม่มีข้อมูล'} /><DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || 'ยังไม่มีข้อมูล'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
+          {reviews.length > 0 && (
+            <section className="detail-section">
+              <h3>ประวัติการตรวจรับ (Governance Audit Trail)</h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {reviews.map(rev => {
+                  const isSym = rev.stage === 'sym'
+                  const isPass = rev.decision === 'pass'
+                  return (
+                    <div
+                      key={rev.id}
+                      style={{
+                        padding: '10px 14px',
+                        borderRadius: '6px',
+                        border: '1px solid #e2e8f0',
+                        background: isPass ? '#f0fdf4' : '#fef2f2',
+                        fontSize: '13px'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <strong>{isSym ? 'ด่านที่ 1: SYM Admin ตรวจรับงาน' : 'ด่านที่ 2: Gable Customer ตรวจรับมอบ'}</strong>
+                        <span style={{ fontSize: '11px', fontWeight: 600, color: isPass ? '#15803d' : '#b91c1c' }}>
+                          {isPass ? '✔ ผ่านการตรวจรับ' : '✖ ปฏิเสธงาน / ส่งกลับช่าง'}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#64748b' }}>
+                        ผู้ตรวจ: {rev.reviewer_email} · เมื่อ {formatDate(rev.created_at)}
+                      </div>
+                      {rev.reason && (
+                        <div style={{ marginTop: '6px', fontSize: '12px', color: '#b91c1c' }}>
+                          <strong>เหตุผล:</strong> {rev.reason}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </section>
+          )}
           {((canViewEvidence && Boolean(taskId)) || demo) && <TaskEvidencePanel key={taskId || 'demo'} taskId={taskId || undefined} canEdit={canEditEvidence} editableSlots={editableSlots} requiredSlots={stageRequiredSlots} canView={canViewEvidence} previewOnly={demo} outcome={outcome || outcomeInput} onRequiredReady={setRequiredEvidenceReady} onBusyChange={setEvidenceBusy} onTaskStarted={nextVersion => {
             setEvidenceStartedTask(current => current?.id === taskId && current.version > nextVersion ? current : { id: taskId, version: nextVersion })
             onUpdated('evidence_started')
@@ -2481,12 +2536,216 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
   </div>
 }
 
-function People() {
-  const roles = [
-    ['Admin', 'ดูแลทะเบียนและสิทธิ์ เปิดหรือยกเลิกใบงาน และพิจารณารายการ Pending', 'Admin ประจำ Office'],
-    ['Field Technician', 'เห็นใบงานที่เปิดไว้ และบันทึกผลหน้างานได้', 'ช่าง Onsite'],
-  ]
-  return <div className="people-layout"><section className="panel roles-panel"><div className="panel-heading"><div><h2>บทบาทงานปฏิบัติการ</h2><p>Admin ประจำ Office และช่าง Onsite</p></div><div className="readonly-badge"><LockKeyhole size={14} /> อ่านอย่างเดียว</div></div><div className="roles-list">{roles.map(([role, description, label]) => <div className="role-row" key={role}><div className={'role-avatar role-' + role.toLowerCase().replaceAll(' ', '-')}>{role === 'Field Technician' ? <Wrench size={17} /> : <Users size={17} />}</div><div className="role-copy"><strong>{role}</strong><span>{description}</span></div><span className="role-label">{label}</span></div>)}</div><p className="team-access-note">ช่างทุกคนเข้าถึงใบงานที่เปิดไว้ได้ บันทึกงานและแนบหลักฐานได้โดยไม่จำกัดทีม</p></section></div>
+function People({ currentEmail, role }: { currentEmail?: string; role?: string }) {
+  const [users, setUsers] = useState<Array<{ id: string; email: string; role: string; full_name: string | null; is_active: number; created_at: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState('')
+  const [formSuccess, setFormSuccess] = useState('')
+  const [reload, setReload] = useState(0)
+
+  // Form state
+  const [newEmail, setNewEmail] = useState('')
+  const [newName, setNewName] = useState('')
+  const [newRole, setNewRole] = useState('field_technician')
+
+  const isAdmin = role === 'admin'
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError('')
+    void (async () => {
+      try {
+        const res = await d1Api.getAllowlistUsers()
+        if (!active) return
+        setUsers(res.users || [])
+      } catch (err: any) {
+        if (!active) return
+        setError(err.message || 'โหลดรายชื่อผู้ใช้ไม่สำเร็จ')
+      } finally {
+        if (active) setLoading(false)
+      }
+    })()
+    return () => { active = false }
+  }, [reload])
+
+  const handleAddUser = async (e: FormEvent) => {
+    e.preventDefault()
+    setFormError('')
+    setFormSuccess('')
+    if (!newEmail.trim()) {
+      setFormError('กรุณากรอกอีเมล')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const res = await d1Api.addAllowlistUser({
+        email: newEmail.trim(),
+        full_name: newName.trim() || undefined,
+        role: newRole,
+      })
+      setFormSuccess(res.message || 'เพิ่มผู้ใช้งานสำเร็จ')
+      setNewEmail('')
+      setNewName('')
+      setReload(r => r + 1)
+    } catch (err: any) {
+      setFormError(err.message || 'เพิ่มผู้ใช้งานไม่สำเร็จ')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleToggleActive = async (user: { id: string; email: string; is_active: number }) => {
+    try {
+      await d1Api.toggleAllowlistUser(user.id)
+      setReload(r => r + 1)
+    } catch (err: any) {
+      alert(err.message || 'ปรับเปลี่ยนสถานะไม่สำเร็จ')
+    }
+  }
+
+  const roleLabels: Record<string, { label: string; tone: string }> = {
+    admin: { label: 'Admin Office', tone: 'ready' },
+    field_technician: { label: 'ช่าง Onsite', tone: 'done' },
+    customer_reviewer: { label: 'Gable Reviewer', tone: 'progress' },
+    viewer: { label: 'Viewer', tone: 'neutral' },
+  }
+
+  return (
+    <div className="people-layout">
+      {/* ส่วนจัดการ Allowlist ผู้ใช้งาน */}
+      <section className="panel allowlist-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>รายชื่อผู้มีสิทธิ์ใช้งานระบบ (Google Sign-In Allowlist)</h2>
+            <p>ควบคุมการเข้าถึงระบบผ่าน Google OAuth 2.0 จัดเก็บบน Cloudflare D1 (0 บาท)</p>
+          </div>
+          <button type="button" className="text-button" disabled={loading} onClick={() => setReload(r => r + 1)}>
+            รีเฟรช
+          </button>
+        </div>
+
+        {loading ? (
+          <EmptyState compact loading />
+        ) : error ? (
+          <EmptyState compact title="โหลดรายชื่อไม่สำเร็จ" detail={error} onRetry={() => setReload(r => r + 1)} />
+        ) : (
+          <div className="allowlist-table-wrapper" style={{ overflowX: 'auto', marginBottom: '24px' }}>
+            <table className="summary-table" style={{ width: '100%', fontSize: '13px' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>อีเมล (Google Account)</th>
+                  <th style={{ textAlign: 'left' }}>ชื่อ-นามสกุล</th>
+                  <th style={{ textAlign: 'left' }}>บทบาท (Role)</th>
+                  <th style={{ textAlign: 'center' }}>สถานะ</th>
+                  {isAdmin && <th style={{ textAlign: 'right' }}>การจัดการ</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {users.map(u => {
+                  const rolePres = roleLabels[u.role] || { label: u.role, tone: 'neutral' }
+                  const isCurrent = u.email === currentEmail
+                  return (
+                    <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.6 }}>
+                      <td>
+                        <strong>{u.email}</strong>
+                        {isCurrent && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#16a34a' }}>(คุณ)</span>}
+                      </td>
+                      <td>{u.full_name || '—'}</td>
+                      <td>
+                        <StatusPill label={rolePres.label} tone={rolePres.tone} />
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{
+                          display: 'inline-block',
+                          padding: '2px 8px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: u.is_active ? '#dcfce7' : '#f1f5f9',
+                          color: u.is_active ? '#15803d' : '#64748b'
+                        }}>
+                          {u.is_active ? 'เปิดใช้งาน' : 'ระงับชั่วคราว'}
+                        </span>
+                      </td>
+                      {isAdmin && (
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="text-button"
+                            style={{ fontSize: '12px', color: isCurrent ? '#94a3b8' : u.is_active ? '#b91c1c' : '#16a34a' }}
+                            disabled={isCurrent}
+                            onClick={() => handleToggleActive(u)}
+                          >
+                            {u.is_active ? 'ระงับสิทธิ์' : 'เปิดสิทธิ์'}
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ฟอร์มเพิ่มผู้ใช้งาน (สำหรับ Admin) */}
+        {isAdmin && (
+          <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '16px' }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: '14px' }}>เพิ่มผู้ใช้งานใหม่เข้า Allowlist</h3>
+            {formError && <div className="form-error" role="alert" style={{ marginBottom: '12px' }}>{formError}</div>}
+            {formSuccess && <div style={{ color: '#16a34a', fontSize: '13px', marginBottom: '12px', background: '#dcfce7', padding: '8px 12px', borderRadius: '6px' }}>{formSuccess}</div>}
+            <form onSubmit={handleAddUser} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', alignItems: 'end' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', gap: '4px' }}>
+                อีเมล Google (@sym.co.th / @gmail.com)
+                <input
+                  type="email"
+                  required
+                  placeholder="technician@sym.co.th"
+                  value={newEmail}
+                  onChange={e => setNewEmail(e.target.value)}
+                  style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', gap: '4px' }}>
+                ชื่อ-นามสกุล (ไม่บังคับ)
+                <input
+                  type="text"
+                  placeholder="สมชาย ใจดี"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', gap: '4px' }}>
+                บทบาท (Role)
+                <select
+                  value={newRole}
+                  onChange={e => setNewRole(e.target.value)}
+                  style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                >
+                  <option value="field_technician">ช่าง Onsite (Field Technician)</option>
+                  <option value="admin">Admin ประจำ Office</option>
+                  <option value="customer_reviewer">Gable Customer Reviewer</option>
+                  <option value="viewer">Viewer (ดูได้อย่างเดียว)</option>
+                </select>
+              </label>
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={submitting}
+                style={{ height: '36px' }}
+              >
+                {submitting ? 'กำลังบันทึก…' : 'เพิ่มผู้ใช้งาน'}
+              </button>
+            </form>
+          </div>
+        )}
+      </section>
+    </div>
+  )
 }
 
 function EmptyState({ title, detail, loading, compact, onRetry }: { title?: string; detail?: string; loading?: boolean; compact?: boolean; onRetry?: () => void }) {

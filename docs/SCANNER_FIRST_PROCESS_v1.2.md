@@ -31,8 +31,8 @@
 
 ### มาตรการยืนยันตัวตน (Authentication & Allowlist)
 1. **Google OAuth 2.0:** เข้าสู่ระบบด้วยบัญชี Google ที่ผ่านการอนุมัติ (ไม่มีการตั้ง/จำรหัสผ่านในระบบ)
-2. **Database Auth Hook (`before_user_created`):** สกัดกั้นอีเมลที่ไม่ได้อยู่ใน `app_private.google_signin_allowlist` ตั้งแต่ระดับ Database ก่อนที่ Supabase Auth จะสร้างบัญชี
-3. **Database-Level Authorization:** สิทธิ์การอ่าน/เขียนถูกควบคุมด้วย **Row Level Security (RLS)** และ **RPC Functions ใน `app_private`** เท่านั้น การซ่อนปุ่มบน UI ไม่ถือเป็นด่านความปลอดภัย
+2. **Cloudflare D1 Allowlist Middleware:** สกัดกั้นอีเมลที่ไม่ได้อยู่ในตาราง `google_signin_allowlist` ตั้งแต่ระดับ Edge Functions ก่อนเข้าถึง API
+3. **Role-Based Authorization & 4-Eyes Enforced:** สิทธิ์การอ่าน/เขียนถูกควบคุมด้วย Edge Native Hono API และ D1 Transactions พร้อมทั้งบังคับหลัก 4-Eyes ห้ามผู้ปิดงานเซ็นตรวจรับงานของตนเอง
 
 ---
 
@@ -118,16 +118,18 @@ flowchart TD
 * **Mobile-First CSS:** ออกแบบรองรับหน้าจอสมาร์ทโฟนของช่างตั้งแต่ความกว้าง 320px ขึ้นไป พร้อมรองรับ Virtual Keyboard
 * **AIS Green Design System:** ใช้ชุดสีองค์กร สะอาด ชัดเจน และสื่อสารสถานะอย่างแม่นยำ
 
-### 6.2 Edge & Static Delivery
-* **Cloudflare Static Assets / Workers:** เสิร์ฟไฟล์แบบ Static 100% ควบคุมต้นทุน 0 บาท
-* **Content Security Policy (CSP):** กำหนด Policy ในไฟล์ `_headers` อนุญาตเฉพาะ Supabase HTTPS/WSS origin เท่านั้น ป้องกัน XSS และ Data Exfiltration
+### 6.2 Edge Compute & Delivery (Cloudflare Pages + Hono)
+* **Cloudflare Pages:** เสิร์ฟ Static Bundle (JS/CSS/HTML) ขนาดเล็กพิเศษ (~158 kB gzip) ภายใต้โควตาฟรี
+* **Hono on Cloudflare Pages Functions (`web/functions/api/[[route]].ts`):** Edge Native API ประสิทธิภาพสูง ตอบสนองทันทีจาก Cloudflare Global Edge Network
+* **Content Security Policy (CSP):** กำหนด Policy ในไฟล์ `_headers` เป็น `connect-src 'self'` ป้องกัน XSS และ Data Exfiltration 100%
 
-### 6.3 Database & Storage Layer
-* **Supabase PostgreSQL 15+:**
-  * แยก Schema ชัดเจน: `public` สำหรับ View ปลอดภัย และ Safe Public RPC Wrappers; `app_private` สำหรับ Core Tables, Auth Hook, ข้อมูลความลับ และ Security Functions
-  * **Viewer Privacy:** กลไก Masking ปิดบังบางส่วนของ Serial Number สำหรับผู้มีสิทธิ์ระดับ Viewer
-* **Evidence Storage:**
-  * Supabase Private Bucket บังคับตรวจสอบ Content-Type, Content-Length และผูกสิทธิ์ตาม Task ID เพื่อป้องกันการอัปโหลดไฟล์แปลกปลอม
+### 6.3 Database & Storage Layer (Cloudflare D1 & R2)
+* **Cloudflare D1 (SQLite Edge Database):**
+  * โควตาฟรี 5,000,000 Reads/วัน, 100,000 Writes/วัน ครอบคลุมงานสแกนเนอร์ทั้ง 1,992 เครื่องใน 580 สาขา (0 บาท)
+  * จัดเก็บตารางหลัก: `branches`, `scanner_assets`, `replacement_tasks`, `task_reviews`, `scanner_discovery_reports` และ `google_signin_allowlist`
+* **Cloudflare R2 Evidence Storage:**
+  * จัดเก็บภาพถ่าย 10 รูปและลายเซ็นหน้างาน โดยไม่มีค่าธรรมเนียม Egress Bandwidth
+  * ผูกสิทธิ์และตรวจสอบความถูกต้องของภาพป้องกันการ Tampering
 
 ---
 
@@ -136,11 +138,11 @@ flowchart TD
 ### 7.1 การทดสอบอัตโนมัติ (Local Verification)
 ก่อนส่งมอบงานทุกครั้ง ต้องรันคำสั่งตรวจสอบในโฟลเดอร์ `web/`:
 ```powershell
-npm run typecheck    # ตรวจสอบ TypeScript ทั้งโปรเจกต์
+npm run typecheck    # ตรวจสอบ TypeScript ทั้งโปรเจกต์ (0 errors)
 npm run build        # ทดสอบการ Build Bundle และสร้าง CSP headers
-npm run test:xlsx    # ทดสอบตัวประมวลผลไฟล์ Excel
-npm run test:app     # ทดสอบ E2E Flow ของแอปพลิเคชัน
-npm run test:db      # ทดสอบความปลอดภัยและสิทธิ์ฐานข้อมูลด้วย pgTAP (386+ assertions)
+npm run test:xlsx    # ทดสอบตัวอ่านและตรวจสอบไฟล์ Excel
+npm run test:d1      # ทดสอบ D1 Schema & Edge API Endpoints
+npm run test:e2e     # ทดสอบ Full Live E2E Flow บน Production Pages
 npm run test:all     # รันชุดทดสอบทั้งหมดรวมกัน
 ```
 

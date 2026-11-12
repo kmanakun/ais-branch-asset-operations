@@ -1382,4 +1382,104 @@ app.post('/discovery/:id/review', async (c) => {
   return c.json({ success: true, status: decision === 'approve' ? 'approved' : 'rejected' })
 })
 
+// 17. ประวัติการตรวจรับของใบงาน (Task Review Audit Trail)
+app.get('/tasks/:id/reviews', async (c) => {
+  const taskId = c.req.param('id')
+  const rows = await c.env.DB.prepare(`
+    SELECT id, task_id, stage, decision, reason, reviewer_email, created_at
+    FROM task_reviews
+    WHERE task_id = ?
+    ORDER BY created_at ASC
+  `).bind(taskId).all()
+
+  return c.json({ reviews: rows.results || [] })
+})
+
+// 18. รายชื่อผู้ใช้งานใน Allowlist (สำหรับ Admin)
+app.get('/allowlist', async (c) => {
+  const user = c.get('user')
+  if (!['admin', 'data_manager'].includes(user.role)) {
+    return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถดูรายชื่อผู้ใช้งานได้' }, 403)
+  }
+
+  const rows = await c.env.DB.prepare(`
+    SELECT id, email, role, full_name, is_active, created_at
+    FROM google_signin_allowlist
+    ORDER BY created_at DESC
+  `).all()
+
+  return c.json({ users: rows.results || [] })
+})
+
+// 19. เพิ่ม/แก้ไขผู้ใช้งานใน Allowlist (สำหรับ Admin)
+app.post('/allowlist', async (c) => {
+  const user = c.get('user')
+  if (!['admin', 'data_manager'].includes(user.role)) {
+    return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถจัดการรายชื่อผู้ใช้งานได้' }, 403)
+  }
+
+  const body = await c.req.json<{
+    email: string
+    role: string
+    full_name?: string
+  }>()
+
+  const email = body.email?.toLowerCase().trim()
+  const role = body.role?.trim()
+  const fullName = body.full_name?.trim() || null
+
+  if (!email || !email.includes('@')) {
+    return c.json({ error: 'กรุณากรอกอีเมลที่ถูกต้อง' }, 400)
+  }
+
+  const allowedRoles = ['admin', 'field_technician', 'customer_reviewer', 'viewer']
+  if (!role || !allowedRoles.includes(role)) {
+    return c.json({ error: 'บทบาทไม่ถูกต้อง (ต้องเป็น admin, field_technician, customer_reviewer หรือ viewer)' }, 400)
+  }
+
+  const id = `usr-${email.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+  await c.env.DB.prepare(`
+    INSERT INTO google_signin_allowlist (id, email, role, full_name, is_active, created_at)
+    VALUES (?, ?, ?, ?, 1, datetime('now'))
+    ON CONFLICT(email) DO UPDATE SET
+      role = excluded.role,
+      full_name = COALESCE(excluded.full_name, google_signin_allowlist.full_name),
+      is_active = 1
+  `).bind(id, email, role, fullName).run()
+
+  return c.json({ success: true, message: `เพิ่ม/อัปเดตสิทธิ์ ${email} สำเร็จ` })
+})
+
+// 20. เปิด/ปิดการใช้งานผู้ใช้งาน (Toggle Active State)
+app.post('/allowlist/:id/toggle', async (c) => {
+  const user = c.get('user')
+  if (!['admin', 'data_manager'].includes(user.role)) {
+    return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถจัดการสิทธิ์ผู้ใช้งานได้' }, 403)
+  }
+
+  const id = c.req.param('id')
+  const targetUser = await c.env.DB.prepare(
+    'SELECT id, email, is_active FROM google_signin_allowlist WHERE id = ?'
+  ).bind(id).first<{ id: string; email: string; is_active: number }>()
+
+  if (!targetUser) {
+    return c.json({ error: 'ไม่พบผู้ใช้งานนี้ในระบบ' }, 404)
+  }
+
+  if (targetUser.email === user.email) {
+    return c.json({ error: 'ไม่อนุญาตให้ระงับสิทธิ์บัญชีของตนเอง' }, 400)
+  }
+
+  const nextActive = targetUser.is_active === 1 ? 0 : 1
+  await c.env.DB.prepare(
+    'UPDATE google_signin_allowlist SET is_active = ? WHERE id = ?'
+  ).bind(nextActive, id).run()
+
+  return c.json({
+    success: true,
+    is_active: nextActive,
+    message: nextActive === 1 ? 'เปิดใช้งานผู้ใช้เรียบร้อย' : 'ระงับการใช้งานผู้ใช้เรียบร้อย'
+  })
+})
+
 export const onRequest = handle(app)

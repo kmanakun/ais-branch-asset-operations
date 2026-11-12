@@ -150,11 +150,37 @@ async function main() {
   console.log('  ✔ Admin approved discovery report:', reviewReport.status)
 
   // 10. Dashboard Summary ภาพรวม
-  console.log('\n[10/10] Testing /api/dashboard/summary...')
+  console.log('\n[10/12] Testing /api/dashboard/summary...')
   const summary = await req('/api/dashboard/summary', 'GET', null, 'admin@sym.co.th')
   console.log('  ✔ Dashboard Summary Stats:', summary.summary)
 
-  console.log('\n🎉 ALL 10/10 LIVE E2E INTEGRATION CHECKS PASSED!')
+  // 11. Task Review Audit Trail
+  console.log('\n[11/12] Testing /api/tasks/:id/reviews (Governance Audit Trail)...')
+  const taskReviews = await req(`/api/tasks/${taskId}/reviews`, 'GET', null, 'admin@sym.co.th')
+  if (!taskReviews.reviews || taskReviews.reviews.length < 2) {
+    throw new Error('Task reviews audit trail incomplete')
+  }
+  console.log('  ✔ Audit trail records found:', taskReviews.reviews.length, 'Stages:', taskReviews.reviews.map(r => r.stage).join(', '))
+
+  // 12. Google Sign-In Allowlist Management
+  console.log('\n[12/12] Testing /api/allowlist (User Management)...')
+  const newTechEmail = `testtech_${timestamp}@sym.co.th`
+  const addAllowlist = await req('/api/allowlist', 'POST', {
+    email: newTechEmail,
+    role: 'field_technician',
+    full_name: 'Test Technician'
+  }, 'admin@sym.co.th')
+  console.log('  ✔ Added user to allowlist:', addAllowlist.message)
+
+  const allowlist = await req('/api/allowlist', 'GET', null, 'admin@sym.co.th')
+  const addedUser = allowlist.users?.find(u => u.email === newTechEmail)
+  if (!addedUser) throw new Error('Added user not found in allowlist')
+  console.log('  ✔ Found user in allowlist:', addedUser.email, 'Role:', addedUser.role)
+
+  const toggleUser = await req(`/api/allowlist/${addedUser.id}/toggle`, 'POST', {}, 'admin@sym.co.th')
+  console.log('  ✔ Toggled user active status. New is_active:', toggleUser.is_active)
+
+  console.log('\n🎉 ALL 12/12 LIVE E2E INTEGRATION CHECKS PASSED!')
 }
 
 main().catch(err => {
