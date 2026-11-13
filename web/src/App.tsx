@@ -35,7 +35,7 @@ import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot, 
 import { groupRowsByBranch } from './province'
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
-import { d1Api, getDevEmail, setDevEmail } from './d1-client'
+import { ApiError, type AuthConfigResponse, d1Api, getDevEmail, setDevAuthHeadersEnabled, setDevEmail } from './d1-client'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -225,6 +225,13 @@ function DevAuthBar({ currentEmail, onSwitch }: { currentEmail: string; onSwitch
 
 function App() {
   const [devEmail, setDevEmailState] = useState(getDevEmail)
+  const [authConfig, setAuthConfig] = useState<AuthConfigResponse>({
+    auth_provider: 'google_oauth',
+    mode: 'dev_fallback',
+    google_enabled: false,
+    dev_auth_enabled: false,
+  })
+  const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(null)
   const handleDevSwitch = (email: string) => {
     setDevEmail(email)
     setDevEmailState(email)
@@ -283,7 +290,7 @@ function App() {
   const [listError, setListError] = useState('')
   const [listReloadKey, setListReloadKey] = useState(0)
   const [loadedAssetSearch, setLoadedAssetSearch] = useState('')
-  const [isSigningIn] = useState(false)
+  const [isSigningIn, setIsSigningIn] = useState(false)
   const [signOutError, setSignOutError] = useState('')
   const [demoMode, setDemoMode] = useState(false)
   const [authChecked, setAuthChecked] = useState(false)
@@ -434,12 +441,27 @@ function App() {
   useEffect(() => {
     const callbackUrl = new URL(window.location.href)
     const hashParams = new URLSearchParams(callbackUrl.hash.replace(/^#/, ''))
+    const authError = callbackUrl.searchParams.get('auth_error')
     const oauthError = callbackUrl.searchParams.get('error') || hashParams.get('error')
     const errorCode = callbackUrl.searchParams.get('error_code') || hashParams.get('error_code')
     const errorDescription = callbackUrl.searchParams.get('error_description') || hashParams.get('error_description')
-    if (!oauthError && !errorCode && !errorDescription) return
+    if (!authError && !oauthError && !errorCode && !errorDescription) return
 
-    setLoginError('Google Sign-In ไม่สำเร็จ บัญชีอาจยังไม่ได้รับอนุญาต หรือการตั้งค่า OAuth ยังไม่ครบ โปรดติดต่อ Identity Admin')
+    const authErrorMessages: Record<string, string> = {
+      not_allowlisted: 'เข้าสู่ระบบ Google สำเร็จ แต่บัญชีอีเมลนี้ยังไม่ได้รับอนุญาตในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) กรุณาติดต่อ Identity Admin หรือลองบัญชี Google อื่น',
+      unverified_email: 'บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล จึงไม่สามารถเข้าใช้งานระบบได้',
+      access_denied: 'ยกเลิกการเข้าสู่ระบบด้วย Google',
+      invalid_state: 'ลิงก์ยืนยันตัวตนหมดอายุหรือไม่ถูกต้อง กรุณากดเข้าสู่ระบบด้วย Google ใหม่อีกครั้ง',
+      oauth_misconfigured: 'การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อผู้ดูแลระบบ',
+      oauth_not_configured: 'ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / SESSION_SECRET บน Cloudflare Pages',
+      oauth_failed: 'Google Sign-In ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อ Identity Admin',
+    }
+
+    setLoginError(
+      (authError && authErrorMessages[authError]) ||
+        'Google Sign-In ไม่สำเร็จ บัญชีอาจยังไม่ได้รับอนุญาต หรือการตั้งค่า OAuth ยังไม่ครบ โปรดติดต่อ Identity Admin',
+    )
+    callbackUrl.searchParams.delete('auth_error')
     callbackUrl.searchParams.delete('error')
     callbackUrl.searchParams.delete('error_code')
     callbackUrl.searchParams.delete('error_description')
@@ -456,15 +478,35 @@ function App() {
     let alive = true
     const loadSession = async () => {
       try {
+        const cfg = await d1Api.getAuthConfig()
+        if (!alive) return
+        setAuthConfig(cfg)
+        setDevAuthHeadersEnabled(cfg.dev_auth_enabled)
+
+        if (cfg.mode === 'misconfigured') {
+          setLoginError('การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบ (ต้องระบุ GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET และ SESSION_SECRET)')
+          return
+        }
+
         const me = await d1Api.getMe()
         if (alive && me?.email) {
+          setAccessDeniedMessage(null)
           const d1Session = { user: { id: me.email, email: me.email } }
           sessionRef.current = d1Session
           setSession(d1Session)
           await loadContext(me.email)
         }
-      } catch {
-        if (alive) setLoginError('ตรวจสอบสถานะการเข้าสู่ระบบไม่ได้ โปรดลองอีกครั้ง')
+      } catch (error) {
+        if (!alive) return
+        if (error instanceof ApiError && error.status === 401) {
+          // Normal unauthenticated state in Google OAuth mode: show LoginPage cleanly without overwriting callback alerts
+          return
+        }
+        if (error instanceof ApiError && error.status === 403) {
+          setAccessDeniedMessage(error.message)
+          return
+        }
+        setLoginError('ตรวจสอบสถานะการเข้าสู่ระบบไม่ได้ โปรดลองอีกครั้ง')
       } finally {
         if (alive) setAuthChecked(true)
       }
@@ -680,14 +722,29 @@ function App() {
   }, [])
 
   async function signInWithGoogle() {
-    setLoginError('ระบบปัจจุบันทำงานบน Cloudflare Edge Native กรุณาเลือกสิทธิ์ผู้ใช้งานจากแถบด้านบน (Dev Auth Bar) เพื่อทดสอบตามบทบาท')
+    if (isSigningIn) return
+    setLoginError('')
+    if (authConfig.google_enabled) {
+      setIsSigningIn(true)
+      window.location.assign('/api/auth/google/start')
+      return
+    }
+    if (authConfig.mode === 'misconfigured') {
+      setLoginError('การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อผู้ดูแลระบบ')
+      return
+    }
+    setLoginError('ระบบกำลังทำงานในโหมดทดสอบ (รอเปิดใช้งาน Google OAuth) กรุณาเลือกสิทธิ์ผู้ใช้งานจากแถบด้านบน (Dev Auth Bar)')
   }
 
   async function signOut() {
     setSignOutError('')
+    if (authConfig.google_enabled) {
+      await d1Api.logout().catch(() => null)
+    }
     authRequestId.current += 1
     sessionRef.current = null
     setSession(null)
+    setAccessDeniedMessage(null)
     reauthRequiredRef.current = false
     setReauthRequired(false)
     clearUserScopedState(true)
@@ -814,11 +871,19 @@ function App() {
   }
 
   if (!authChecked) return <div className="loading-screen"><div className="spinner" /><span>กำลังตรวจสอบสถานะการเข้าสู่ระบบ</span></div>
+  if (accessDeniedMessage && !session && !demoMode) {
+    return (
+      <>
+        {authConfig.dev_auth_enabled && <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />}
+        <NoAccess email={authConfig.dev_auth_enabled ? devEmail : ''} error={signOutError || accessDeniedMessage} onSignOut={() => void signOut()} />
+      </>
+    )
+  }
   if (!session && !reauthRequired && !demoMode) {
     return (
       <>
-        <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />
-        <LoginPage onGoogleSignIn={() => void signInWithGoogle()} onDemo={() => setDemoMode(true)} onHelp={() => setLoginError('ใช้บัญชี Google ที่อยู่ในรายชื่อผู้มีสิทธิ์ หากยังเข้าไม่ได้โปรดติดต่อ Identity Admin')} error={loginError} configured={true} submitting={isSigningIn} />
+        {authConfig.dev_auth_enabled && <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />}
+        <LoginPage onGoogleSignIn={() => void signInWithGoogle()} onDemo={() => setDemoMode(true)} onHelp={() => setLoginError('ใช้บัญชี Google ที่อยู่ในรายชื่อผู้มีสิทธิ์ หากยังเข้าไม่ได้โปรดติดต่อ Identity Admin')} error={loginError} configured={authConfig.mode !== 'misconfigured'} submitting={isSigningIn} />
       </>
     )
   }
@@ -854,7 +919,7 @@ function App() {
 
   return (
     <>
-    <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />
+    {authConfig.dev_auth_enabled && <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />}
     {!isOnline && (
       <div className="sticky top-0 z-[9999] flex items-center justify-center gap-2 bg-red-700 px-4 py-2 text-[13px] font-semibold text-white">
         <WifiOff size={16} /> คุณกำลังออฟไลน์ (Offline) สัญญาณอินเทอร์เน็ตขาดหาย โปรดตรวจสอบสัญญาณก่อนทำรายการ

@@ -56,8 +56,10 @@ npx wrangler d1 execute ais-scanner-db --remote --command="UPDATE google_signin_
 To connect Google Sign-In on live production:
 
 ### 3.1 Google Cloud Console Setup
-1. Navigate to **Google Cloud Console → APIs & Services → Credentials**.
-2. Create **OAuth 2.0 Client ID** of type **Web application**.
+1. Navigate to **Google Cloud Console → APIs & Services → OAuth consent screen**:
+   - Configure app name and Authorized domain (`ais-branch-asset-operations.pages.dev`), scopes `openid`, `email`, `profile` (all non-sensitive basic scopes — **\$0 Free Tier, unlimited users** once published to **In Production**; Testing mode limits up to 100 test users).
+2. Navigate to **Google Cloud Console → APIs & Services → Credentials**:
+   - Create **OAuth 2.0 Client ID** of type **Web application**.
 3. Add Authorized JavaScript origins:
    - `https://ais-branch-asset-operations.pages.dev`
 4. Add Authorized redirect URIs:
@@ -65,15 +67,20 @@ To connect Google Sign-In on live production:
 5. Note down the Client ID. (Keep the Client Secret secure; never commit it to source control).
 
 ### 3.2 Cloudflare Pages Configuration
-1. In Cloudflare Dashboard → Workers & Pages → `ais-branch-asset-operations` → Settings → Environment Variables.
-2. Add `GOOGLE_CLIENT_ID` (Plain text).
+1. In Cloudflare Dashboard → Workers & Pages → `ais-branch-asset-operations` → Settings → Variables and Secrets.
+2. Add `GOOGLE_CLIENT_ID` (Plain text / Variable).
 3. Add `GOOGLE_CLIENT_SECRET` (Encrypted / Secret).
-4. Save and redeploy.
+4. Add `SESSION_SECRET` (Encrypted / Secret — cryptographically random string **at least 32 characters**, e.g. generated with `[Convert]::ToBase64String((1..48 | ForEach-Object { [byte](Get-Random -Maximum 256) }))` or `openssl rand -base64 48`).
+5. Save and redeploy (`npm run deploy` from `web/`).
+
+> [!IMPORTANT]
+> Partial or weak secret setup (`SESSION_SECRET < 32 chars` or missing one of the 3 values) automatically enters **fail-closed `misconfigured` mode** (HTTP `503`) rather than falling back to Dev Switcher. When all 3 values are present, Dev Auth Bar is hidden automatically, `x-dev-user-email` is ignored, `/api/evidence/*` requires the signed `ais_session` `HttpOnly` cookie, and CSRF Origin checks protect all mutating requests.
 
 ---
 
 ## 4. Security Guardrails
 
-- **Zero Hard-Coded Credentials:** No OAuth secrets or tokens exist in frontend code or Git history.
-- **Session Isolation:** Dev Auth Switcher is active in staging/internal environments; production endpoints enforce valid signed tokens.
+- **Zero Hard-Coded Credentials:** No OAuth secrets or signing keys exist in frontend code or Git history.
+- **PKCE + Nonce + Signed Session Cookie (`web/src/lib/google-oauth.ts`):** `/api/auth/google/start` initiates Authorization Code flow with PKCE (`S256`), signed transaction cookie (`ais_oauth_tx`), and `nonce`; `/api/auth/callback` verifies Google JWKS `RS256` ID Token (`iss`, `aud`, `exp`, `nonce`, `email_verified === true`) before checking `google_signin_allowlist` and issuing HMAC-SHA256 `ais_session` (`HttpOnly; SameSite=Lax; Secure`).
+- **Instant Revocation:** Every authenticated request re-verifies `is_active = 1` in D1 `google_signin_allowlist` and deletes the session cookie immediately if deactivated.
 - **Least Privilege:** Each role can only access endpoints relevant to their duties (e.g. technicians cannot access `/api/review/customer-batch-accept` and customer reviewers cannot modify scanner registers).

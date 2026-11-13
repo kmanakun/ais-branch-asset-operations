@@ -1,9 +1,33 @@
 import { Hono } from 'hono'
 import { handle } from 'hono/cloudflare-pages'
+import {
+  GoogleAuthError,
+  OAUTH_TX_COOKIE_NAME,
+  OAUTH_TX_TTL_SECONDS,
+  SESSION_COOKIE_NAME,
+  SESSION_TTL_SECONDS,
+  type OAuthTransactionPayload,
+  type SessionCookiePayload,
+  buildGoogleAuthorizationUrl,
+  createPkceChallenge,
+  exchangeGoogleAuthCode,
+  generateRandomToken,
+  isSecureRequestUrl,
+  readCookieValue,
+  resolveGoogleAuthConfig,
+  resolveOAuthRedirectUri,
+  serializeCookie,
+  signCookiePayload,
+  verifyCookiePayload,
+  verifyGoogleIdToken,
+} from '../../src/lib/google-oauth.ts'
 
 type Bindings = {
   DB: D1Database
   EVIDENCE_BUCKET?: R2Bucket
+  GOOGLE_CLIENT_ID?: string
+  GOOGLE_CLIENT_SECRET?: string
+  SESSION_SECRET?: string
 }
 
 type Variables = {
@@ -39,43 +63,133 @@ function makeUniqueId(prefix: string): string {
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>().basePath('/api')
 
+const PUBLIC_AUTH_PATHS = new Set([
+  '/api/health',
+  '/api/auth/config',
+  '/api/auth/google/start',
+  '/api/auth/callback',
+  '/api/auth/logout',
+])
+const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+function isCrossOriginBlocked(requestUrl: string, originHeader: string | undefined, fetchSiteHeader: string | undefined): boolean {
+  if (fetchSiteHeader && fetchSiteHeader.toLowerCase() === 'cross-site') {
+    return true
+  }
+  if (!originHeader) {
+    return false
+  }
+  try {
+    return new URL(originHeader).origin !== new URL(requestUrl).origin
+  } catch {
+    return true
+  }
+}
+
 // CORS / Headers Middleware
 app.use('*', async (c, next) => {
   await next()
-  c.header('Access-Control-Allow-Origin', '*')
-  c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-  c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-dev-user-email')
+  const authConfig = resolveGoogleAuthConfig(c.env)
+  c.header('Vary', 'Origin')
+  if (authConfig.mode === 'dev_fallback') {
+    c.header('Access-Control-Allow-Origin', '*')
+    c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-dev-user-email')
+  }
 })
 
 app.options('*', (c) => c.text('', 204))
 
-// Authentication & Allowlist Middleware
+// CSRF + Authentication & Allowlist Middleware
 app.use('*', async (c, next) => {
-  if (c.req.path === '/api/health' || c.req.path.startsWith('/api/evidence/')) {
+  const authConfig = resolveGoogleAuthConfig(c.env)
+  const path = c.req.path
+
+  if (
+    authConfig.mode === 'google_oauth' &&
+    MUTATING_METHODS.has(c.req.method.toUpperCase()) &&
+    isCrossOriginBlocked(c.req.url, c.req.header('Origin'), c.req.header('Sec-Fetch-Site'))
+  ) {
+    return c.json({ error: 'คำขอข้ามโดเมนไม่ได้รับอนุญาต (CSRF Blocked)', code: 'CSRF_ORIGIN_MISMATCH' }, 403)
+  }
+
+  if (PUBLIC_AUTH_PATHS.has(path)) {
     return next()
   }
 
-  // 1. ตรวจสอบ Dev Auth Switcher ผ่าน Header หรือ Query parameter
-  let email = c.req.header('x-dev-user-email') || c.req.query('dev_email')
-
-  // 2. ถ้ามี Bearer token
-  const authHeader = c.req.header('Authorization')
-  if (!email && authHeader?.startsWith('Bearer ')) {
-    email = authHeader.slice(7)
+  if (authConfig.mode === 'misconfigured') {
+    return c.json({
+      error: authConfig.misconfiguredReason || 'การตั้งค่า Google OAuth บน Cloudflare Pages ยังไม่ครบ',
+      code: 'OAUTH_MISCONFIGURED',
+    }, 503)
   }
 
-  // 3. ปฏิเสธคำขอที่ไม่มีข้อมูลผู้ใช้งาน (Authentication Required)
+  let email: string | undefined
+
+  if (authConfig.mode === 'google_oauth') {
+    // Protect all endpoints (including /api/evidence/*) with signed HttpOnly session cookie.
+    // Never accept x-dev-user-email, dev_email, or raw Authorization headers in Production OAuth mode.
+    const rawCookie = readCookieValue(c.req.header('Cookie'), SESSION_COOKIE_NAME)
+    const sessionPayload = await verifyCookiePayload<SessionCookiePayload>(
+      rawCookie,
+      'session',
+      authConfig.sessionSecret,
+    )
+    if (!sessionPayload?.email) {
+      if (rawCookie) {
+        c.header(
+          'Set-Cookie',
+          serializeCookie(SESSION_COOKIE_NAME, '', {
+            path: '/',
+            maxAge: 0,
+            secure: isSecureRequestUrl(c.req.url),
+          }),
+          { append: true },
+        )
+      }
+      return c.json({
+        error: 'กรุณาเข้าสู่ระบบด้วย Google Sign-In เพื่อใช้งานระบบ (Session Required)',
+        code: 'SESSION_REQUIRED',
+      }, 401)
+    }
+    email = sessionPayload.email
+  } else {
+    // Dev / transitional pre-OAuth mode: keep Dev Switcher + unauthenticated evidence preview
+    if (path.startsWith('/api/evidence/')) {
+      return next()
+    }
+    email = c.req.header('x-dev-user-email') || c.req.query('dev_email')
+    const authHeader = c.req.header('Authorization')
+    if (!email && authHeader?.startsWith('Bearer ')) {
+      email = authHeader.slice(7)
+    }
+  }
+
   if (!email) {
     return c.json({ error: 'กรุณาเข้าสู่ระบบ หรือเลือกสิทธิ์ผู้ใช้งาน (Authentication Required)' }, 401)
   }
 
-  // 4. ตรวจสอบกับตาราง google_signin_allowlist ใน Cloudflare D1
+  const normalizedEmail = email.toLowerCase().trim()
   const user = await c.env.DB.prepare(
     'SELECT email, role, full_name, is_active FROM google_signin_allowlist WHERE email = ? AND is_active = 1'
-  ).bind(email.toLowerCase().trim()).first<{ email: string; role: string; full_name: string; is_active: number }>()
+  ).bind(normalizedEmail).first<{ email: string; role: string; full_name: string; is_active: number }>()
 
   if (!user) {
-    return c.json({ error: 'บัญชีของคุณไม่อยู่ในรายชื่อผู้มีสิทธิ์เข้าใช้งานระบบ (Unauthorized Allowlist)' }, 403)
+    if (authConfig.mode === 'google_oauth') {
+      c.header(
+        'Set-Cookie',
+        serializeCookie(SESSION_COOKIE_NAME, '', {
+          path: '/',
+          maxAge: 0,
+          secure: isSecureRequestUrl(c.req.url),
+        }),
+        { append: true },
+      )
+    }
+    return c.json({
+      error: 'บัญชีของคุณไม่อยู่ในรายชื่อผู้มีสิทธิ์เข้าใช้งานระบบ (Unauthorized Allowlist)',
+      code: 'NOT_ALLOWLISTED',
+    }, 403)
   }
 
   c.set('user', {
@@ -111,13 +225,199 @@ app.get('/health', async (c) => {
   }
 })
 
+// 1.5 โหมดการยืนยันตัวตนของระบบ + Google Sign-In OAuth 2.0 Endpoints
+app.get('/auth/config', (c) => {
+  const authConfig = resolveGoogleAuthConfig(c.env)
+  c.header('Cache-Control', 'no-store')
+  return c.json({
+    auth_provider: 'google_oauth',
+    mode: authConfig.mode,
+    google_enabled: authConfig.googleEnabled,
+    dev_auth_enabled: authConfig.devAuthEnabled,
+  })
+})
+
+app.get('/auth/google/start', async (c) => {
+  const authConfig = resolveGoogleAuthConfig(c.env)
+  c.header('Cache-Control', 'no-store')
+
+  if (authConfig.mode !== 'google_oauth') {
+    const errorCode = authConfig.mode === 'misconfigured' ? 'oauth_misconfigured' : 'oauth_not_configured'
+    return c.redirect(`/?auth_error=${errorCode}`, 302)
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const state = generateRandomToken(32)
+  const nonce = generateRandomToken(32)
+  const codeVerifier = generateRandomToken(48)
+  const codeChallenge = await createPkceChallenge(codeVerifier)
+
+  const txCookie = await signCookiePayload(
+    {
+      p: 'oauth_tx',
+      state,
+      nonce,
+      codeVerifier,
+      exp: nowSeconds + OAUTH_TX_TTL_SECONDS,
+    },
+    authConfig.sessionSecret,
+  )
+
+  c.header(
+    'Set-Cookie',
+    serializeCookie(OAUTH_TX_COOKIE_NAME, txCookie, {
+      path: '/api/auth',
+      maxAge: OAUTH_TX_TTL_SECONDS,
+      secure: isSecureRequestUrl(c.req.url),
+    }),
+    { append: true },
+  )
+
+  const authorizeUrl = buildGoogleAuthorizationUrl({
+    clientId: authConfig.clientId,
+    redirectUri: resolveOAuthRedirectUri(c.req.url),
+    state,
+    nonce,
+    codeChallenge,
+  })
+  return c.redirect(authorizeUrl, 302)
+})
+
+app.get('/auth/callback', async (c) => {
+  const authConfig = resolveGoogleAuthConfig(c.env)
+  const secureCookie = isSecureRequestUrl(c.req.url)
+  c.header('Cache-Control', 'no-store')
+
+  const clearTxCookie = () => {
+    c.header(
+      'Set-Cookie',
+      serializeCookie(OAUTH_TX_COOKIE_NAME, '', {
+        path: '/api/auth',
+        maxAge: 0,
+        secure: secureCookie,
+      }),
+      { append: true },
+    )
+  }
+
+  const failRedirect = (errorCode: string) => {
+    clearTxCookie()
+    return c.redirect(`/?auth_error=${encodeURIComponent(errorCode)}`, 302)
+  }
+
+  if (authConfig.mode !== 'google_oauth') {
+    return failRedirect(authConfig.mode === 'misconfigured' ? 'oauth_misconfigured' : 'oauth_not_configured')
+  }
+
+  const oauthError = c.req.query('error')
+  if (oauthError) {
+    return failRedirect(oauthError === 'access_denied' ? 'access_denied' : 'oauth_failed')
+  }
+
+  const code = c.req.query('code')?.trim()
+  const state = c.req.query('state')?.trim()
+  if (!code || !state) {
+    return failRedirect('invalid_state')
+  }
+
+  const rawTxCookie = readCookieValue(c.req.header('Cookie'), OAUTH_TX_COOKIE_NAME)
+  const txPayload = await verifyCookiePayload<OAuthTransactionPayload>(
+    rawTxCookie,
+    'oauth_tx',
+    authConfig.sessionSecret,
+  )
+  if (!txPayload || txPayload.state !== state) {
+    return failRedirect('invalid_state')
+  }
+
+  let verifiedEmail: string
+  let verifiedSub: string | undefined
+  try {
+    const { idToken } = await exchangeGoogleAuthCode({
+      code,
+      clientId: authConfig.clientId,
+      clientSecret: authConfig.clientSecret,
+      redirectUri: resolveOAuthRedirectUri(c.req.url),
+      codeVerifier: txPayload.codeVerifier,
+    })
+    const identity = await verifyGoogleIdToken(idToken, {
+      clientId: authConfig.clientId,
+      expectedNonce: txPayload.nonce,
+    })
+    verifiedEmail = identity.email
+    verifiedSub = identity.sub
+  } catch (error) {
+    if (error instanceof GoogleAuthError && error.code === 'UNVERIFIED_EMAIL') {
+      return failRedirect('unverified_email')
+    }
+    return failRedirect('oauth_failed')
+  }
+
+  const allowlistedUser = await c.env.DB.prepare(
+    'SELECT email, role, full_name, is_active FROM google_signin_allowlist WHERE email = ? AND is_active = 1'
+  ).bind(verifiedEmail).first<{ email: string; role: string; full_name: string; is_active: number }>()
+
+  if (!allowlistedUser) {
+    c.header(
+      'Set-Cookie',
+      serializeCookie(SESSION_COOKIE_NAME, '', {
+        path: '/',
+        maxAge: 0,
+        secure: secureCookie,
+      }),
+      { append: true },
+    )
+    return failRedirect('not_allowlisted')
+  }
+
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const sessionToken = await signCookiePayload(
+    {
+      p: 'session',
+      email: allowlistedUser.email.toLowerCase().trim(),
+      sub: verifiedSub,
+      iat: nowSeconds,
+      exp: nowSeconds + SESSION_TTL_SECONDS,
+    },
+    authConfig.sessionSecret,
+  )
+
+  clearTxCookie()
+  c.header(
+    'Set-Cookie',
+    serializeCookie(SESSION_COOKIE_NAME, sessionToken, {
+      path: '/',
+      maxAge: SESSION_TTL_SECONDS,
+      secure: secureCookie,
+    }),
+    { append: true },
+  )
+  return c.redirect('/', 302)
+})
+
+app.post('/auth/logout', (c) => {
+  c.header('Cache-Control', 'no-store')
+  c.header(
+    'Set-Cookie',
+    serializeCookie(SESSION_COOKIE_NAME, '', {
+      path: '/',
+      maxAge: 0,
+      secure: isSecureRequestUrl(c.req.url),
+    }),
+    { append: true },
+  )
+  return c.json({ ok: true })
+})
+
 // 2. ข้อมูลโปรไฟล์ผู้ใช้ปัจจุบัน
 app.get('/auth/me', (c) => {
   const user = c.get('user')
+  const authConfig = resolveGoogleAuthConfig(c.env)
   return c.json({
     email: user.email,
     role: user.role,
-    full_name: user.full_name
+    full_name: user.full_name,
+    auth_mode: authConfig.mode,
   })
 })
 

@@ -2,6 +2,30 @@
 // Zero-Baht Architecture for AIS Scanner Replacement Project
 
 const DEV_EMAIL_KEY = 'ais_dev_user_email'
+let devAuthHeadersEnabled = true
+
+export interface AuthConfigResponse {
+  auth_provider: 'google_oauth'
+  mode: 'google_oauth' | 'dev_fallback' | 'misconfigured'
+  google_enabled: boolean
+  dev_auth_enabled: boolean
+}
+
+export class ApiError extends Error {
+  status: number
+  code?: string
+
+  constructor(message: string, status: number, code?: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+  }
+}
+
+export function setDevAuthHeadersEnabled(enabled: boolean): void {
+  devAuthHeadersEnabled = enabled
+}
 
 export function getDevEmail(): string {
   if (typeof window === 'undefined') return 'admin@sym.co.th'
@@ -17,29 +41,36 @@ export function setDevEmail(email: string): void {
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {})
   headers.set('Content-Type', 'application/json')
-  
-  // แนบ Dev user email
-  const devEmail = getDevEmail()
-  if (devEmail) {
-    headers.set('x-dev-user-email', devEmail)
+
+  // แนบ Dev user email เฉพาะเมื่อ Backend ยังเปิดโหมด Dev Fallback เท่านั้น
+  if (devAuthHeadersEnabled) {
+    const devEmail = getDevEmail()
+    if (devEmail) {
+      headers.set('x-dev-user-email', devEmail)
+    }
   }
 
   const response = await fetch(path, {
+    credentials: 'same-origin',
     ...options,
     headers,
   })
 
   if (!response.ok) {
     let errorMessage = `HTTP Error ${response.status}`
+    let errorCode: string | undefined
     try {
       const errorJson = await response.json()
       if (errorJson.error || errorJson.message) {
         errorMessage = errorJson.error || errorJson.message
       }
+      if (typeof errorJson.code === 'string') {
+        errorCode = errorJson.code
+      }
     } catch {
       // ignore
     }
-    throw new Error(errorMessage)
+    throw new ApiError(errorMessage, response.status, errorCode)
   }
 
   const text = await response.text()
@@ -47,11 +78,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const d1Api = {
-  // 1. ตรวจสอบสถานะ API
+  // 1. ตรวจสอบสถานะ API และโหมดการยืนยันตัวตน
   getHealth: () => request<{ status: string; database: string; stats: any }>('/api/health'),
+  getAuthConfig: () => request<AuthConfigResponse>('/api/auth/config'),
+  logout: () => request<{ ok: boolean }>('/api/auth/logout', { method: 'POST' }),
 
   // 2. ผู้ใช้ปัจจุบัน
-  getMe: () => request<{ email: string; role: string; full_name: string }>('/api/auth/me'),
+  getMe: () => request<{ email: string; role: string; full_name: string; auth_mode?: string }>('/api/auth/me'),
 
   // 3. Dashboard สรุปความคืบหน้า
   getDashboard: () => request<{

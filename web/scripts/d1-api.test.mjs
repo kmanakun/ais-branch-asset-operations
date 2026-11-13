@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createHash, generateKeyPairSync, sign as cryptoSign } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import { app } from '../functions/api/[[route]].ts'
+import { clearGoogleJwksCache } from '../src/lib/google-oauth.ts'
 
 const schemaSql = readFileSync(new URL('../d1/schema.sql', import.meta.url), 'utf-8')
 const seedSql = readFileSync(new URL('../d1/seed.sql', import.meta.url), 'utf-8')
@@ -375,4 +377,241 @@ test('HTTP runtime: 4-Eyes blocks case-insensitive self-approval and Customer Ba
   const reviews = await apiReq(env, `/api/tasks/${started.json.task_id}/reviews`, { email: 'admin@sym.co.th' })
   assert.equal(reviews.status, 200)
   assert.deepEqual(reviews.json.reviews.map(r => r.stage).sort(), ['customer', 'sym'])
+})
+
+function signTestJwt(privateKeyPem, header, payload) {
+  const encodePart = obj => Buffer.from(JSON.stringify(obj), 'utf8').toString('base64url')
+  const signingInput = `${encodePart(header)}.${encodePart(payload)}`
+  const signature = cryptoSign('RSA-SHA256', Buffer.from(signingInput, 'utf8'), privateKeyPem)
+  return `${signingInput}.${signature.toString('base64url')}`
+}
+
+function getSetCookies(headers) {
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie()
+  }
+  const single = headers.get('set-cookie')
+  return single ? [single] : []
+}
+
+function extractCookiePair(setCookieList, name) {
+  for (const entry of setCookieList) {
+    const firstSegment = entry.split(';')[0]
+    if (firstSegment.startsWith(`${name}=`)) {
+      return firstSegment
+    }
+  }
+  return null
+}
+
+test('HTTP runtime: Google OAuth config resolves cleanly and fails closed on partial or weak secret setup', async () => {
+  const env = createTestEnv()
+
+  const devCfgRes = await app.request('/api/auth/config', {}, env)
+  const devCfg = await devCfgRes.json()
+  assert.equal(devCfgRes.status, 200)
+  assert.equal(devCfg.mode, 'dev_fallback')
+  assert.equal(devCfg.dev_auth_enabled, true)
+  assert.equal(devCfg.google_enabled, false)
+
+  const partialEnv = { ...env, GOOGLE_CLIENT_ID: 'client-id-123.apps.googleusercontent.com' }
+  const partialCfgRes = await app.request('/api/auth/config', {}, partialEnv)
+  const partialCfg = await partialCfgRes.json()
+  assert.equal(partialCfg.mode, 'misconfigured')
+  assert.equal(partialCfg.dev_auth_enabled, false)
+
+  const spoofRes = await app.request('/api/auth/me', {
+    headers: { 'x-dev-user-email': 'admin@sym.co.th' },
+  }, partialEnv)
+  assert.equal(spoofRes.status, 503)
+
+  const weakSecretEnv = {
+    ...env,
+    GOOGLE_CLIENT_ID: 'client-id-123.apps.googleusercontent.com',
+    GOOGLE_CLIENT_SECRET: 'secret-123',
+    SESSION_SECRET: 'too-short-secret',
+  }
+  const weakCfg = await (await app.request('/api/auth/config', {}, weakSecretEnv)).json()
+  assert.equal(weakCfg.mode, 'misconfigured')
+  assert.equal((await app.request('/api/auth/me', { headers: { 'x-dev-user-email': 'admin@sym.co.th' } }, weakSecretEnv)).status, 503)
+})
+
+test('HTTP runtime: Google Sign-In OAuth PKCE flow issues signed HttpOnly cookie, blocks dev spoofing, checks allowlist/revocation/CSRF', async () => {
+  clearGoogleJwksCache()
+  const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const jwk = { ...publicKey.export({ format: 'jwk' }), kid: 'google-key-1', alg: 'RS256', use: 'sig' }
+
+  const origin = 'https://ais-branch-asset-operations.pages.dev'
+  const clientId = 'ais-scanner-client.apps.googleusercontent.com'
+  const clientSecret = 'google-client-secret-value'
+  const sessionSecret = '0123456789abcdef0123456789abcdef-test-session-secret'
+  const baseEnv = {
+    ...createTestEnv(),
+    GOOGLE_CLIENT_ID: clientId,
+    GOOGLE_CLIENT_SECRET: clientSecret,
+    SESSION_SECRET: sessionSecret,
+  }
+
+  let nextExchangeNonce = ''
+  let nextEmail = 'admin@sym.co.th'
+  let nextEmailVerified = true
+  let lastTokenBody = null
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    const url = typeof input === 'string' ? input : input.url
+    if (url === 'https://www.googleapis.com/oauth2/v3/certs') {
+      return new Response(JSON.stringify({ keys: [jwk] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (url === 'https://oauth2.googleapis.com/token') {
+      lastTokenBody = new URLSearchParams(String(init?.body || ''))
+      const now = Math.floor(Date.now() / 1000)
+      const idToken = signTestJwt(privateKey, { alg: 'RS256', kid: 'google-key-1' }, {
+        iss: 'https://accounts.google.com',
+        aud: clientId,
+        sub: 'google-sub-12345',
+        email: nextEmail,
+        email_verified: nextEmailVerified,
+        nonce: nextExchangeNonce,
+        exp: now + 3600,
+      })
+      return new Response(JSON.stringify({ id_token: idToken, token_type: 'Bearer' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return originalFetch(input, init)
+  }
+
+  try {
+    // 1. Config hides Dev Auth Bar and enables Google OAuth without leaking secrets
+    const cfgJson = await (await app.request(`${origin}/api/auth/config`, {}, baseEnv)).json()
+    assert.equal(cfgJson.mode, 'google_oauth')
+    assert.equal(cfgJson.google_enabled, true)
+    assert.equal(cfgJson.dev_auth_enabled, false)
+    assert.equal('SESSION_SECRET' in cfgJson, false)
+
+    // 2. Reject x-dev-user-email / query / Bearer spoofing and unauthenticated /api/evidence/*
+    const devSpoof = await app.request(`${origin}/api/auth/me?dev_email=admin@sym.co.th`, {
+      headers: {
+        'x-dev-user-email': 'admin@sym.co.th',
+        Authorization: 'Bearer admin@sym.co.th',
+      },
+    }, baseEnv)
+    assert.equal(devSpoof.status, 401)
+    assert.equal((await app.request(`${origin}/api/evidence/tasks/t1/old.jpg`, {}, baseEnv)).status, 401)
+
+    // 3. Start OAuth flow: issues HttpOnly signed ais_oauth_tx cookie and redirects with PKCE S256
+    const startRes = await app.request(`${origin}/api/auth/google/start`, {}, baseEnv)
+    assert.equal(startRes.status, 302)
+    const redirectLocation = new URL(startRes.headers.get('location'))
+    assert.equal(redirectLocation.origin, 'https://accounts.google.com')
+    assert.equal(redirectLocation.searchParams.get('redirect_uri'), `${origin}/api/auth/callback`)
+    assert.equal(redirectLocation.searchParams.get('code_challenge_method'), 'S256')
+    assert.equal(redirectLocation.searchParams.get('prompt'), 'select_account')
+    const state = redirectLocation.searchParams.get('state')
+    const nonce = redirectLocation.searchParams.get('nonce')
+    const codeChallenge = redirectLocation.searchParams.get('code_challenge')
+    assert.ok(state && nonce && codeChallenge)
+
+    const startSetCookies = getSetCookies(startRes.headers)
+    const txCookiePair = extractCookiePair(startSetCookies, 'ais_oauth_tx')
+    assert.ok(txCookiePair)
+    assert.match(startSetCookies[0], /HttpOnly/i)
+    assert.match(startSetCookies[0], /SameSite=Lax/i)
+    assert.match(startSetCookies[0], /Secure/i)
+
+    // 4. Invalid state rejected with invalid_state & clears tx cookie
+    const badStateRes = await app.request(`${origin}/api/auth/callback?code=c1&state=wrong-state`, {
+      headers: { Cookie: txCookiePair },
+    }, baseEnv)
+    assert.equal(badStateRes.status, 302)
+    assert.equal(badStateRes.headers.get('location'), '/?auth_error=invalid_state')
+
+    // 5. Unverified email rejected & issues no session cookie
+    nextExchangeNonce = nonce
+    nextEmail = 'admin@sym.co.th'
+    nextEmailVerified = false
+    const unverifiedRes = await app.request(`${origin}/api/auth/callback?code=c2&state=${encodeURIComponent(state)}`, {
+      headers: { Cookie: txCookiePair },
+    }, baseEnv)
+    assert.equal(unverifiedRes.status, 302)
+    assert.equal(unverifiedRes.headers.get('location'), '/?auth_error=unverified_email')
+    assert.equal(extractCookiePair(getSetCookies(unverifiedRes.headers), 'ais_session'), null)
+
+    // Verify PKCE code_verifier hashed to the exact code_challenge from /start
+    const verifier = lastTokenBody.get('code_verifier')
+    assert.equal(createHash('sha256').update(verifier).digest('base64url'), codeChallenge)
+
+    // 6. Verified Google email NOT in allowlist gets not_allowlisted & no session cookie
+    nextEmailVerified = true
+    nextEmail = 'outsider@gmail.com'
+    const deniedRes = await app.request(`${origin}/api/auth/callback?code=c3&state=${encodeURIComponent(state)}`, {
+      headers: { Cookie: txCookiePair },
+    }, baseEnv)
+    assert.equal(deniedRes.status, 302)
+    assert.equal(deniedRes.headers.get('location'), '/?auth_error=not_allowlisted')
+
+    // 7. Valid allowlisted Google user receives signed HttpOnly ais_session cookie
+    nextEmail = 'ADMIN@SYM.CO.TH'
+    const okCallbackRes = await app.request(`${origin}/api/auth/callback?code=c4&state=${encodeURIComponent(state)}`, {
+      headers: { Cookie: txCookiePair },
+    }, baseEnv)
+    assert.equal(okCallbackRes.status, 302)
+    assert.equal(okCallbackRes.headers.get('location'), '/')
+    const cbCookies = getSetCookies(okCallbackRes.headers)
+    const sessionCookiePair = extractCookiePair(cbCookies, 'ais_session')
+    assert.ok(sessionCookiePair)
+    const sessionHeaderLine = cbCookies.find(line => line.startsWith('ais_session='))
+    assert.match(sessionHeaderLine, /HttpOnly/i)
+    assert.match(sessionHeaderLine, /SameSite=Lax/i)
+    assert.match(sessionHeaderLine, /Secure/i)
+
+    // 8. Signed cookie authenticates /api/auth/me and /api/evidence/*, while tampered cookie fails 401
+    const meRes = await app.request(`${origin}/api/auth/me`, {
+      headers: { Cookie: sessionCookiePair },
+    }, baseEnv)
+    const meJson = await meRes.json()
+    assert.equal(meRes.status, 200)
+    assert.equal(meJson.email, 'admin@sym.co.th')
+    assert.equal(meJson.role, 'admin')
+    assert.equal(meJson.auth_mode, 'google_oauth')
+
+    const evidenceAuthRes = await app.request(`${origin}/api/evidence/tasks/missing/photo.jpg`, {
+      headers: { Cookie: sessionCookiePair },
+    }, baseEnv)
+    assert.equal(evidenceAuthRes.status, 404)
+
+    const tamperedCookie = `${sessionCookiePair.slice(0, -4)}AAAA`
+    assert.equal((await app.request(`${origin}/api/auth/me`, { headers: { Cookie: tamperedCookie } }, baseEnv)).status, 401)
+
+    // 9. CSRF cross-site Origin rejected on mutating requests
+    const csrfBlocked = await app.request(`${origin}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Cookie: sessionCookiePair, Origin: 'https://evil.example' },
+    }, baseEnv)
+    assert.equal(csrfBlocked.status, 403)
+
+    // 10. Real-time allowlist deactivation revokes active cookie immediately on next request
+    baseEnv.DB.prepare("UPDATE google_signin_allowlist SET is_active = 0 WHERE email = 'admin@sym.co.th'").run()
+    const revokedRes = await app.request(`${origin}/api/auth/me`, {
+      headers: { Cookie: sessionCookiePair },
+    }, baseEnv)
+    assert.equal(revokedRes.status, 403)
+    assert.match(getSetCookies(revokedRes.headers).find(c => c.startsWith('ais_session=')) || '', /Max-Age=0/i)
+
+    // 11. Logout clears ais_session cookie
+    const logoutRes = await app.request(`${origin}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Origin: origin },
+    }, baseEnv)
+    assert.equal(logoutRes.status, 200)
+    assert.match(getSetCookies(logoutRes.headers).find(c => c.startsWith('ais_session=')) || '', /Max-Age=0/i)
+  } finally {
+    globalThis.fetch = originalFetch
+    clearGoogleJwksCache()
+  }
 })
