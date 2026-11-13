@@ -833,6 +833,7 @@ function App() {
 
   const role = demoMode ? 'viewer' : userContext?.role
   const canUseAdminModules = demoMode || role === 'admin'
+  const canExportRawData = !demoMode && (role === 'admin' || role === 'data_manager' || role === 'customer_reviewer')
   const visibleNavigation = navigation.filter(item => {
     if (role === 'customer_reviewer') {
       return ['overview', 'pending', 'completed'].includes(item.key)
@@ -931,7 +932,7 @@ function App() {
           <div className="page-heading">
             <div><div className="eyebrow">AIS BRANCH & ASSET OPERATIONS</div><h1>{currentPage.title}</h1><p>{currentPage.subtitle}</p></div>
             <div className="flex flex-wrap gap-2">
-              {!demoMode && <Button type="button" variant="outline" onClick={handleExportRawData}><FileDown size={16} /> ส่งออก Raw Data (.csv)</Button>}
+              {canExportRawData && <Button type="button" variant="outline" onClick={handleExportRawData}><FileDown size={16} /> ส่งออก Raw Data (.csv)</Button>}
               {activeMenu === 'assets' && canUseAdminModules && <Button type="button" variant="outline" onClick={() => setActiveMenu('imports')}><FileSpreadsheet size={16} /> นำเข้าทะเบียน</Button>}
             </div>
           </div>

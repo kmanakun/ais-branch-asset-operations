@@ -1713,6 +1713,9 @@ app.post('/review/customer-reject', async (c) => {
 // 13. Export Raw Data ความคืบหน้าภาพรวมโครงการ
 app.get('/export/raw-data', async (c) => {
   const user = c.get('user')
+  if (!['admin', 'data_manager', 'customer_reviewer'].includes(user.role)) {
+    return c.json({ error: 'บัญชีนี้ไม่มีสิทธิ์ส่งออก Raw Data โครงการ' }, 403)
+  }
 
   const rows = await c.env.DB.prepare(`
     SELECT 
@@ -2032,4 +2035,5 @@ app.post('/allowlist/:id/toggle', async (c) => {
   })
 })
 
+export { app }
 export const onRequest = handle(app)
