@@ -905,15 +905,17 @@ app.post('/tasks/:id/evidence', async (c) => {
     })
   }
 
-  // อัปเดตรายการใน D1
+  // อัปเดตรายการใน D1 พร้อมเก็บข้อมูลสำรองไว้ใน data_base64
   const evidenceId = `evd-${taskId}-${body.evidence_type}`
   await c.env.DB.prepare(`
     INSERT INTO replacement_task_evidence (
-      id, replacement_task_id, evidence_type, storage_path, byte_size, mime_type, role_assigned
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      id, replacement_task_id, evidence_type, storage_path, byte_size, mime_type, role_assigned, data_base64
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       storage_path = excluded.storage_path,
       byte_size = excluded.byte_size,
+      mime_type = excluded.mime_type,
+      data_base64 = excluded.data_base64,
       created_at = datetime('now')
   `).bind(
     evidenceId,
@@ -922,7 +924,8 @@ app.post('/tasks/:id/evidence', async (c) => {
     storageKey,
     bytes.length,
     body.mime_type || 'image/jpeg',
-    user.role
+    user.role,
+    body.file_base64
   ).run()
 
   return c.json({
@@ -946,22 +949,62 @@ app.get('/tasks/:id/evidence', async (c) => {
   return c.json({ evidence: rows.results })
 })
 
-// 8.2 ดูภาพหลักฐานจาก Storage
+// 8.2 ดูภาพหลักฐานจาก Storage (Cloudflare R2 พร้อม D1 Storage Persistence Fallback)
 app.get('/evidence/:key{.*}', async (c) => {
   const key = c.req.param('key')
+
+  // 1. ตรวจสอบจาก Cloudflare R2 ก่อน หากมีการผูก Bucket ไว้
   if (c.env.EVIDENCE_BUCKET) {
-    const object = await c.env.EVIDENCE_BUCKET.get(key)
-    if (!object) return c.json({ error: 'File not found' }, 404)
-    const headers = new Headers()
-    object.writeHttpMetadata(headers)
-    headers.set('etag', object.httpEtag)
-    return new Response(object.body, { headers })
+    try {
+      const object = await c.env.EVIDENCE_BUCKET.get(key)
+      if (object) {
+        const headers = new Headers()
+        object.writeHttpMetadata(headers)
+        headers.set('etag', object.httpEtag)
+        headers.set('Cache-Control', 'public, max-age=86400')
+        return new Response(object.body, { headers })
+      }
+    } catch {
+      // ดำเนินการค้นหาต่อใน D1
+    }
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="100%" height="100%" fill="#f1f5f9"/><text x="50%" y="45%" text-anchor="middle" fill="#475569" font-family="sans-serif" font-size="14" font-weight="600">บันทึกหลักฐานใน D1 แล้ว</text><text x="50%" y="60%" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="12">Cloudflare R2</text></svg>`
+
+  // 2. Fallback: ดึงรูปภาพจากตาราง replacement_task_evidence ใน D1
+  const row = await c.env.DB.prepare(`
+    SELECT data_base64, mime_type
+    FROM replacement_task_evidence
+    WHERE storage_path = ? OR id = ?
+    LIMIT 1
+  `).bind(key, key).first<{ data_base64?: string; mime_type?: string }>()
+
+  if (row && row.data_base64) {
+    try {
+      const mimeType = row.mime_type || 'image/jpeg'
+      const base64Clean = row.data_base64.replace(/^data:[^;]+;base64,/, '')
+      const binaryString = atob(base64Clean)
+      const bytes = new Uint8Array(binaryString.length)
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i)
+      }
+      return new Response(bytes.buffer, {
+        headers: {
+          'Content-Type': mimeType,
+          'Content-Length': String(bytes.length),
+          'Cache-Control': 'public, max-age=86400'
+        }
+      })
+    } catch {
+      // Base64 decode failed
+    }
+  }
+
+  // 3. หากไม่พบไฟล์เลย ส่งรูปภาพแจ้งเตือนแบบชัดเจน
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="100%" height="100%" fill="#f8fafc"/><text x="50%" y="45%" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="14" font-weight="600">ไม่พบรูปภาพหลักฐาน</text><text x="50%" y="60%" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="12">File Not Found</text></svg>`
   return new Response(svg, {
+    status: 404,
     headers: {
       'Content-Type': 'image/svg+xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=60'
+      'Cache-Control': 'public, max-age=10'
     }
   })
 })

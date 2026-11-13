@@ -368,10 +368,11 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       const readyEntries = Object.values(entries).filter((entry): entry is EvidenceEntry => entry?.status === 'ready')
       const next: Partial<Record<EvidenceSlot, string>> = {}
       for (const entry of readyEntries) {
-        next[entry.slot] = `/api/evidence/${entry.path}`
+        const timeKey = entry.uploaded_at ? `?t=${new Date(entry.uploaded_at).getTime()}` : `?t=${Date.now()}`
+        next[entry.slot] = `/api/evidence/${entry.path}${timeKey}`
       }
       if (active) {
-        setPreviewUrls(next)
+        setPreviewUrls(prev => ({ ...prev, ...next }))
         setPreviewStatuses({})
       }
     }
@@ -399,6 +400,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
         reader.readAsDataURL(blob)
       })
       const base64 = await base64Promise
+      setPreviewUrls(prev => ({ ...prev, [slot]: base64 }))
       await d1Api.uploadEvidence(taskId, slot, base64, blob.type || 'image/jpeg')
       setActionMessage('บันทึกหลักฐานเรียบร้อยแล้ว')
       await loadEvidence()

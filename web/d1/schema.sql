@@ -105,6 +105,7 @@ CREATE TABLE IF NOT EXISTS replacement_task_evidence (
     byte_size INTEGER NOT NULL,
     mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
     role_assigned TEXT NOT NULL,
+    data_base64 TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_task ON replacement_task_evidence(replacement_task_id);
