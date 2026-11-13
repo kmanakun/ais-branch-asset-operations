@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Bell,
+  Camera,
   ClipboardList,
   CheckCircle2,
   ChevronDown,
@@ -1507,23 +1508,54 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
   )
 }
 
-const evidenceTypeLabels: Record<string, string> = {
-  old_serial_photo: 'รูป SN เดิม',
-  old_device_photo: 'รูปตัวเครื่องเดิม',
-  old_condition_photo: 'รูปสภาพความเสียหายเดิม',
-  old_branch_sticker_photo: 'รูปสติกเกอร์สาขาเดิม',
-  new_serial_photo: 'รูป SN ใหม่',
-  new_front_photo: 'รูปด้านหน้าเครื่องใหม่',
-  new_side_photo: 'รูปด้านข้างเครื่องใหม่',
-  new_com_serial_photo: 'รูป COM SN / กล่องใหม่',
-  new_device_photo: 'รูปเครื่องใหม่พร้อมใช้',
-  new_cable_management_photo: 'รูปต่อสายไฟ/สัญญาณ',
-  spare_photo_1: 'รูปสำรอง 1',
-  spare_photo_2: 'รูปสำรอง 2',
-  technician_signature: 'ลายเซ็นช่างหน้างาน',
-  scanner_user_signature: 'ลายเซ็นผู้รับมอบ',
-  inspector_signature: 'ลายเซ็นผู้ตรวจรับ',
-}
+const EVIDENCE_GROUPS_DEF = [
+  {
+    id: 'old_device',
+    title: 'เครื่องเก่า (Old Device)',
+    badge: '4 รูป',
+    icon: '📦',
+    slots: [
+      { key: 'old_serial_photo', aliases: ['photo_old_serial', 'old_serial_photo'], num: '1', title: 'SN เครื่องเก่า', hint: 'ถ่ายฉลาก Serial ของ Scanner เดิม' },
+      { key: 'old_device_photo', aliases: ['photo_old_device', 'old_device_photo'], num: '2', title: 'ภาพรวมเครื่องเก่า', hint: 'ถ่ายตัวเครื่อง Scanner เดิมทั้งเครื่อง' },
+      { key: 'old_condition_photo', aliases: ['photo_old_condition', 'old_condition_photo'], num: '3', title: 'สภาพเครื่องเก่า', hint: 'ถ่ายตำหนิหรือสภาพปัจจุบัน' },
+      { key: 'old_branch_sticker_photo', aliases: ['photo_old_branch_sticker', 'old_branch_sticker_photo'], num: '4', title: 'สติกเกอร์สาขาเดิม', hint: 'ถ่ายสติกเกอร์ที่ระบุสาขาเดิม' },
+    ]
+  },
+  {
+    id: 'new_device',
+    title: 'เครื่องใหม่ (New Device)',
+    badge: '6 รูป',
+    icon: '✨',
+    slots: [
+      { key: 'new_serial_photo', aliases: ['photo_new_serial', 'new_serial_photo'], num: '1', title: 'SN เครื่องใหม่', hint: 'ถ่ายฉลาก Serial ของ Scanner ใหม่' },
+      { key: 'new_front_photo', aliases: ['photo_new_front', 'new_front_photo'], num: '2', title: 'ด้านหน้าเครื่องใหม่', hint: 'ถ่ายด้านหน้าของ Scanner ใหม่' },
+      { key: 'new_side_photo', aliases: ['photo_new_side', 'new_side_photo'], num: '3', title: 'ด้านข้างเครื่องใหม่', hint: 'ถ่ายด้านข้างของ Scanner ใหม่' },
+      { key: 'new_com_serial_photo', aliases: ['photo_new_com_serial', 'new_com_serial_photo'], num: '4', title: 'Com SN / กล่องใหม่', hint: 'ถ่ายฉลาก Com SN / กล่อง' },
+      { key: 'new_device_photo', aliases: ['photo_new_device', 'new_device_photo'], num: '5', title: 'ตัวเครื่องพร้อมใช้', hint: 'ถ่ายภาพ Scanner ใหม่พร้อมใช้งาน' },
+      { key: 'new_cable_management_photo', aliases: ['photo_new_cable_management', 'new_cable_management_photo'], num: '6', title: 'การต่อสายสัญญาณ/ไฟ', hint: 'ถ่ายจุดเชื่อมต่อและสายสัญญาณ' },
+    ]
+  },
+  {
+    id: 'signatures',
+    title: 'ลายเซ็นคู่ (Dual Signatures)',
+    badge: '2 ลายเซ็น',
+    icon: '✍️',
+    slots: [
+      { key: 'technician_signature', aliases: ['technician_signature', 'sig_tech'], num: '1', title: 'ลายเซ็นช่างผู้ปฏิบัติงาน', hint: 'ช่างผู้ปฏิบัติงานลงนาม Onsite' },
+      { key: 'scanner_user_signature', aliases: ['scanner_user_signature', 'sig_cust'], num: '2', title: 'ลายเซ็นผู้รับมอบประจำสาขา', hint: 'พนักงานประจำสาขา AIS ลงนามรับทราบ' },
+    ]
+  },
+  {
+    id: 'spares',
+    title: 'รูปสำรอง (Optional)',
+    badge: 'ไม่บังคับ 2 รูป',
+    icon: '📎',
+    slots: [
+      { key: 'spare_photo_1', aliases: ['spare_photo_1'], num: '1', title: 'รูปสำรอง 1', hint: 'รูปถ่ายเพิ่มเติม (ถ้ามี)' },
+      { key: 'spare_photo_2', aliases: ['spare_photo_2'], num: '2', title: 'รูปสำรอง 2', hint: 'รูปถ่ายเพิ่มเติม (ถ้ามี)' },
+    ]
+  }
+] as const
 
 function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action: string) => void }) {
   const isCustomerReviewer = role === 'customer_reviewer'
@@ -1980,181 +2012,359 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
             setZoomedEvidenceIndex(null)
           }}
         >
-          <div className="handover-modal-content" style={{ maxWidth: '720px' }} onClick={e => e.stopPropagation()}>
-            <div className="handover-modal-bar">
-              <strong>รายละเอียดหลักฐานหน้างาน</strong>
-              <button
-                type="button"
-                className="icon-button"
-                onClick={() => {
-                  setViewingEvidenceTask(null)
-                  setSelectedAdminTask(null)
-                  setActionError('')
-                  setZoomedEvidenceIndex(null)
-                }}
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <div style={{ padding: '20px' }}>
-              {actionError && (
-                <div className="form-error" role="alert" style={{ marginBottom: '14px' }}>
-                  {actionError}
-                </div>
-              )}
-              {(() => {
-                const currentTask = selectedAdminTask || viewingEvidenceTask!
-                return (
-                  <>
-                    <div style={{ background: '#f8fafc', padding: '14px', borderRadius: '6px', marginBottom: '18px', fontSize: '13px' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        <div><strong>สาขา:</strong> {String(currentTask.branch_name || currentTask.loc_bld || '—')}</div>
-                        <div><strong>LocationCode:</strong> {String(currentTask.location_code || '—')}</div>
-                        <div><strong>SN เดิม:</strong> {String(currentTask.com_sn || currentTask.serial || '—')}</div>
-                        <div><strong>SN ใหม่:</strong> {String(currentTask.new_serial_number || '—')}</div>
-                        <div><strong>ผลการเปลี่ยน:</strong> {String(currentTask.outcome || '—')}</div>
-                        <div><strong>หมายเหตุ:</strong> {String(currentTask.notes || '—')}</div>
-                      </div>
-                    </div>
+          <div className="evidence-modal-box" onClick={e => e.stopPropagation()}>
+            {(() => {
+              const currentTask = selectedAdminTask || viewingEvidenceTask!
 
-                    <h4 style={{ margin: '0 0 10px', fontSize: '14px' }}>รูปถ่ายหลักฐาน 10 รูป & ลายเซ็น (คลิกเพื่อขยายดูภาพเต็ม)</h4>
-                    {evidenceLoading ? (
-                      <div style={{ padding: '30px', textAlign: 'center' }}>กำลังโหลดหลักฐาน…</div>
-                    ) : (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px', marginBottom: '20px' }}>
-                        {evidenceList.map((ev, i) => (
-                          <div
-                            key={ev.id || i}
-                            style={{
-                              border: '1px solid #e2e8f0',
-                              borderRadius: '6px',
-                              overflow: 'hidden',
-                              textAlign: 'center',
-                              fontSize: '11px',
-                              background: '#fafafa',
-                              cursor: 'pointer',
-                              transition: 'transform 0.15s, box-shadow 0.15s'
-                            }}
-                            onClick={() => setZoomedEvidenceIndex(i)}
-                          >
-                            <div style={{ height: '90px', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              <img
-                                src={`/api/evidence/${ev.storage_path}`}
-                                alt={evidenceTypeLabels[ev.evidence_type] || ev.evidence_type}
-                                style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'cover' }}
-                                onError={e => {
-                                  (e.target as HTMLElement).style.display = 'none'
-                                }}
-                              />
-                              <span style={{ fontSize: '10px', color: '#64748b' }}>{evidenceTypeLabels[ev.evidence_type] || ev.evidence_type}</span>
-                            </div>
-                            <div style={{ padding: '4px', fontWeight: 500 }}>{evidenceTypeLabels[ev.evidence_type] || ev.evidence_type}</div>
-                          </div>
-                        ))}
+              // Map uploaded evidence files
+              const evidenceMap = new Map<string, any>()
+              for (const ev of evidenceList) {
+                evidenceMap.set(ev.evidence_type, ev)
+                if (ev.evidence_type.startsWith('photo_')) {
+                  evidenceMap.set(ev.evidence_type.replace('photo_', '') + '_photo', ev)
+                }
+                if (ev.evidence_type.endsWith('_photo')) {
+                  evidenceMap.set('photo_' + ev.evidence_type.replace('_photo', ''), ev)
+                }
+                if (ev.evidence_type === 'technician_signature') evidenceMap.set('sig_tech', ev)
+                if (ev.evidence_type === 'sig_tech') evidenceMap.set('technician_signature', ev)
+                if (ev.evidence_type === 'scanner_user_signature') evidenceMap.set('sig_cust', ev)
+                if (ev.evidence_type === 'sig_cust') evidenceMap.set('scanner_user_signature', ev)
+              }
+
+              // Build flat list for Lightbox Zoom navigation
+              const lightboxList: Array<{ title: string; path: string; groupTitle: string }> = []
+              EVIDENCE_GROUPS_DEF.forEach(group => {
+                group.slots.forEach(slot => {
+                  const matched = slot.aliases.map(a => evidenceMap.get(a)).find(Boolean)
+                  if (matched) {
+                    lightboxList.push({
+                      title: slot.title,
+                      path: matched.storage_path,
+                      groupTitle: group.title
+                    })
+                  }
+                })
+              })
+
+              return (
+                <>
+                  <div className="evidence-modal-topbar">
+                    <div>
+                      <h3>
+                        <ShieldCheck size={20} color="#15803d" />
+                        รายละเอียดหลักฐานหน้างาน
+                      </h3>
+                      <p>
+                        {String(currentTask.branch_name || currentTask.loc_bld || 'สาขาไม่ระบุ')} · LocationCode: {String(currentTask.location_code || '—')}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="icon-button"
+                      onClick={() => {
+                        setViewingEvidenceTask(null)
+                        setSelectedAdminTask(null)
+                        setActionError('')
+                        setZoomedEvidenceIndex(null)
+                      }}
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="evidence-modal-scroll">
+                    {actionError && (
+                      <div className="form-error" role="alert">
+                        {actionError}
                       </div>
                     )}
 
-                    {/* Lightbox Modal */}
-                    {zoomedEvidenceIndex !== null && evidenceList[zoomedEvidenceIndex] && (
-                      <div
-                        className="handover-modal-backdrop"
-                        style={{ zIndex: 10000, background: 'rgba(0,0,0,0.88)' }}
-                        onClick={() => setZoomedEvidenceIndex(null)}
-                      >
-                        <div
-                          style={{
-                            position: 'relative',
-                            maxWidth: '92vw',
-                            maxHeight: '92vh',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <div style={{
-                            color: '#fff',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            width: '100%',
-                            marginBottom: '10px',
-                            alignItems: 'center'
-                          }}>
-                            <strong style={{ fontSize: '15px' }}>
-                              {evidenceTypeLabels[evidenceList[zoomedEvidenceIndex].evidence_type] || evidenceList[zoomedEvidenceIndex].evidence_type} ({zoomedEvidenceIndex + 1}/{evidenceList.length})
-                            </strong>
-                            <button
-                              type="button"
-                              className="icon-button"
-                              style={{ color: '#fff', background: 'rgba(255,255,255,0.2)' }}
-                              onClick={() => setZoomedEvidenceIndex(null)}
-                            >
-                              <X size={18} />
-                            </button>
-                          </div>
+                    {/* Summary Card */}
+                    <div className="review-summary-card">
+                      <div className="review-summary-pills">
+                        <span className="review-pill-tag">📍 จังหวัด{String(currentTask.province || '—')}</span>
+                        <span className="review-pill-tag">LocationCode: {String(currentTask.location_code || '—')}</span>
+                        <span className="review-pill-tag is-green">
+                          {currentTask.outcome === 'replaced' ? 'เปลี่ยนเครื่องสมบูรณ์ (Replaced)' : String(currentTask.outcome || 'กำลังตรวจรับ')}
+                        </span>
+                        {currentTask.admin_accepted_at ? (
+                          <span className="review-pill-tag is-green">✓ SYM Admin ตรวจรับแล้ว</span>
+                        ) : (
+                          <span className="review-pill-tag" style={{ background: '#fef3c7', color: '#b45309' }}>รอ SYM Admin ตรวจรับ</span>
+                        )}
+                      </div>
 
-                          <img
-                            src={`/api/evidence/${evidenceList[zoomedEvidenceIndex].storage_path}`}
-                            alt={evidenceTypeLabels[evidenceList[zoomedEvidenceIndex].evidence_type] || evidenceList[zoomedEvidenceIndex].evidence_type}
-                            style={{
-                              maxWidth: '100%',
-                              maxHeight: '75vh',
-                              borderRadius: '8px',
-                              objectFit: 'contain',
-                              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
-                            }}
-                          />
-
-                          <div style={{ display: 'flex', gap: '12px', marginTop: '14px' }}>
-                            <button
-                              type="button"
-                              className="secondary-button"
-                              disabled={zoomedEvidenceIndex === 0}
-                              onClick={() => setZoomedEvidenceIndex(i => Math.max(0, (i || 0) - 1))}
-                            >
-                              <ChevronLeft size={16} /> ภาพก่อนหน้า
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary-button"
-                              disabled={zoomedEvidenceIndex === evidenceList.length - 1}
-                              onClick={() => setZoomedEvidenceIndex(i => Math.min(evidenceList.length - 1, (i || 0) + 1))}
-                            >
-                              ภาพถัดไป <ChevronRight size={16} />
-                            </button>
-                          </div>
+                      <div className="review-summary-grid">
+                        <div className="review-metric-item">
+                          <span className="metric-label">SN เครื่องเดิม</span>
+                          <strong className="metric-val mono">{String(currentTask.com_sn || currentTask.serial || '—')}</strong>
+                          <span className="metric-sub">รุ่น {String(currentTask.model_name || currentTask.scanner_model || 'Honeywell')}</span>
+                        </div>
+                        <div className="review-metric-item is-highlight">
+                          <span className="metric-label">SN เครื่องใหม่</span>
+                          <strong className="metric-val mono">{String(currentTask.new_serial_number || '—')}</strong>
+                          <span className="metric-sub">ผล: {String(currentTask.outcome || 'replaced')}</span>
+                        </div>
+                        <div className="review-metric-item">
+                          <span className="metric-label">ผู้ปฏิบัติงานที่เข้าสาขา</span>
+                          <strong className="metric-val">{String(currentTask.started_by || 'ช่าง Onsite')}</strong>
+                          <span className="metric-sub">{currentTask.closeout_submitted_at ? `ส่งเมื่อ: ${formatDate(currentTask.closeout_submitted_at)}` : '—'}</span>
+                        </div>
+                        <div className="review-metric-item">
+                          <span className="metric-label">การตรวจสอบ Stage 1 (SYM)</span>
+                          <strong className="metric-val" style={{ color: currentTask.admin_accepted_at ? '#15803d' : '#d97706' }}>
+                            {currentTask.admin_accepted_at ? '✓ ผ่านการตรวจแล้ว' : 'รอ SYM พิจารณา'}
+                          </strong>
+                          <span className="metric-sub">{currentTask.admin_accepted_at ? `${String(currentTask.admin_accepted_by || 'Admin')} · ${formatDate(currentTask.admin_accepted_at)}` : 'รอคิว'}</span>
                         </div>
                       </div>
-                    )}
 
-                    {selectedAdminTask && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '16px' }}>
-                        <button
-                          type="button"
-                          className="secondary-button"
-                          style={{ color: '#b91c1c' }}
-                          onClick={() => {
-                            setRejectingTask(selectedAdminTask)
-                            setSelectedAdminTask(null)
-                          }}
-                        >
-                          ปฏิเสธ / ส่งกลับช่าง
-                        </button>
-                        <button
-                          type="button"
-                          className="primary-button"
-                          disabled={submitting}
-                          onClick={() => handleSymPass(selectedAdminTask)}
-                        >
-                          <CheckCircle2 size={16} /> ตรวจผ่าน (ส่งต่อ Gable)
-                        </button>
+                      {Boolean(currentTask.notes) && (
+                        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', color: '#475569', border: '1px solid #edf2f7' }}>
+                          <strong style={{ color: '#1e293b' }}>หมายเหตุจากหน้างาน:</strong> {String(currentTask.notes)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Evidence Photo Sections */}
+                    {evidenceLoading ? (
+                      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>กำลังโหลดรูปภาพและลายเซ็น…</div>
+                    ) : (
+                      <div className="review-sections-list">
+                        {EVIDENCE_GROUPS_DEF.map(group => {
+                          const uploadedCount = group.slots.filter(s => s.aliases.some(a => evidenceMap.has(a))).length
+                          const isComplete = uploadedCount === group.slots.length
+
+                          return (
+                            <section className="review-section-box" key={group.id}>
+                              <div className="review-section-header">
+                                <h4>
+                                  <span>{group.icon}</span>
+                                  <span>{group.title}</span>
+                                </h4>
+                                <span className={`review-section-counter ${isComplete ? '' : 'is-incomplete'}`} style={!isComplete ? { background: '#fef3c7', color: '#b45309' } : undefined}>
+                                  แนบแล้ว {uploadedCount}/{group.slots.length}
+                                </span>
+                              </div>
+
+                              <div className="review-grid-cards">
+                                {group.slots.map(slot => {
+                                  const matched = slot.aliases.map(a => evidenceMap.get(a)).find(Boolean)
+                                  const isUploaded = Boolean(matched)
+
+                                  const handleCardClick = () => {
+                                    if (!matched) return
+                                    const idx = lightboxList.findIndex(item => item.path === matched.storage_path)
+                                    if (idx !== -1) setZoomedEvidenceIndex(idx)
+                                  }
+
+                                  return (
+                                    <div
+                                      key={slot.key}
+                                      className={`review-card-item ${isUploaded ? 'is-ready' : 'is-empty'}`}
+                                      onClick={handleCardClick}
+                                      title={isUploaded ? 'คลิกเพื่อขยายดูภาพเต็ม' : undefined}
+                                    >
+                                      <span className="review-slot-badge">{slot.num}</span>
+                                      {isUploaded ? (
+                                        <span className="review-ready-pill">✓ แนบแล้ว</span>
+                                      ) : (
+                                        <span className="review-ready-pill" style={{ background: '#f1f5f9', color: '#64748b', borderColor: '#e2e8f0' }}>ยังไม่มีรูป</span>
+                                      )}
+
+                                      <div className="review-card-thumb">
+                                        {isUploaded ? (
+                                          <>
+                                            <img
+                                              src={`/api/evidence/${matched.storage_path}`}
+                                              alt={slot.title}
+                                              loading="lazy"
+                                              onError={e => {
+                                                (e.target as HTMLElement).style.display = 'none'
+                                              }}
+                                            />
+                                            <div className="review-thumb-zoom-hint">
+                                              <Search size={14} /> คลิกขยาย
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <div className="review-thumb-missing">
+                                            <Camera size={20} />
+                                            <span>ยังไม่มีรูป</span>
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="review-card-info">
+                                        <strong>{slot.title}</strong>
+                                        <small>{slot.hint}</small>
+                                      </div>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </section>
+                          )
+                        })}
                       </div>
                     )}
-                  </>
-                )
-              })()}
-            </div>
+                  </div>
+
+                  {/* Lightbox Zoom Modal */}
+                  {zoomedEvidenceIndex !== null && lightboxList[zoomedEvidenceIndex] && (
+                    <div
+                      className="handover-modal-backdrop"
+                      style={{ zIndex: 10000, background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(4px)' }}
+                      onClick={() => setZoomedEvidenceIndex(null)}
+                    >
+                      <div
+                        style={{
+                          position: 'relative',
+                          maxWidth: '94vw',
+                          maxHeight: '94vh',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <div style={{
+                          color: '#ffffff',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          width: '100%',
+                          marginBottom: '12px',
+                          alignItems: 'center'
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <strong style={{ fontSize: '16px' }}>
+                              {lightboxList[zoomedEvidenceIndex].title}
+                            </strong>
+                            <span style={{ fontSize: '12px', background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '999px' }}>
+                              {lightboxList[zoomedEvidenceIndex].groupTitle} · ภาพที่ {zoomedEvidenceIndex + 1} จาก {lightboxList.length}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className="icon-button"
+                            style={{ color: '#ffffff', background: 'rgba(255,255,255,0.2)' }}
+                            onClick={() => setZoomedEvidenceIndex(null)}
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+
+                        <img
+                          src={`/api/evidence/${lightboxList[zoomedEvidenceIndex].path}`}
+                          alt={lightboxList[zoomedEvidenceIndex].title}
+                          style={{
+                            maxWidth: '100%',
+                            maxHeight: '78vh',
+                            borderRadius: '12px',
+                            objectFit: 'contain',
+                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+                            background: '#0f172a'
+                          }}
+                        />
+
+                        <div style={{ display: 'flex', gap: '14px', marginTop: '14px' }}>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            style={{ color: '#ffffff', background: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)' }}
+                            disabled={zoomedEvidenceIndex === 0}
+                            onClick={() => setZoomedEvidenceIndex(i => Math.max(0, (i || 0) - 1))}
+                          >
+                            <ChevronLeft size={16} /> ภาพก่อนหน้า
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            style={{ color: '#ffffff', background: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)' }}
+                            disabled={zoomedEvidenceIndex === lightboxList.length - 1}
+                            onClick={() => setZoomedEvidenceIndex(i => Math.min(lightboxList.length - 1, (i || 0) + 1))}
+                          >
+                            ภาพถัดไป <ChevronRight size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Modal Footer Actions */}
+                  <div className="review-modal-actions">
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => {
+                        setViewingEvidenceTask(null)
+                        setSelectedAdminTask(null)
+                        setActionError('')
+                        setZoomedEvidenceIndex(null)
+                      }}
+                    >
+                      ปิดหน้าต่าง
+                    </button>
+
+                    <div style={{ display: 'flex', gap: '10px' }}>
+                      {isCustomerReviewer ? (
+                        <>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            style={{ color: '#b91c1c', borderColor: '#fca5a5' }}
+                            onClick={() => {
+                              setRejectingTask(currentTask)
+                              setViewingEvidenceTask(null)
+                            }}
+                          >
+                            ปฏิเสธงานนี้ (Reject)
+                          </button>
+                          <button
+                            type="button"
+                            className="primary-button"
+                            onClick={() => {
+                              const bId = String(currentTask.branch_id || '')
+                              const group = branchGroups.find(g => g.id === bId)
+                              if (group) {
+                                setViewingEvidenceTask(null)
+                                handleOpenBatchAccept(group)
+                              }
+                            }}
+                          >
+                            <ShieldCheck size={16} /> ตรวจรับทั้งสาขา
+                          </button>
+                        </>
+                      ) : selectedAdminTask ? (
+                        <>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            style={{ color: '#b91c1c', borderColor: '#fca5a5' }}
+                            onClick={() => {
+                              setRejectingTask(selectedAdminTask)
+                              setSelectedAdminTask(null)
+                            }}
+                          >
+                            ปฏิเสธ / ส่งกลับช่าง
+                          </button>
+                          <button
+                            type="button"
+                            className="primary-button"
+                            disabled={submitting}
+                            onClick={() => handleSymPass(selectedAdminTask)}
+                          >
+                            <CheckCircle2 size={16} /> ตรวจผ่าน (ส่งต่อ Gable)
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
       )}

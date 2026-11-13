@@ -1476,3 +1476,348 @@ tbody tr:last-child td { border-bottom: 0; }
   }
 }
 
+/* ==========================================================================
+   Modern Evidence Review Modal Styles (AIS Green Theme)
+   ========================================================================== */
+.evidence-modal-box {
+  max-width: 880px;
+  width: 95vw;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+  border: 1px solid #e2e8f0;
+}
+
+.evidence-modal-topbar {
+  padding: 16px 22px;
+  border-bottom: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.evidence-modal-topbar h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.evidence-modal-topbar p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.evidence-modal-scroll {
+  padding: 20px 22px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: #f8fafc;
+}
+
+.review-summary-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.review-summary-pills {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.review-pill-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.review-pill-tag.is-green {
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.review-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.review-metric-item {
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.review-metric-item.is-highlight {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.review-metric-item .metric-label {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.review-metric-item .metric-val {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.review-metric-item .metric-val.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.review-metric-item.is-highlight .metric-val {
+  color: #15803d;
+}
+
+.review-metric-item .metric-sub {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.review-sections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-section-box {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+}
+
+.review-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.review-section-header h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-section-counter {
+  font-size: 11px;
+  font-weight: 600;
+  color: #15803d;
+  background: #dcfce7;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.review-grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+  gap: 12px;
+}
+
+.review-card-item {
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  cursor: pointer;
+}
+
+.review-card-item:hover {
+  border-color: #22c55e;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px -2px rgba(34, 197, 94, 0.15);
+}
+
+.review-card-item.is-empty {
+  border-style: dashed;
+  background: #fafbfc;
+  cursor: default;
+}
+
+.review-card-item.is-empty:hover {
+  border-color: #cbd5e1;
+  transform: none;
+  box-shadow: none;
+}
+
+.review-card-thumb {
+  height: 120px;
+  background: #f1f5f9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.review-card-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  padding: 4px;
+  transition: transform 0.2s ease;
+}
+
+.review-card-item:hover .review-card-thumb img {
+  transform: scale(1.05);
+}
+
+.review-thumb-zoom-hint {
+  position: absolute;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.4);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.review-card-item:hover .review-thumb-zoom-hint {
+  opacity: 1;
+}
+
+.review-thumb-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.review-slot-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.65);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+
+.review-card-item.is-ready .review-slot-badge {
+  background: #15803d;
+}
+
+.review-ready-pill {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  z-index: 2;
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #86efac;
+}
+
+.review-card-info {
+  padding: 8px 10px;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.review-card-info strong {
+  font-size: 12px;
+  color: #1e293b;
+  font-weight: 600;
+}
+
+.review-card-info small {
+  font-size: 10px;
+  color: #64748b;
+  line-height: 1.3;
+}
+
+.review-modal-actions {
+  padding: 14px 22px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #ffffff;
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+
+@media (max-width: 640px) {
+  .evidence-modal-box {
+    width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .review-grid-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+
