@@ -62,7 +62,9 @@ export const d1Api = {
       branches_remaining: number
       open: number
       on_process: number
+      awaiting_admin?: number
       awaiting_customer: number
+      awaiting_review?: number
       delivered: number
     }
     provinces: Array<{

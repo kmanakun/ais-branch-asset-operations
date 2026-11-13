@@ -477,6 +477,7 @@ function App() {
               scanners_complete: d1Dash.summary.delivered,
               open: d1Dash.summary.open,
               on_process: d1Dash.summary.on_process,
+              awaiting_review: d1Dash.summary.awaiting_review ?? d1Dash.summary.awaiting_customer ?? 0,
               delivered: d1Dash.summary.delivered,
             },
             provinces: d1Dash.provinces.map(p => ({
@@ -577,7 +578,13 @@ function App() {
     // The app may be restored after the browser suspends or discards its tab.
     // Do not send a restored page to Overview while the signed-in role is still loading.
     if (!demoMode && (contextStatus !== 'ready' || !userContext)) return
-    if (['pending', 'discovery'].includes(activeMenu)) {
+    if (activeMenu === 'pending') {
+      if (!demoMode && (userContext?.role === 'admin' || userContext?.role === 'customer_reviewer')) return
+      setActiveMenu('overview')
+      setMobileMenuOpen(false)
+      return
+    }
+    if (activeMenu === 'discovery') {
       if (!demoMode && userContext?.role === 'admin') return
       setActiveMenu('overview')
       setMobileMenuOpen(false)
@@ -914,7 +921,7 @@ function App() {
             </div>
           </div>
 
-          {activeMenu === 'overview' && <Overview demo={demoMode} dashboard={dashboard} error={dashboardError} onNavigate={navigateTo} />}
+          {activeMenu === 'overview' && <Overview demo={demoMode} dashboard={dashboard} error={dashboardError} onNavigate={navigateTo} role={role} />}
           {activeMenu === 'work_orders' && <WorkOrders role={role} demo={demoMode} onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'completed' && <WorkOrders role={role} demo={demoMode} view="completed" onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} />}
           {activeMenu === 'assets' && <Assets role={role} demo={demoMode} items={demoMode ? demoAssets : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onTaskUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'refresh' ? 'กำลังโหลดสถานะ Scanner ล่าสุด' : action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'resolve_exception' ? 'Admin ตรวจ Pending และบันทึกผลพิจารณาแล้ว' : action === 'accept' ? 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} search={search} searchResultsReady={demoMode || loadedAssetSearch === search} setSearch={value => { clearAssetQueryResults(); resetAssetPages(); setSearch(value) }} provinceOptions={visibleProvinces} provinceFilter={activeProvince} setProvinceFilter={value => { clearAssetQueryResults(); resetAssetPages(); setActiveProvince(value) }} statusFilter={assetStatusFilter} setStatusFilter={value => { clearAssetQueryResults(); resetAssetPages(); setAssetStatusFilter(value) }} page={assetPage} pageOffset={assetPageOffsets.current[assetPage] || 0} total={assetTotal} provinceTotal={assetProvinceTotal} setPage={value => { setListData([]); setListError(''); setAssetPage(value) }} focusSerial={pendingAssetSerial} onFocusResolved={() => setPendingAssetSerial('')} />}
@@ -1056,7 +1063,7 @@ function NoAccess({ email, error, onSignOut, onRetry, retry = false }: { email: 
   return <div className="no-access"><div className="no-access-card"><div className="login-icon"><ShieldCheck size={22} /></div><div className="eyebrow">AIS BRANCH & ASSET OPERATIONS</div><h1>{retry ? 'ตรวจสอบสิทธิ์ไม่ได้' : 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน'}</h1><p>{retry ? email : `เข้าสู่ระบบสำเร็จด้วย ${email || 'บัญชีของคุณ'} แต่ยังไม่มีบทบาทที่ผู้ดูแลกำหนดไว้ โปรดติดต่อ Identity Admin`}</p>{error && <div className="form-error" role="alert">{error}</div>}{retry && onRetry && <button className="primary-button" onClick={onRetry}>ลองตรวจสอบอีกครั้ง</button>}<button className="secondary-button" onClick={onSignOut}><LogOut size={16} /> ออกจากระบบ</button></div></div>
 }
 
-function Overview({ demo, dashboard, error, onNavigate }: { demo: boolean; dashboard: DashboardData | null; error: string; onNavigate: (key: MenuKey, search?: string) => void }) {
+function Overview({ demo, dashboard, error, onNavigate, role }: { demo: boolean; dashboard: DashboardData | null; error: string; onNavigate: (key: MenuKey, search?: string) => void; role?: string }) {
   const demoWeeklyActivity = [
     { date: '2026-11-05', opened: 2, completed: 1 }, { date: '2026-11-06', opened: 3, completed: 2 },
     { date: '2026-11-07', opened: 1, completed: 1 }, { date: '2026-11-08', opened: 2, completed: 1 },
@@ -1067,22 +1074,39 @@ function Overview({ demo, dashboard, error, onNavigate }: { demo: boolean; dashb
     { province: 'กรุงเทพมหานคร', branches_total: 3, branches_complete: 1, branches_remaining: 2, scanners_total: 8, scanners_open: 3, scanners_on_process: 3, scanners_complete: 2 },
     { province: 'ปทุมธานี', branches_total: 2, branches_complete: 1, branches_remaining: 1, scanners_total: 5, scanners_open: 1, scanners_on_process: 1, scanners_complete: 3 },
   ]
+  const isCustomerReviewer = role === 'customer_reviewer'
   const provinceSummary = dashboard?.province_summary
-  const totals = (demo ? { branches_total: 5, branches_complete: 2, branches_remaining: 3, scanners_total: 13, scanners_open: 4, scanners_on_process: 4, scanners_complete: 5 } : provinceSummary?.totals || {}) as Record<string, number>
+  const totals = (demo ? { branches_total: 5, branches_complete: 2, branches_remaining: 3, scanners_total: 13, scanners_open: 4, scanners_on_process: 4, scanners_complete: 5, awaiting_review: 2 } : provinceSummary?.totals || {}) as Record<string, number>
   const provinces = (demo ? demoProvinces : provinceSummary?.provinces || []) as Array<Record<string, unknown>>
   const activity = (demo ? demoWeeklyActivity : dashboard?.weekly_activity || []) as DashboardData['weekly_activity']
   const number = (value: unknown) => Math.max(0, Number(value) || 0)
   const activityMax = Math.max(1, ...(activity || []).map(day => Math.max(number(day.opened), number(day.completed))))
-  const stats = [
-    { label: 'สาขาทั้งหมด', key: 'branches_total', tone: 'blue', icon: <MapPin size={18} />, destination: 'assets', action: 'ดูทะเบียน' },
-    { label: 'สาขาเปลี่ยนครบ', key: 'branches_complete', tone: 'green', icon: <CheckCircle2 size={18} />, destination: 'assets', action: 'ดูทะเบียน' },
-    { label: 'สาขาที่ยังเปลี่ยนไม่ครบ', key: 'branches_remaining', tone: 'orange', icon: <Activity size={18} />, destination: 'assets', action: 'ดูทะเบียน' },
-    { label: 'Scanner ทั้งหมด', key: 'scanners_total', tone: 'violet', icon: <HardDrive size={18} />, destination: 'assets', action: 'ดูทะเบียน' },
-    { label: 'On Process', key: 'scanners_on_process', tone: 'orange', icon: <Wrench size={18} />, destination: 'work_orders', action: 'ดูใบงาน' },
-    { label: 'Complete', key: 'scanners_complete', tone: 'green', icon: <CheckCircle2 size={18} />, destination: 'completed', action: 'ดูงานที่เสร็จแล้ว' },
-  ] as const
+  const stats = isCustomerReviewer ? [
+    { label: 'รอตรวจรับมอบ', key: 'awaiting_review', tone: 'orange', icon: <ShieldCheck size={18} />, destination: 'pending' as MenuKey, action: 'เปิดตรวจรับ' },
+    { label: 'ตรวจรับเรียบร้อย', key: 'scanners_complete', tone: 'green', icon: <CheckCircle2 size={18} />, destination: 'completed' as MenuKey, action: 'ดูงานที่เสร็จแล้ว' },
+    { label: 'สาขาทั้งหมด', key: 'branches_total', tone: 'blue', icon: <MapPin size={18} />, destination: 'pending' as MenuKey, action: 'ดูงานรอตรวจรับ' },
+    { label: 'Scanner ทั้งหมด', key: 'scanners_total', tone: 'violet', icon: <HardDrive size={18} />, destination: 'pending' as MenuKey, action: 'ดูงานรอตรวจรับ' },
+    { label: 'On Process', key: 'scanners_on_process', tone: 'orange', icon: <Wrench size={18} />, destination: 'pending' as MenuKey, action: 'ดูงานรอตรวจรับ' },
+    { label: 'สาขาตรวจรับครบ', key: 'branches_complete', tone: 'green', icon: <CheckCircle2 size={18} />, destination: 'completed' as MenuKey, action: 'ดูงานที่เสร็จแล้ว' },
+  ] : [
+    { label: 'สาขาทั้งหมด', key: 'branches_total', tone: 'blue', icon: <MapPin size={18} />, destination: 'assets' as MenuKey, action: 'ดูทะเบียน' },
+    { label: 'Scanner ทั้งหมด', key: 'scanners_total', tone: 'violet', icon: <HardDrive size={18} />, destination: 'assets' as MenuKey, action: 'ดูทะเบียน' },
+    { label: 'On Process', key: 'scanners_on_process', tone: 'orange', icon: <Wrench size={18} />, destination: 'work_orders' as MenuKey, action: 'ดูใบงาน' },
+    { label: 'รอตรวจรับ', key: 'awaiting_review', tone: 'orange', icon: <ShieldCheck size={18} />, destination: 'pending' as MenuKey, action: 'เปิดตรวจรับ' },
+    { label: 'Complete', key: 'scanners_complete', tone: 'green', icon: <CheckCircle2 size={18} />, destination: 'completed' as MenuKey, action: 'ดูงานที่เสร็จแล้ว' },
+    { label: 'สาขาเปลี่ยนครบ', key: 'branches_complete', tone: 'green', icon: <CheckCircle2 size={18} />, destination: 'assets' as MenuKey, action: 'ดูทะเบียน' },
+  ]
   return <div className="overview-content">
-    <div className="welcome-strip"><div className="welcome-mark"><Activity size={20} /></div><div><strong>ติดตามความคืบหน้าการเปลี่ยน Scanner</strong><span>เลือกจังหวัด สาขา และเครื่องจากทะเบียน เพื่อดูรายละเอียดหรือเริ่มงานกับเครื่องนั้นได้ทันที</span></div><button onClick={() => onNavigate('assets')}>เปิดทะเบียนอุปกรณ์ <ArrowRight size={15} /></button></div>
+    <div className="welcome-strip">
+      <div className="welcome-mark">{isCustomerReviewer ? <ShieldCheck size={20} /> : <Activity size={20} />}</div>
+      <div>
+        <strong>{isCustomerReviewer ? 'งานรอตรวจรับมอบ Scanner (Gable Review)' : 'ติดตามความคืบหน้าการเปลี่ยน Scanner'}</strong>
+        <span>{isCustomerReviewer ? 'ตรวจสอบหลักฐานภาพถ่าย ลายเซ็นช่าง และลงนามรับมอบงานแบบรวมทั้งสาขา' : 'เลือกจังหวัด สาขา และเครื่องจากทะเบียน เพื่อดูรายละเอียดหรือเริ่มงานกับเครื่องนั้นได้ทันที'}</span>
+      </div>
+      <button onClick={() => onNavigate(isCustomerReviewer ? 'pending' : 'assets')}>
+        {isCustomerReviewer ? 'เปิดคิวตรวจรับงาน' : 'เปิดทะเบียนอุปกรณ์'} <ArrowRight size={15} />
+      </button>
+    </div>
     <div className="section-heading-row"><div><h2>ภาพรวมทุกจังหวัด</h2><p>จำนวนสาขาและสถานะ Scanner จากงานจริงในทะเบียน</p></div><span className="period-label"><MapPin size={15} /> {provinces.length.toLocaleString('th-TH')} จังหวัด</span></div>
     <div className="stats-grid dashboard-summary-grid">{stats.map(stat => <button type="button" className="stat-card stat-card-action" key={stat.key} aria-label={`${stat.action}: ${stat.label}`} onClick={() => onNavigate(stat.destination)}><div className="stat-top"><span>{stat.label}</span><div className={'stat-icon ' + stat.tone}>{stat.icon}</div></div><div className="stat-value">{error && !demo ? '—' : number(totals[stat.key]).toLocaleString('th-TH')}</div><div className="stat-foot"><span className="stat-change">{stat.key.startsWith('branches') ? 'สรุปจากสาขาในทะเบียน' : 'สรุปตามสถานะล่าสุด'}</span><span className="stat-period">{stat.action} <ArrowRight size={12} /></span></div></button>)}</div>
     <section className="panel weekly-activity-panel"><div className="panel-heading"><div><h2>งานที่เปิดและปิดใน 7 วันที่ผ่านมา</h2><p>นับใบงานตามวันที่สร้างและวันที่ส่งมอบงาน</p></div><div className="chart-legend" aria-label="คำอธิบายกราฟ"><span><i className="weekly-open-key" /> เปิดใบงาน</span><span><i className="weekly-complete-key" /> ส่งมอบแล้ว</span></div></div>
@@ -1098,14 +1122,14 @@ function Overview({ demo, dashboard, error, onNavigate }: { demo: boolean; dashb
         })}
       </div> : <EmptyState compact title="ยังไม่มีใบงานในช่วงนี้" detail="กราฟจะแสดงเมื่อมีการเปิดหรือส่งมอบใบงาน" />}
     </section>
-    <section className="panel province-summary-panel"><div className="panel-heading"><div><h2>สรุปแยกตามจังหวัด</h2><p>กดจังหวัดเพื่อเปิดทะเบียนและดู Scanner ในพื้นที่นั้น</p></div><button className="text-button" onClick={() => onNavigate('assets')}>ดูทะเบียนทั้งหมด <ArrowRight size={15} /></button></div>
+    <section className="panel province-summary-panel"><div className="panel-heading"><div><h2>สรุปแยกตามจังหวัด</h2><p>{isCustomerReviewer ? 'กดจังหวัดเพื่อตรวจรับ Scanner ในพื้นที่นั้น' : 'กดจังหวัดเพื่อเปิดทะเบียนและดู Scanner ในพื้นที่นั้น'}</p></div><button className="text-button" onClick={() => onNavigate(isCustomerReviewer ? 'pending' : 'assets')}>{isCustomerReviewer ? 'ดูงานรอตรวจรับ' : 'ดูทะเบียนทั้งหมด'} <ArrowRight size={15} /></button></div>
       {error && !demo ? <EmptyState compact title="โหลดสรุปจังหวัดไม่สำเร็จ" detail={error} /> : provinces.length ? <div className="province-summary-list">{provinces.map((province, index) => {
         const name = String(province.province || 'ไม่ระบุจังหวัด')
         const scannerTotal = number(province.scanners_total)
         const open = number(province.scanners_open)
         const onProcess = number(province.scanners_on_process)
         const complete = number(province.scanners_complete)
-        return <button type="button" className="province-summary-row" key={name || index} onClick={() => onNavigate('assets', name)} aria-label={`ดูทะเบียนจังหวัด${name}`}>
+        return <button type="button" className="province-summary-row" key={name || index} onClick={() => onNavigate(isCustomerReviewer ? 'pending' : 'assets', name)} aria-label={isCustomerReviewer ? `ดูงานรอตรวจรับจังหวัด${name}` : `ดูทะเบียนจังหวัด${name}`}>
           <span className="province-summary-main"><strong>{name}</strong><small>{number(province.branches_total).toLocaleString('th-TH')} สาขา · เปลี่ยนครบ {number(province.branches_complete).toLocaleString('th-TH')} · ยังไม่ครบ {number(province.branches_remaining).toLocaleString('th-TH')}</small></span>
           <span className="province-summary-metric"><small>Scanner</small><strong>{scannerTotal.toLocaleString('th-TH')}</strong></span>
           <span className="province-summary-breakdown"><span className="province-status-labels"><small>รอเปิดใบงาน {open}</small><small>On Process {onProcess}</small><small>Complete {complete}</small></span><span className="province-status-bar" aria-label={`รอเปิดใบงาน ${open}, On Process ${onProcess}, Complete ${complete}`}><i className="province-status-open" style={{ width: `${getPercent(open, scannerTotal)}%` }} /><i className="province-status-process" style={{ width: `${getPercent(onProcess, scannerTotal)}%` }} /><i className="province-status-complete" style={{ width: `${getPercent(complete, scannerTotal)}%` }} /></span></span>
@@ -1514,6 +1538,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
   const [rejectingTask, setRejectingTask] = useState<Record<string, unknown> | null>(null)
   const [rejectReason, setRejectReason] = useState('')
   const [batchBranch, setBatchBranch] = useState<{ id: string; name: string; code: string; province: string; tasks: any[] } | null>(null)
+  const [batchConsent, setBatchConsent] = useState(false)
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([])
   const [viewingEvidenceTask, setViewingEvidenceTask] = useState<Record<string, unknown> | null>(null)
   const [evidenceList, setEvidenceList] = useState<any[]>([])
@@ -1531,7 +1556,11 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
     void (async () => {
       try {
         const res = await d1Api.getPendingTasks(query || undefined)
-        if (active) setTasks(res.tasks || [])
+        if (active) {
+          const list = res.tasks || []
+          setTasks(list)
+          setSelectedTaskIds(list.map((t: any) => String(t.task_id || t.id)))
+        }
       } catch (err: any) {
         if (active) setError(err.message || 'โหลดรายการ Pending ไม่สำเร็จ')
       } finally {
@@ -1566,6 +1595,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
 
   const handleOpenBatchAccept = (group: { id: string; name: string; code: string; province: string; tasks: any[] }) => {
     setActionError('')
+    setBatchConsent(false)
     setBatchBranch(group)
     setSelectedTaskIds(group.tasks.map(t => String(t.task_id || t.id)))
   }
@@ -1577,7 +1607,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
   }
 
   const handleConfirmBatchAccept = async () => {
-    if (!batchBranch || selectedTaskIds.length === 0) return
+    if (!batchBranch || selectedTaskIds.length === 0 || !batchConsent) return
     if (!sigPadRef.current) return
     setSubmitting(true)
     setActionError('')
@@ -1593,6 +1623,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
 
       await d1Api.customerBatchAccept(batchBranch.id, selectedTaskIds, signatureBase64)
       setBatchBranch(null)
+      setBatchConsent(false)
       setSelectedTaskIds([])
       setReload(r => r + 1)
       onUpdated('accept')
@@ -1843,19 +1874,41 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                 </p>
               </div>
 
-              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '16px', fontSize: '12px' }}>
+              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '14px', fontSize: '12px' }}>
                 ข้าพเจ้าในฐานะตัวแทน บมจ. จีเอเบิล (G-Able) ได้ตรวจสอบผลงานและหลักฐานการเปลี่ยนเครื่องสแกนเนอร์ของสาขานี้แล้ว ขอลงนามตรวจรับมอบงานเข้าสู่สถานะส่งมอบสมบูรณ์ (Delivered)
               </div>
+
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', marginBottom: '14px', fontSize: '13px' }}>
+                <input
+                  type="checkbox"
+                  checked={batchConsent}
+                  onChange={e => {
+                    const checked = e.target.checked
+                    setBatchConsent(checked)
+                    if (!checked) {
+                      sigPadRef.current?.clear()
+                    }
+                  }}
+                  disabled={submitting}
+                />
+                <span>ผู้ตรวจรับมอบยืนยันว่าได้ตรวจสอบหลักฐานและยินยอมให้บันทึกลายเซ็นนี้เป็นหลักฐานตรวจรับงาน</span>
+              </label>
 
               <div style={{ marginBottom: '12px' }}>
                 <span style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
                   ลายเซ็นผู้ตรวจรับมอบงาน (Gable Representative)
                 </span>
-                <SignaturePad ref={sigPadRef} disabled={submitting} label="ช่องลายเซ็นผู้ตรวจรับมอบงาน" />
-                <div style={{ marginTop: '6px' }}>
-                  <button type="button" className="text-button" onClick={() => sigPadRef.current?.clear()}>
+                <SignaturePad
+                  ref={sigPadRef}
+                  disabled={submitting || !batchConsent}
+                  label="ช่องลายเซ็นผู้ตรวจรับมอบงาน"
+                  placeholder={!batchConsent ? 'โปรดกดยืนยันข้อความด้านบนก่อนลงลายเซ็น' : undefined}
+                />
+                <div style={{ marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button type="button" className="text-button" onClick={() => sigPadRef.current?.clear()} disabled={!batchConsent || submitting}>
                     ล้างลายเซ็น
                   </button>
+                  {!batchConsent && <small style={{ color: '#94a3b8' }}>ติ๊กยืนยันเพื่อเปิดใช้งานช่องลายเซ็น</small>}
                 </div>
               </div>
 
@@ -1863,7 +1916,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                 <button type="button" className="secondary-button" onClick={() => setBatchBranch(null)} disabled={submitting}>
                   ยกเลิก
                 </button>
-                <button type="button" className="primary-button" onClick={handleConfirmBatchAccept} disabled={submitting}>
+                <button type="button" className="primary-button" onClick={handleConfirmBatchAccept} disabled={submitting || !batchConsent || selectedTaskIds.length === 0}>
                   {submitting ? 'กำลังบันทึก…' : `ยืนยันตรวจรับทั้ง ${selectedTaskIds.length} เครื่อง`}
                 </button>
               </div>

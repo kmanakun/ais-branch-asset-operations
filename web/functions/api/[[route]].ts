@@ -110,6 +110,8 @@ app.get('/dashboard/summary', async (c) => {
         COUNT(s.id) as scanner_count,
         SUM(CASE WHEN t.status = 'delivered' THEN 1 ELSE 0 END) as delivered_count,
         SUM(CASE WHEN t.status IN ('in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception') THEN 1 ELSE 0 END) as on_process_count,
+        SUM(CASE WHEN t.status = 'awaiting_admin_acceptance' THEN 1 ELSE 0 END) as awaiting_admin_count,
+        SUM(CASE WHEN t.status = 'awaiting_customer_acceptance' THEN 1 ELSE 0 END) as awaiting_customer_count,
         SUM(CASE WHEN t.status IS NULL OR t.status = 'open' OR t.status = 'cancelled' THEN 1 ELSE 0 END) as open_count
       FROM branches b
       LEFT JOIN scanner_assets s ON s.branch_id = b.id
@@ -129,6 +131,8 @@ app.get('/dashboard/summary', async (c) => {
       SUM(scanner_count) as scanner_count,
       SUM(delivered_count) as delivered_count,
       SUM(on_process_count) as on_process_count,
+      SUM(awaiting_admin_count) as awaiting_admin_count,
+      SUM(awaiting_customer_count) as awaiting_customer_count,
       SUM(open_count) as open_count
     FROM branch_stats
     GROUP BY province
@@ -141,6 +145,8 @@ app.get('/dashboard/summary', async (c) => {
     scanner_count: number
     delivered_count: number
     on_process_count: number
+    awaiting_admin_count: number
+    awaiting_customer_count: number
     open_count: number
   }>()
 
@@ -152,6 +158,8 @@ app.get('/dashboard/summary', async (c) => {
   let totalBranchesRemaining = 0
   let totalOpen = 0
   let totalOnProcess = 0
+  let totalAwaitingAdmin = 0
+  let totalAwaitingCustomer = 0
   let totalDelivered = 0
 
   for (const p of provinces) {
@@ -161,6 +169,8 @@ app.get('/dashboard/summary', async (c) => {
     totalScanners += Number(p.scanner_count) || 0
     totalOpen += Number(p.open_count) || 0
     totalOnProcess += Number(p.on_process_count) || 0
+    totalAwaitingAdmin += Number(p.awaiting_admin_count) || 0
+    totalAwaitingCustomer += Number(p.awaiting_customer_count) || 0
     totalDelivered += Number(p.delivered_count) || 0
   }
 
@@ -196,6 +206,10 @@ app.get('/dashboard/summary', async (c) => {
     })
   }
 
+  const awaitingReview = user.role === 'customer_reviewer'
+    ? totalAwaitingCustomer
+    : (user.role === 'admin' ? totalAwaitingAdmin : (totalAwaitingAdmin + totalAwaitingCustomer))
+
   return c.json({
     summary: {
       total_scanners: totalScanners,
@@ -204,7 +218,9 @@ app.get('/dashboard/summary', async (c) => {
       branches_remaining: totalBranchesRemaining,
       open: totalOpen,
       on_process: totalOnProcess,
-      awaiting_customer: 0,
+      awaiting_admin: totalAwaitingAdmin,
+      awaiting_customer: totalAwaitingCustomer,
+      awaiting_review: awaitingReview,
       delivered: totalDelivered
     },
     provinces,
