@@ -1625,11 +1625,20 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
     return Array.from(map.values())
   }, [tasks, isCustomerReviewer])
 
-  const handleOpenBatchAccept = (group: { id: string; name: string; code: string; province: string; tasks: any[] }) => {
+  const handleOpenBatchAccept = (
+    group: { id: string; name: string; code: string; province: string; tasks: any[] },
+    singleTaskId?: string
+  ) => {
     setActionError('')
     setBatchConsent(false)
     setBatchBranch(group)
-    setSelectedTaskIds(group.tasks.map(t => String(t.task_id || t.id)))
+    if (singleTaskId) {
+      setSelectedTaskIds([singleTaskId])
+    } else {
+      const groupTaskIds = group.tasks.map(t => String(t.task_id || t.id))
+      const alreadySelectedInGroup = selectedTaskIds.filter(id => groupTaskIds.includes(id))
+      setSelectedTaskIds(alreadySelectedInGroup.length > 0 ? alreadySelectedInGroup : groupTaskIds)
+    }
   }
 
   const handleToggleSelectTask = (taskId: string) => {
@@ -1773,6 +1782,9 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
           branchGroups.length ? (
             <div className="branch-review-queue">
               {branchGroups.map(group => {
+                const groupTaskIds = group.tasks.map(t => String(t.task_id || t.id))
+                const selectedInGroupCount = groupTaskIds.filter(id => selectedTaskIds.includes(id)).length
+
                 return (
                   <article className="branch-review-card" key={group.id}>
                     <div className="branch-review-header">
@@ -1791,7 +1803,10 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                           className="primary-button"
                           onClick={() => handleOpenBatchAccept(group)}
                         >
-                          <ShieldCheck size={15} /> ตรวจรับทั้งสาขา ({group.tasks.length} เครื่อง)
+                          <ShieldCheck size={15} />{' '}
+                          {selectedInGroupCount > 0 && selectedInGroupCount < group.tasks.length
+                            ? `ตรวจรับที่เลือก (${selectedInGroupCount} เครื่อง)`
+                            : `ตรวจรับทั้งสาขา (${group.tasks.length} เครื่อง)`}
                         </button>
                       </div>
                     </div>
@@ -1822,6 +1837,15 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                                 onClick={() => handleOpenEvidence(task)}
                               >
                                 ดูรูปหลักฐาน
+                              </button>
+                              <button
+                                type="button"
+                                className="primary-button"
+                                style={{ padding: '4px 10px', fontSize: '12px', background: '#15803d' }}
+                                onClick={() => handleOpenBatchAccept(group, taskId)}
+                                title="ตรวจรับเฉพาะเครื่องนี้ (1 เครื่อง)"
+                              >
+                                <ShieldCheck size={13} /> ตรวจรับเครื่องนี้
                               </button>
                               <button
                                 type="button"
@@ -1883,12 +1907,16 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
         )}
       </section>
 
-      {/* Modal: Batch Acceptance by Gable */}
+      {/* Modal: Batch / Single Acceptance by Gable */}
       {batchBranch && (
         <div className="handover-modal-backdrop" onClick={() => { setBatchBranch(null); setActionError('') }}>
           <div className="handover-modal-content" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
             <div className="handover-modal-bar">
-              <strong>ตรวจรับมอบงานแบบรวมทั้งสาขา (Batch Accept)</strong>
+              <strong>
+                {selectedTaskIds.length === 1
+                  ? 'ตรวจรับมอบงาน (เฉพาะเครื่องที่เลือก)'
+                  : `ตรวจรับมอบงานแบบรวม (${selectedTaskIds.length} เครื่อง)`}
+              </strong>
               <button type="button" className="icon-button" onClick={() => { setBatchBranch(null); setActionError('') }}>
                 <X size={16} />
               </button>
@@ -1902,12 +1930,14 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
               <div style={{ marginBottom: '16px' }}>
                 <h3 style={{ margin: '0 0 4px', fontSize: '16px' }}>{batchBranch.name}</h3>
                 <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
-                  LocationCode: {batchBranch.code} · กำลังตรวจรับจำนวน {selectedTaskIds.length} เครื่อง
+                  LocationCode: {batchBranch.code} · {selectedTaskIds.length === 1 ? 'ตรวจรับเฉพาะเครื่องนี้ (1 เครื่อง)' : `กำลังตรวจรับจำนวน ${selectedTaskIds.length} เครื่อง`}
                 </p>
               </div>
 
-              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '14px', fontSize: '12px' }}>
-                ข้าพเจ้าในฐานะตัวแทน บมจ. จีเอเบิล (G-Able) ได้ตรวจสอบผลงานและหลักฐานการเปลี่ยนเครื่องสแกนเนอร์ของสาขานี้แล้ว ขอลงนามตรวจรับมอบงานเข้าสู่สถานะส่งมอบสมบูรณ์ (Delivered)
+              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '14px', fontSize: '12px', lineHeight: 1.5 }}>
+                {selectedTaskIds.length === 1
+                  ? 'ข้าพเจ้าในฐานะตัวแทน บมจ. จีเอเบิล (G-Able) ได้ตรวจสอบผลงานและหลักฐานของเครื่องนี้แล้ว ขอลงนามตรวจรับมอบงานเข้าสู่สถานะส่งมอบสมบูรณ์ (Delivered)'
+                  : 'ข้าพเจ้าในฐานะตัวแทน บมจ. จีเอเบิล (G-Able) ได้ตรวจสอบผลงานและหลักฐานการเปลี่ยนเครื่องสแกนเนอร์ของสาขานี้แล้ว ขอลงนามตรวจรับมอบงานเข้าสู่สถานะส่งมอบสมบูรณ์ (Delivered)'}
               </div>
 
               <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', marginBottom: '14px', fontSize: '13px' }}>
@@ -1949,7 +1979,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                   ยกเลิก
                 </button>
                 <button type="button" className="primary-button" onClick={handleConfirmBatchAccept} disabled={submitting || !batchConsent || selectedTaskIds.length === 0}>
-                  {submitting ? 'กำลังบันทึก…' : `ยืนยันตรวจรับทั้ง ${selectedTaskIds.length} เครื่อง`}
+                  {submitting ? 'กำลังบันทึก…' : selectedTaskIds.length === 1 ? 'ยืนยันตรวจรับเครื่องนี้' : `ยืนยันตรวจรับทั้ง ${selectedTaskIds.length} เครื่อง`}
                 </button>
               </div>
             </div>
@@ -2321,6 +2351,22 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                             }}
                           >
                             ปฏิเสธงานนี้ (Reject)
+                          </button>
+                          <button
+                            type="button"
+                            className="secondary-button"
+                            style={{ borderColor: '#15803d', color: '#15803d' }}
+                            onClick={() => {
+                              const bId = String(currentTask.branch_id || '')
+                              const group = branchGroups.find(g => g.id === bId)
+                              const tId = String(currentTask.task_id || currentTask.id)
+                              if (group) {
+                                setViewingEvidenceTask(null)
+                                handleOpenBatchAccept(group, tId)
+                              }
+                            }}
+                          >
+                            <ShieldCheck size={16} /> ตรวจรับเฉพาะเครื่องนี้
                           </button>
                           <button
                             type="button"
