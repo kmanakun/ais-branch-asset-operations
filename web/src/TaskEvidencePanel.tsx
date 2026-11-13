@@ -1,22 +1,39 @@
-import { Fragment, forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { Box, Button, Chip, Typography } from '@mui/material'
 import { Check, ImagePlus, LoaderCircle, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { d1Api } from './d1-client'
 
+const OLD_DEVICE_SLOTS = [
+  { key: 'old_serial_photo', num: '1', label: 'SN เครื่องเก่า', hint: 'ถ่ายฉลาก Serial ของ Scanner เดิมให้เห็นเลขชัดเจน' },
+  { key: 'old_device_photo', num: '2', label: 'ภาพรวมเครื่องเก่า', hint: 'ถ่ายภาพ Scanner เครื่องเดิมทั้งเครื่อง' },
+  { key: 'old_condition_photo', num: '3', label: 'สภาพเครื่องเก่า', hint: 'ถ่ายตำหนิหรือสภาพปัจจุบันของ Scanner เดิม' },
+  { key: 'old_branch_sticker_photo', num: '4', label: 'สติกเกอร์สาขาเดิม', hint: 'ถ่ายสติกเกอร์ที่ระบุสาขาเดิมให้เห็นชัด' },
+] as const
+
+const NEW_DEVICE_SLOTS = [
+  { key: 'new_serial_photo', num: '1', label: 'SN เครื่องใหม่', hint: 'ถ่ายฉลาก Serial ของ Scanner ใหม่ให้เห็นเลขชัดเจน' },
+  { key: 'new_front_photo', num: '2', label: 'ด้านหน้าเครื่องใหม่', hint: 'ถ่ายด้านหน้าของ Scanner หลังติดตั้ง' },
+  { key: 'new_side_photo', num: '3', label: 'ด้านข้างเครื่องใหม่', hint: 'ถ่ายด้านข้างของ Scanner หลังติดตั้ง' },
+  { key: 'new_com_serial_photo', num: '4', label: 'Com SN เครื่องใหม่', hint: 'ถ่ายฉลาก Com SN ให้เห็นเลขชัดเจน' },
+  { key: 'new_device_photo', num: '5', label: 'ภาพรวมเครื่องใหม่', hint: 'ถ่ายภาพ Scanner ใหม่ทั้งเครื่องหลังติดตั้ง' },
+  { key: 'new_cable_management_photo', num: '6', label: 'การจัดสายเครื่องใหม่', hint: 'ถ่ายการจัดสายและจุดเชื่อมต่อหลังติดตั้ง' },
+] as const
+
+const SPARE_SLOTS = [
+  { key: 'spare_photo_1', num: '1', label: 'รูปสำรอง 1', hint: 'แนบภาพประกอบเพิ่มเติม (ถ้ามี)' },
+  { key: 'spare_photo_2', num: '2', label: 'รูปสำรอง 2', hint: 'แนบภาพประกอบเพิ่มเติม (ถ้ามี)' },
+] as const
+
+const PHOTO_GROUPS = [
+  { id: 'old_device', title: 'เครื่องเก่า (Old Device)', icon: '📦', countText: '4 รูป', slots: OLD_DEVICE_SLOTS },
+  { id: 'new_device', title: 'เครื่องใหม่ (New Device)', icon: '✨', countText: '6 รูป', slots: NEW_DEVICE_SLOTS },
+  { id: 'spare', title: 'รูปสำรอง (Optional)', icon: '📎', countText: 'ไม่บังคับ 2 รูป', slots: SPARE_SLOTS },
+] as const
+
 const PHOTO_SLOTS = [
-  { key: 'old_serial_photo', label: 'SN เครื่องเก่า', required: false, hint: 'ถ่ายฉลาก Serial ของ Scanner เดิมให้เห็นเลขชัดเจน', section: 'เครื่องเก่า · 4 รูป' },
-  { key: 'old_device_photo', label: 'ภาพรวมเครื่องเก่า', required: false, hint: 'ถ่ายภาพ Scanner เครื่องเดิมทั้งเครื่อง' },
-  { key: 'old_condition_photo', label: 'สภาพเครื่องเก่า', required: false, hint: 'ถ่ายตำหนิหรือสภาพปัจจุบันของ Scanner เดิม' },
-  { key: 'old_branch_sticker_photo', label: 'สติกเกอร์สาขาเดิม', required: false, hint: 'ถ่ายสติกเกอร์ที่ระบุสาขาเดิมให้เห็นชัด' },
-  { key: 'new_serial_photo', label: 'SN เครื่องใหม่', required: false, hint: 'ถ่ายฉลาก Serial ของ Scanner ใหม่ให้เห็นเลขชัดเจน', section: 'เครื่องใหม่ · 6 รูป' },
-  { key: 'new_front_photo', label: 'ด้านหน้าเครื่องใหม่', required: false, hint: 'ถ่ายด้านหน้าของ Scanner หลังติดตั้ง' },
-  { key: 'new_side_photo', label: 'ด้านข้างเครื่องใหม่', required: false, hint: 'ถ่ายด้านข้างของ Scanner หลังติดตั้ง' },
-  { key: 'new_com_serial_photo', label: 'Com SN เครื่องใหม่', required: false, hint: 'ถ่ายฉลาก Com SN ให้เห็นเลขชัดเจน' },
-  { key: 'new_device_photo', label: 'ภาพรวมเครื่องใหม่', required: false, hint: 'ถ่ายภาพ Scanner ใหม่ทั้งเครื่องหลังติดตั้ง' },
-  { key: 'new_cable_management_photo', label: 'การจัดสายเครื่องใหม่', required: false, hint: 'ถ่ายการจัดสายและจุดเชื่อมต่อหลังติดตั้ง' },
-  { key: 'spare_photo_1', label: 'รูปสำรอง 1', required: false, hint: 'แนบภาพประกอบเพิ่มเติม (ถ้ามี)', section: 'รูปสำรอง · ไม่บังคับ 2 รูป' },
-  { key: 'spare_photo_2', label: 'รูปสำรอง 2', required: false, hint: 'แนบภาพประกอบเพิ่มเติม (ถ้ามี)' },
+  ...OLD_DEVICE_SLOTS,
+  ...NEW_DEVICE_SLOTS,
+  ...SPARE_SLOTS,
 ] as const
 
 const SIGNATURE_SLOTS = [
@@ -434,127 +451,184 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
     {loadState === 'loading' && <p className="evidence-status" role="status">กำลังโหลดหลักฐาน…</p>}
     {loadError && <div className="task-action-error" role="alert">{loadError} <button type="button" className="text-button" onClick={() => void loadEvidence()}>ลองอีกครั้ง</button></div>}
 
-    <div className="task-evidence-grid">
-      {PHOTO_SLOTS.map(slot => {
-        const entry = entries[slot.key]
-        const imageUrl = previewUrls[slot.key]
-        const matchesOutcome = entry?.outcome_context === outcome
-        const label = outcome === 'different_device_found' && slot.key === 'new_serial_photo'
-          ? 'SN เครื่องที่พบ'
-          : outcome === 'different_device_found' && slot.key === 'new_device_photo'
-          ? 'ภาพอุปกรณ์ที่พบ'
-            : outcome === 'target_device_not_found' && slot.key === 'spare_photo_1'
-              ? 'ภาพบริเวณที่ตรวจค้น'
-            : slot.label
-        const hint = outcome === 'different_device_found' && slot.key === 'new_serial_photo'
-          ? 'ถ่ายฉลาก Serial ของ Scanner ที่พบจริง ให้เห็นเลขชัดเจน'
-          : outcome === 'different_device_found' && slot.key === 'new_device_photo'
-            ? 'ถ่ายภาพตัว Scanner ที่พบจริงเพื่อให้ Admin ตรวจสอบ'
-            : outcome === 'target_device_not_found' && slot.key === 'spare_photo_1'
-              ? 'ถ่ายภาพบริเวณหรือจุดที่ควรพบ Scanner ตามทะเบียน เพื่อให้ Admin ตรวจสอบ'
-            : slot.hint
-        const isRequired = stageRequiredSlots.includes(slot.key)
-        const statusLabel = isRequired
-          ? entry?.status === 'ready' && !matchesOutcome ? 'ต้องบันทึกใหม่' : 'จำเป็นในขั้นนี้'
-          : entry?.status === 'ready' ? 'บันทึกแล้ว' : slot.required ? 'ใช้ในขั้นอื่น' : 'ไม่บังคับ'
-        const missingPreviewMessage = previewStatuses[slot.key] === 'loading'
-          ? 'กำลังโหลดภาพ…'
-          : previewStatuses[slot.key] === 'error'
-            ? 'โหลดภาพไม่สำเร็จ'
-            : entry?.status === 'pending'
-              ? 'รอการยืนยัน'
-              : loadState === 'loading'
-                ? 'กำลังตรวจสอบ…'
-                : loadState === 'error'
+    <div className="evidence-groups-container">
+      {PHOTO_GROUPS.map(group => {
+        const groupSlots = group.slots
+        const groupUploadedCount = groupSlots.filter(s => entries[s.key]?.status === 'ready').length
+        const groupRequiredSlots = groupSlots.filter(s => stageRequiredSlots.includes(s.key))
+        const isGroupAllRequiredReady = groupRequiredSlots.length > 0 && groupRequiredSlots.every(s => entries[s.key]?.status === 'ready' && entries[s.key]?.outcome_context === outcome)
+
+        return (
+          <div key={group.id} className="evidence-section-group">
+            <div className="evidence-section-header">
+              <h4 className="evidence-section-title">
+                <span>{group.icon}</span>
+                <span>{group.title} · {group.countText}</span>
+              </h4>
+              <span className={`evidence-section-badge ${isGroupAllRequiredReady ? 'is-complete' : ''}`}>
+                {groupUploadedCount} / {groupSlots.length} บันทึกแล้ว
+              </span>
+            </div>
+
+            <div className="evidence-photo-grid">
+              {groupSlots.map(slot => {
+                const entry = entries[slot.key]
+                const imageUrl = previewUrls[slot.key]
+                const matchesOutcome = entry?.outcome_context === outcome
+                const label = outcome === 'different_device_found' && slot.key === 'new_serial_photo'
+                  ? 'SN เครื่องที่พบ'
+                  : outcome === 'different_device_found' && slot.key === 'new_device_photo'
+                  ? 'ภาพอุปกรณ์ที่พบ'
+                  : outcome === 'target_device_not_found' && slot.key === 'spare_photo_1'
+                  ? 'ภาพบริเวณที่ตรวจค้น'
+                  : slot.label
+                const hint = outcome === 'different_device_found' && slot.key === 'new_serial_photo'
+                  ? 'ถ่ายฉลาก Serial ของ Scanner ที่พบจริง ให้เห็นเลขชัดเจน'
+                  : outcome === 'different_device_found' && slot.key === 'new_device_photo'
+                  ? 'ถ่ายภาพตัว Scanner ที่พบจริงเพื่อให้ Admin ตรวจสอบ'
+                  : outcome === 'target_device_not_found' && slot.key === 'spare_photo_1'
+                  ? 'ถ่ายภาพบริเวณหรือจุดที่ควรพบ Scanner ตามทะเบียน เพื่อให้ Admin ตรวจสอบ'
+                  : slot.hint
+                const isRequired = stageRequiredSlots.includes(slot.key)
+                const isUploaded = entry?.status === 'ready' && matchesOutcome
+                const statusLabel = isUploaded
+                  ? '✓ บันทึกแล้ว'
+                  : isRequired
+                  ? 'จำเป็น'
+                  : entry?.status === 'ready'
+                  ? 'บันทึกแล้ว'
+                  : 'ไม่บังคับ'
+                const pillClass = isUploaded || entry?.status === 'ready'
+                  ? 'pill-ready'
+                  : isRequired
+                  ? 'pill-required'
+                  : 'pill-optional'
+
+                const missingPreviewMessage = previewStatuses[slot.key] === 'loading'
+                  ? 'กำลังโหลดภาพ…'
+                  : previewStatuses[slot.key] === 'error'
+                  ? 'โหลดภาพไม่สำเร็จ'
+                  : entry?.status === 'pending'
+                  ? 'รอการยืนยัน'
+                  : loadState === 'loading'
+                  ? 'กำลังตรวจสอบ…'
+                  : loadState === 'error'
                   ? 'ตรวจสอบรูปไม่ได้'
                   : 'ยังไม่มีรูป'
-        return <Fragment key={slot.key}>
-          {'section' in slot && <h4 className="task-evidence-group-title">{slot.section}</h4>}
-          <Box component="article" sx={{
-            minWidth: 0,
-            display: 'grid',
-            gridTemplateColumns: { xs: '54px minmax(0, 1fr) 44px', sm: '58px minmax(0, 1fr) auto' },
-            gridTemplateRows: 'auto auto auto',
-            gridTemplateAreas: '"preview heading action" "preview hint action" "state state state"',
-            alignContent: 'center',
-            alignItems: 'center',
-            columnGap: { xs: 1, sm: 1.25 },
-            rowGap: '3px',
-            px: { xs: 1, sm: 1.25 },
-            py: 1,
-            border: '1px solid #eceae6',
-            borderRadius: '13px',
-            bgcolor: '#fff',
-            transition: 'border-color 140ms ease',
-            '&:hover': { borderColor: '#dbe7d3' },
-          }}>
-            <Box sx={{ gridArea: 'heading', minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 0.75 }}>
-              <Typography component="strong" sx={{ minWidth: 0, color: '#343a43', fontSize: 11, fontWeight: 700, lineHeight: 1.3, overflowWrap: 'anywhere' }}>{label}</Typography>
-              <Chip
-                size="small"
-                label={statusLabel}
-                sx={{
-                  flexShrink: 0,
-                  height: 20,
-                  borderRadius: '999px',
-                  color: isRequired && !(entry?.status === 'ready' && matchesOutcome) ? '#8b461f' : entry?.status === 'ready' ? '#376e28' : '#6a717a',
-                  bgcolor: isRequired && !(entry?.status === 'ready' && matchesOutcome) ? '#fff0e7' : entry?.status === 'ready' ? '#edf8e8' : '#f1f2f3',
-                  '& .MuiChip-label': { px: 0.75, fontSize: 8, fontWeight: 700 },
-                }}
-              />
-            </Box>
-            <Typography component="p" sx={{ gridArea: 'hint', minWidth: 0, m: 0, color: '#757b84', fontSize: 9, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{hint}</Typography>
-            {imageUrl ? <Box component="a" href={imageUrl} target="_blank" rel="noreferrer" aria-label={`เปิดดูรูป ${label} ขนาดเต็ม`} sx={{
-              gridArea: 'preview', minWidth: 0, width: { xs: 54, sm: 58 }, height: { xs: 54, sm: 58 }, display: 'grid', placeItems: 'center', overflow: 'hidden',
-              border: '1px solid #eeece8', borderRadius: '10px', bgcolor: '#f8f7f5',
-            }}>
-              <Box component="img" src={imageUrl} alt={`หลักฐาน ${label}`} sx={{ display: 'block', width: '100%', height: '100%', objectFit: 'cover' }} />
-            </Box> : <Box aria-label={missingPreviewMessage} sx={{
-              gridArea: 'preview', minWidth: 0, width: { xs: 54, sm: 58 }, height: { xs: 54, sm: 58 }, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px', p: 0.5,
-              overflow: 'hidden', border: '1px dashed #dfddd9', borderRadius: '10px', color: previewStatuses[slot.key] === 'error' ? '#84512e' : '#858b93', bgcolor: previewStatuses[slot.key] === 'error' ? '#fff8f0' : '#faf9f7',
-            }}>
-              {previewStatuses[slot.key] === 'loading' ? <LoaderCircle className="evidence-spinner" size={17} /> : <ImagePlus size={17} />}
-              <Typography component="span" sx={{ maxWidth: '100%', color: 'inherit', fontSize: 7, lineHeight: 1.15, textAlign: 'center' }}>{missingPreviewMessage}</Typography>
-            </Box>}
-            {(entry?.status === 'ready' || entry?.status === 'pending') && <Box sx={{ gridArea: 'state', minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 0.75, color: entry.status === 'ready' ? '#3e792d' : '#965528', fontSize: 9, lineHeight: 1.4, overflowWrap: 'anywhere' }}>
-              {entry.status === 'ready' ? <>
-                <Check size={14} />
-                <Typography component="span" sx={{ color: 'inherit', fontSize: 'inherit' }}>บันทึกแล้วสำหรับ “{outcomeLabel(entry.outcome_context)}” · {(entry.byte_size / 1024).toFixed(0)} KB</Typography>
-                {canEditSlot(slot.key) && <Button type="button" size="small" color="inherit" disabled={busySlot !== null} onClick={() => void removeEvidence(slot.key)} startIcon={<Trash2 size={13} />} sx={{ minWidth: 0, minHeight: { xs: 44, sm: 'auto' }, px: { xs: 0.75, sm: 0 }, py: 0, fontSize: 9, lineHeight: 1.3, textTransform: 'none' }}>ลบรูป</Button>}
-                {previewStatuses[slot.key] === 'error' && <><Typography component="span" sx={{ color: 'inherit', fontSize: 'inherit' }}>โหลดภาพไม่สำเร็จ</Typography><Button type="button" size="small" onClick={retryPreviews} sx={{ minWidth: 0, minHeight: { xs: 44, sm: 'auto' }, px: { xs: 0.75, sm: 0 }, py: 0, fontSize: 9, lineHeight: 1.3, textTransform: 'none' }}>ลองโหลดอีกครั้ง</Button></>}
-              </> : <>
-                <Typography component="span" sx={{ color: 'inherit', fontSize: 'inherit' }}>การบันทึกยังไม่สมบูรณ์</Typography>
-                {canEditSlot(slot.key) && entry.can_finalize && <Button type="button" size="small" disabled={busySlot !== null} startIcon={<RotateCcw size={13} />} onClick={() => void retryFinalize(slot.key)} sx={{ minWidth: 0, minHeight: { xs: 44, sm: 'auto' }, px: { xs: 0.75, sm: 0 }, py: 0, fontSize: 9, lineHeight: 1.3, textTransform: 'none' }}>ลองยืนยันไฟล์เดิม</Button>}
-              </>}
-            </Box>}
-            {canEditSlot(slot.key) && <Button
-              type="button"
-              variant="outlined"
-              color="inherit"
-              aria-label={`${entry?.status === 'ready' ? 'เปลี่ยน' : 'เพิ่ม'}รูป: ${label}`}
-              disabled={busySlot !== null}
-              onClick={() => photoInputRefs.current[slot.key]?.click()}
-              startIcon={<ImagePlus size={16} />}
-              sx={{
-                gridArea: 'action', width: { xs: 44, sm: 'auto' }, minWidth: { xs: 44, sm: 88 }, minHeight: { xs: 44, sm: 34 }, px: { xs: 0, sm: 1 },
-                borderColor: '#e2e5e9', borderRadius: '9px', color: '#555c67', fontFamily: 'inherit', fontSize: 9, lineHeight: 1.2, textTransform: 'none', whiteSpace: 'nowrap',
-                '& .MuiButton-startIcon': { mx: { xs: 0, sm: '5px' } },
-              }}
-            >
-              <Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{busySlot === slot.key ? 'กำลังบันทึก…' : entry?.status === 'ready' ? 'เปลี่ยนรูป' : 'เพิ่มรูป'}</Box>
-            </Button>}
-            {canEditSlot(slot.key) && <Box
-              component="input"
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              aria-label={`${entry?.status === 'ready' ? 'เปลี่ยน' : 'เพิ่ม'}รูป: ${label}`}
-              tabIndex={-1}
-              ref={(element: HTMLInputElement | null) => { photoInputRefs.current[slot.key] = element }}
-              onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void savePhoto(slot.key, file) }}
-              sx={{ display: 'none' }}
-            />}
-          </Box>
-        </Fragment>
+
+                return (
+                  <div key={slot.key} className={`evidence-photo-card ${entry?.status === 'ready' ? 'is-uploaded' : ''}`}>
+                    <div className="evidence-photo-card-top">
+                      <div className="evidence-photo-card-title-group">
+                        <span className="evidence-slot-number">{slot.num}</span>
+                        <strong className="evidence-photo-card-title" title={label}>{label}</strong>
+                      </div>
+                      <span className={`evidence-pill ${pillClass}`}>{statusLabel}</span>
+                    </div>
+
+                    <div
+                      className={`evidence-photo-box ${imageUrl ? 'has-image' : 'is-empty'}`}
+                      onClick={() => {
+                        if (imageUrl) {
+                          window.open(imageUrl, '_blank')
+                        } else if (canEditSlot(slot.key)) {
+                          photoInputRefs.current[slot.key]?.click()
+                        }
+                      }}
+                      title={imageUrl ? `คลิกเพื่อดูรูปขยายใหญ่` : canEditSlot(slot.key) ? `คลิกเพื่อถ่ายรูปหรือเลือกไฟล์` : undefined}
+                      role={canEditSlot(slot.key) || imageUrl ? 'button' : undefined}
+                      tabIndex={canEditSlot(slot.key) || imageUrl ? 0 : undefined}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          if (imageUrl) window.open(imageUrl, '_blank')
+                          else if (canEditSlot(slot.key)) photoInputRefs.current[slot.key]?.click()
+                        }
+                      }}
+                    >
+                      {imageUrl ? (
+                        <img src={imageUrl} alt={`หลักฐาน ${label}`} className="evidence-photo-img" />
+                      ) : (
+                        <div className="evidence-photo-placeholder">
+                          {previewStatuses[slot.key] === 'loading' ? (
+                            <LoaderCircle className="evidence-spinner" size={20} />
+                          ) : (
+                            <ImagePlus size={20} />
+                          )}
+                          <span className="evidence-photo-placeholder-text">
+                            {busySlot === slot.key ? 'กำลังบันทึก…' : missingPreviewMessage}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <p className="evidence-photo-card-hint" title={hint}>{hint}</p>
+
+                    {entry?.status === 'ready' && (
+                      <div className="task-evidence-saved" style={{ fontSize: '10px', gap: '5px' }}>
+                        <Check size={13} />
+                        <span>บันทึกแล้วสำหรับ “{outcomeLabel(entry.outcome_context)}” · {(entry.byte_size / 1024).toFixed(0)} KB</span>
+                      </div>
+                    )}
+                    {entry?.status === 'pending' && (
+                      <div className="task-evidence-pending" style={{ fontSize: '10px', gap: '5px' }}>
+                        <span>การบันทึกยังไม่สมบูรณ์</span>
+                        {canEditSlot(slot.key) && entry.can_finalize && (
+                          <button type="button" className="text-button" disabled={busySlot !== null} onClick={() => void retryFinalize(slot.key)}>
+                            <RotateCcw size={12} /> ลองยืนยันไฟล์เดิม
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {canEditSlot(slot.key) && (
+                      <div className="evidence-photo-card-actions">
+                        <button
+                          type="button"
+                          className="evidence-photo-btn primary"
+                          disabled={busySlot !== null}
+                          onClick={() => photoInputRefs.current[slot.key]?.click()}
+                        >
+                          <ImagePlus size={13} />
+                          <span>{busySlot === slot.key ? 'กำลังบันทึก…' : entry?.status === 'ready' ? 'เปลี่ยนรูป' : 'ถ่ายรูป'}</span>
+                        </button>
+                        {entry?.status === 'ready' && (
+                          <button
+                            type="button"
+                            className="evidence-photo-btn danger"
+                            title={`ลบรูป ${label}`}
+                            aria-label={`ลบรูป ${label}`}
+                            disabled={busySlot !== null}
+                            onClick={() => void removeEvidence(slot.key)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {canEditSlot(slot.key) && (
+                      <input
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        capture="environment"
+                        aria-label={`${entry?.status === 'ready' ? 'เปลี่ยน' : 'เพิ่ม'}รูป: ${label}`}
+                        tabIndex={-1}
+                        ref={(element: HTMLInputElement | null) => { photoInputRefs.current[slot.key] = element }}
+                        onChange={event => {
+                          const file = event.currentTarget.files?.[0]
+                          event.currentTarget.value = ''
+                          void savePhoto(slot.key, file)
+                        }}
+                        style={{ display: 'none' }}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )
       })}
     </div>
 
