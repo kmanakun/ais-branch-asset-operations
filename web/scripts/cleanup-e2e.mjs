@@ -1,75 +1,26 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { setTimeout as delay } from 'node:timers/promises'
-import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
+import {
+  WEB_DIR,
+  DB_NAME,
+  R2_BUCKET,
+  collectR2KeysWithBranchSignatures,
+  queryD1Json,
+  runWrangler,
+  validateR2Key,
+} from './cf-wrangler-helpers.mjs'
 
-const execFileAsync = promisify(execFile)
-
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
-const WEB_DIR = resolve(SCRIPT_DIR, '..')
-const WRANGLER_BIN = resolve(WEB_DIR, 'node_modules/wrangler/bin/wrangler.js')
 const CLEANUP_SQL = './d1/cleanup-e2e-test-data.sql'
-const DB_NAME = 'ais-scanner-db'
-const R2_BUCKET = 'ais-scanner-evidence'
-const SAFE_R2_KEY_PATTERN = /^[A-Za-z0-9_./-]+$/
 
 function parseArgs(argv) {
   const flags = new Set(argv)
-  const isRemote = flags.has('--remote')
-  const isExecute = flags.has('--execute')
-  const confirmProd = flags.has('--confirm-production-delete')
-  return { isRemote, isExecute, confirmProd }
-}
-
-async function runWrangler(args, maxAttempts = 2) {
-  const nodeOptions = [process.env.NODE_OPTIONS, '--dns-result-order=ipv4first']
-    .filter(Boolean)
-    .join(' ')
-
-  let lastError
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const { stdout } = await execFileAsync(process.execPath, [WRANGLER_BIN, ...args], {
-        cwd: WEB_DIR,
-        encoding: 'utf8',
-        maxBuffer: 8 * 1024 * 1024,
-        timeout: 120_000,
-        env: {
-          ...process.env,
-          NODE_OPTIONS: nodeOptions,
-        },
-      })
-      return stdout
-    } catch (err) {
-      lastError = err
-      const out = `${err?.stdout || ''}\n${err?.stderr || ''}\n${err?.message || ''}`
-      if (attempt < maxAttempts && /fetch failed|ETIMEDOUT|ECONNRESET|429|502|503|504/i.test(out)) {
-        await delay(attempt * 1500)
-        continue
-      }
-      throw err
-    }
+  return {
+    isRemote: flags.has('--remote'),
+    isExecute: flags.has('--execute'),
+    confirmProd: flags.has('--confirm-production-delete'),
   }
-  throw lastError
-}
-
-async function queryD1Json(sql, isRemote) {
-  const modeFlag = isRemote ? '--remote' : '--local'
-  const compactSql = sql.replace(/\s+/g, ' ').trim()
-  const out = await runWrangler(
-    ['d1', 'execute', DB_NAME, modeFlag, '--json', '--command', compactSql],
-    isRemote ? 5 : 1
-  )
-  const parsed = JSON.parse(out)
-  if (!Array.isArray(parsed) || !parsed[0]?.success) {
-    throw new Error(`D1 query did not return success: ${out}`)
-  }
-  return parsed[0].results || []
 }
 
 async function getE2eCounts(isRemote) {
-  const [counts] = await queryD1Json(`
+  const [counts = {}] = await queryD1Json(`
     SELECT
       (SELECT COUNT(*) FROM branches WHERE loc_bld LIKE 'AIS Shop E2E %') AS branches,
       (SELECT COUNT(*) FROM scanner_assets s JOIN branches b ON b.id = s.branch_id WHERE b.loc_bld LIKE 'AIS Shop E2E %') AS scanner_assets,
@@ -81,37 +32,10 @@ async function getE2eCounts(isRemote) {
       (SELECT COUNT(*) FROM google_signin_allowlist WHERE email GLOB 'testtech_[0-9]*@sym.co.th') AS google_signin_allowlist,
       (SELECT COUNT(*) FROM import_batches WHERE source_name LIKE 'E2E_Test_%') AS import_batches
   `, isRemote)
-  return counts || {}
+  return counts
 }
 
-async function getE2eR2Keys(isRemote) {
-  const rows = await queryD1Json(`
-    SELECT DISTINCT
-      e.storage_path,
-      s.branch_id
-    FROM replacement_task_evidence e
-    JOIN replacement_tasks t ON t.id = e.replacement_task_id
-    JOIN scanner_assets s ON s.id = t.scanner_asset_id
-    JOIN branches b ON b.id = s.branch_id
-    WHERE b.loc_bld LIKE 'AIS Shop E2E %'
-  `, isRemote)
-
-  const keys = new Set()
-  for (const row of rows) {
-    const path = String(row.storage_path || '').trim()
-    if (!path) continue
-    keys.add(path)
-
-    // Reconstruct branch-level Gable signature path written by /api/review/customer-batch-accept
-    const sigMatch = path.match(/\/inspector_signature_(\d+)\.jpg$/)
-    if (sigMatch && row.branch_id) {
-      keys.add(`branches/${String(row.branch_id).trim()}/gable_sign_${sigMatch[1]}.png`)
-    }
-  }
-  return Array.from(keys).sort()
-}
-
-async function main() {
+export async function runCleanupE2e() {
   const { isRemote, isExecute, confirmProd } = parseArgs(process.argv.slice(2))
   const envLabel = isRemote ? 'REMOTE PRODUCTION' : 'LOCAL DEV'
 
@@ -122,7 +46,17 @@ async function main() {
 
   console.log(`🔎 ตรวจสอบข้อมูลทดสอบ E2E (${envLabel}) [${isExecute ? 'EXECUTE' : 'DRY-RUN'}]`)
   const counts = await getE2eCounts(isRemote)
-  const r2Keys = await getE2eR2Keys(isRemote)
+  const r2Rows = await queryD1Json(`
+    SELECT DISTINCT
+      e.storage_path,
+      s.branch_id
+    FROM replacement_task_evidence e
+    JOIN replacement_tasks t ON t.id = e.replacement_task_id
+    JOIN scanner_assets s ON s.id = t.scanner_asset_id
+    JOIN branches b ON b.id = s.branch_id
+    WHERE b.loc_bld LIKE 'AIS Shop E2E %'
+  `, isRemote)
+  const r2Keys = collectR2KeysWithBranchSignatures(r2Rows)
 
   const totalRows = Object.values(counts).reduce((sum, n) => sum + Number(n || 0), 0)
   console.table(counts)
@@ -152,17 +86,13 @@ async function main() {
   // 1. Delete R2 objects BEFORE deleting D1 rows so exact storage_path references remain queryable
   if (r2Keys.length > 0) {
     console.log(`\n🧹 กำลังลบไฟล์ R2 จำนวน ${r2Keys.length} รายการจาก bucket ${R2_BUCKET} (${modeFlag})...`)
-    for (const key of r2Keys) {
-      if (!SAFE_R2_KEY_PATTERN.test(key) || key.includes('..')) {
-        throw new Error(`Refusing unsafe R2 object key: ${key}`)
-      }
-    }
-    const batchSize = isRemote ? 4 : 8
+    // Local Miniflare R2 stores metadata in SQLite; sequential deletes avoid SQLITE_BUSY write locks.
+    const batchSize = isRemote ? 4 : 1
     let completed = 0
     for (let i = 0; i < r2Keys.length; i += batchSize) {
       const slice = r2Keys.slice(i, i + batchSize)
       await Promise.all(
-        slice.map(key => runWrangler(['r2', 'object', 'delete', `${R2_BUCKET}/${key}`, modeFlag], isRemote ? 5 : 1))
+        slice.map(key => runWrangler(['r2', 'object', 'delete', `${R2_BUCKET}/${validateR2Key(key)}`, modeFlag], isRemote ? 5 : 1))
       )
       completed += slice.length
       if (completed === r2Keys.length || completed % 20 === 0 || slice.length === r2Keys.length) {
@@ -188,7 +118,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
+runCleanupE2e().catch(err => {
   console.error('\n❌ cleanup-e2e failed:', err?.message || err)
   process.exit(1)
 })

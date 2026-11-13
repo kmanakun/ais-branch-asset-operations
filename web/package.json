@@ -16,6 +16,7 @@
     "test:d1": "node --test scripts/d1-api.test.mjs",
     "test:e2e": "node scripts/test-live-flow.mjs",
     "cleanup:e2e": "node scripts/cleanup-e2e.mjs",
+    "backup:r2": "node scripts/backup-r2-evidence.mjs",
     "test:all": "npm run test:xlsx && npm run test:d1 && npm run test:e2e",
     "deploy": "wrangler pages deploy dist --project-name ais-branch-asset-operations --branch main"
   },
