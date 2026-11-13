@@ -31,7 +31,7 @@ import {
 import { demoAssets, demoTasks, type MenuKey } from './data'
 import type { RegisterImportRow } from './xlsx-register.mjs'
 import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot, SignaturePad, type SignaturePadHandle } from './TaskEvidencePanel'
-import { groupRowsByBranch, groupRowsByProvince, ProvinceCardGroup } from './province'
+import { groupRowsByBranch } from './province'
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
 import { d1Api, getDevEmail, setDevEmail } from './d1-client'
@@ -1133,8 +1133,7 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
         : 'on_process'
     return searchMatches && provinceMatches && (statusFilter === 'all' || statusGroup === statusFilter)
   }) : rows
-  const provinceGroups = groupRowsByProvince(filteredRows)
-  const [expandedProvinces, setExpandedProvinces] = useState<string[]>([])
+  const branchGroups = groupRowsByBranch(filteredRows)
   const [expandedBranches, setExpandedBranches] = useState<string[]>([])
   const autoExpandedSearch = useRef('')
   useEffect(() => {
@@ -1142,7 +1141,6 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
     if (!query) {
       if (autoExpandedSearch.current) {
         autoExpandedSearch.current = ''
-        setExpandedProvinces([])
         setExpandedBranches([])
       }
       return
@@ -1150,11 +1148,17 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
     const key = `${query}\u0000${page}`
     if (loading || !searchResultsReady || autoExpandedSearch.current === key) return
     autoExpandedSearch.current = key
-    setExpandedProvinces(provinceGroups.map(group => group.province))
-    setExpandedBranches(provinceGroups.flatMap(group => groupRowsByBranch(group.rows).map(branch => group.province + branch.key)))
-  }, [loading, page, provinceGroups, search, searchResultsReady])
-  const toggleProvince = (name: string) => setExpandedProvinces(current => current.includes(name) ? current.filter(value => value !== name) : [...current, name])
+    setExpandedBranches(branchGroups.map(branch => branch.key))
+  }, [loading, page, branchGroups, search, searchResultsReady])
   const toggleBranch = (key: string) => setExpandedBranches(current => current.includes(key) ? current.filter(value => value !== key) : [...current, key])
+  const allBranchesExpanded = branchGroups.length > 0 && branchGroups.every(b => expandedBranches.includes(b.key))
+  const toggleAllBranches = () => {
+    if (allBranchesExpanded) {
+      setExpandedBranches([])
+    } else {
+      setExpandedBranches(branchGroups.map(b => b.key))
+    }
+  }
   const assetStatus = (row: Record<string, unknown>) => row.status ? getStatusPresentation(row.status) : { label: 'ยังไม่เปิดใบงาน', tone: 'neutral' }
   const [selectedAsset, setSelectedAsset] = useState<Record<string, unknown> | null>(null)
   const [reportBranch, setReportBranch] = useState<BranchReference | null>(null)
@@ -1178,7 +1182,12 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
     onFocusResolved()
   }, [error, focusSerial, loading, onFocusResolved, rows])
   return <>
-    <div className="asset-summary"><div><span>Scanner ในผลลัพธ์</span><strong>{demo ? filteredRows.length.toLocaleString('th-TH') : total.toLocaleString('th-TH')}</strong></div><div><span>จังหวัดในผลลัพธ์</span><strong>{demo ? new Set(filteredRows.map(row => String(row.province || '').trim()).filter(Boolean)).size.toLocaleString('th-TH') : provinceTotal.toLocaleString('th-TH')}</strong></div><div><span>หน้าปัจจุบัน</span><strong>{demo ? 'ตัวอย่าง' : (page + 1).toLocaleString('th-TH')}</strong></div></div>
+    <div className="asset-summary">
+      <div><span>สาขาในผลลัพธ์</span><strong>{branchGroups.length.toLocaleString('th-TH')}</strong></div>
+      <div><span>Scanner ในผลลัพธ์</span><strong>{demo ? filteredRows.length.toLocaleString('th-TH') : total.toLocaleString('th-TH')}</strong></div>
+      <div><span>จังหวัดในผลลัพธ์</span><strong>{demo ? new Set(filteredRows.map(row => String(row.province || '').trim()).filter(Boolean)).size.toLocaleString('th-TH') : provinceTotal.toLocaleString('th-TH')}</strong></div>
+      <div><span>หน้าปัจจุบัน</span><strong>{demo ? 'ตัวอย่าง' : (page + 1).toLocaleString('th-TH')}</strong></div>
+    </div>
     <section className="panel list-panel">
       <div className="asset-register-toolbar">
         <label className="search-box">
@@ -1207,32 +1216,132 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
         <label className="asset-filter-field"><span>จังหวัด</span><select aria-label="กรองตามจังหวัด" value={provinceFilter} onChange={event => setProvinceFilter(event.target.value)}><option value="">ทุกจังหวัด</option>{provinceOptions.map(province => <option value={province} key={province}>{province}</option>)}</select></label>
         <label className="asset-filter-field"><span>สถานะงาน</span><select aria-label="กรองตามสถานะงาน" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">ทุกสถานะ</option><option value="open">รอเปิดใบงาน</option><option value="on_process">On Process · กำลังดำเนินการ</option><option value="complete">Complete · เสร็จสมบูรณ์</option></select></label>
         {(provinceFilter || statusFilter !== 'all' || search) && <button type="button" className="secondary-button asset-filter-reset" onClick={() => { setProvinceFilter(''); setStatusFilter('all'); setSearch(''); setPage(0) }}>ล้างตัวกรอง</button>}
+        {branchGroups.length > 0 && (
+          <button type="button" className="text-button" onClick={toggleAllBranches} style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+            {allBranchesExpanded ? 'ยุบทุกสาขา' : 'ขยายทุกสาขา'}
+          </button>
+        )}
       </div>
       {focusMessage && <div className="detail-readonly-note" role="status">{focusMessage}</div>}
       {loading && !filteredRows.length ? <EmptyState loading /> : error && !filteredRows.length ? <EmptyState title="โหลดข้อมูลไม่สำเร็จ" detail={error} onRetry={onRetry} /> : filteredRows.length ? <>
         {loading && <div className="list-refresh-notice" role="status">กำลังอัปเดตรายการ Scanner…</div>}
         {error && <div className="list-refresh-notice is-error" role="alert"><span>{error}</span><button type="button" className="secondary-button" onClick={onRetry}>ลองอีกครั้ง</button></div>}
-        <div className="table-wrap asset-table-wrap"><table><thead><tr><th>สาขา / LocationCode</th><th>อุปกรณ์</th><th>Serial</th><th>สถานะ</th><th>ปีข้อมูลเดิม</th><th>รายละเอียด</th></tr></thead><tbody>{provinceGroups.flatMap(group => [
-          <tr className="province-table-group" key={'province-' + group.province}><th scope="rowgroup" colSpan={6}><button type="button" className="register-expand-button" aria-expanded={expandedProvinces.includes(group.province)} onClick={() => toggleProvince(group.province)}><ChevronDown size={15} /> จังหวัด{group.province} <small>{group.branchCount} สาขา · {group.rows.length} เครื่อง</small></button></th></tr>,
-          ...(expandedProvinces.includes(group.province) ? groupRowsByBranch(group.rows).flatMap(branch => [
-            <tr className="branch-table-group" key={'branch-' + group.province + '-' + branch.key}><th scope="rowgroup" colSpan={6}><div className="branch-table-heading"><button type="button" className="register-expand-button" aria-expanded={expandedBranches.includes(group.province + branch.key)} onClick={() => toggleBranch(group.province + branch.key)}><ChevronDown size={15} /> {branch.name}<small>LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small></button>{branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}{!demo && ['admin', 'field_technician'].includes(String(role)) && <button type="button" className="text-button" onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: group.province })}>พบ Scanner นอกทะเบียน</button>}</div></th></tr>,
-            ...(expandedBranches.includes(group.province + branch.key) ? branch.rows.map((row, i) => {
-            const rowKey = String(row.id || String(row.location_code || 'asset') + '-' + String(row.com_sn || 'serial') + '-' + i)
-            const status = assetStatus(row)
-            return <tr key={rowKey}><td><div className="table-primary">{String(row.branch || row.branch_name || row.loc_bld || 'สาขา')}</div><div className="table-secondary">{String(row.code || row.location_code || '')}</div></td><td>{String(row.model || row.model_name || row.hw_name || '—')}</td><td className="serial-cell">{String(row.serial || row.com_sn || '—')}</td><td><StatusPill label={status.label} tone={status.tone} /></td><td>{String(row.year || row.com_years || '—')}</td><td><button type="button" className="text-button asset-detail-action" onClick={() => setSelectedAsset(row)}>ดูรายละเอียดและประวัติ</button></td></tr>
-            }) : [])
-          ]) : [])
-        ])}</tbody></table></div>
-        <div className="asset-mobile-list">{provinceGroups.map(group => <ProvinceCardGroup key={'mobile-province-' + group.province} group={group}><div className="province-mobile-cards">{groupRowsByBranch(group.rows).map(branch => <section className="branch-mobile-group" key={'mobile-branch-' + group.province + '-' + branch.key}><div className="branch-mobile-heading"><div><strong>{branch.name}</strong><small>LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small>{branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}</div>{!demo && ['admin', 'field_technician'].includes(String(role)) && <button type="button" className="text-button" onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: group.province })}>พบ Scanner นอกทะเบียน</button>}</div>{branch.rows.map((row, i) => {
-          const rowKey = String(row.id || String(row.location_code || 'asset') + '-' + String(row.com_sn || 'serial') + '-' + i)
-          const status = assetStatus(row)
-          return <article className="mobile-record-card" key={rowKey}>
-            <div className="mobile-record-heading"><div><strong>{String(row.serial || row.com_sn || 'Serial ไม่ระบุ')}</strong><span>{String(row.model || row.model_name || row.hw_name || 'เครื่องสแกน')}</span></div><StatusPill label={status.label} tone={status.tone} /></div>
-            <div className="mobile-record-branch">{String(row.branch || row.branch_name || row.loc_bld || 'สาขาไม่ระบุ')}<small>LocationCode {String(row.code || row.location_code || '—')}</small></div>
-            <div className="mobile-record-meta"><span>ปีข้อมูลเดิม<strong>{String(row.year || row.com_years || '—')}</strong></span></div>
-            <button className="mobile-card-action" onClick={() => setSelectedAsset(row)}>รายละเอียด Scanner และเริ่มงาน</button>
-          </article>
-        })}</section>)}</div></ProvinceCardGroup>)}</div>
+        <div className="table-wrap asset-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>สาขา / LocationCode</th>
+                <th>อุปกรณ์</th>
+                <th>Serial</th>
+                <th>สถานะ</th>
+                <th>ปีข้อมูลเดิม</th>
+                <th>รายละเอียด</th>
+              </tr>
+            </thead>
+            <tbody>
+              {branchGroups.flatMap(branch => [
+                <tr className="branch-table-group" key={'branch-' + branch.key}>
+                  <th scope="rowgroup" colSpan={6}>
+                    <div className="branch-table-heading">
+                      <button
+                        type="button"
+                        className="register-expand-button"
+                        aria-expanded={expandedBranches.includes(branch.key)}
+                        onClick={() => toggleBranch(branch.key)}
+                      >
+                        <ChevronDown size={15} />
+                        <span className="branch-name-text">{branch.name}</span>
+                        <span className="branch-province-tag">📍 {branch.province}</span>
+                        <small>LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small>
+                      </button>
+                      {branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}
+                      {!demo && ['admin', 'field_technician'].includes(String(role)) && (
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: branch.province })}
+                        >
+                          พบ Scanner นอกทะเบียน
+                        </button>
+                      )}
+                    </div>
+                  </th>
+                </tr>,
+                ...(expandedBranches.includes(branch.key) ? branch.rows.map((row, i) => {
+                  const rowKey = String(row.id || String(row.location_code || 'asset') + '-' + String(row.com_sn || 'serial') + '-' + i)
+                  const status = assetStatus(row)
+                  return (
+                    <tr key={rowKey}>
+                      <td>
+                        <div className="table-primary">{String(row.branch || row.branch_name || row.loc_bld || 'สาขา')}</div>
+                        <div className="table-secondary">{String(row.code || row.location_code || '')}</div>
+                      </td>
+                      <td>{String(row.model || row.model_name || row.hw_name || '—')}</td>
+                      <td className="serial-cell">{String(row.serial || row.com_sn || '—')}</td>
+                      <td><StatusPill label={status.label} tone={status.tone} /></td>
+                      <td>{String(row.year || row.com_years || '—')}</td>
+                      <td>
+                        <button type="button" className="text-button asset-detail-action" onClick={() => setSelectedAsset(row)}>
+                          ดูรายละเอียดและประวัติ
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                }) : [])
+              ])}
+            </tbody>
+          </table>
+        </div>
+        <div className="asset-mobile-list">
+          {branchGroups.map(branch => (
+            <section className="branch-mobile-group" key={'mobile-branch-' + branch.key}>
+              <div className="branch-mobile-heading">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <strong>{branch.name}</strong>
+                    <span className="branch-province-tag">📍 {branch.province}</span>
+                  </div>
+                  <small>LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small>
+                  {branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}
+                </div>
+                {!demo && ['admin', 'field_technician'].includes(String(role)) && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: branch.province })}
+                  >
+                    พบ Scanner นอกทะเบียน
+                  </button>
+                )}
+              </div>
+              {branch.rows.map((row, i) => {
+                const rowKey = String(row.id || String(row.location_code || 'asset') + '-' + String(row.com_sn || 'serial') + '-' + i)
+                const status = assetStatus(row)
+                return (
+                  <article className="mobile-record-card" key={rowKey}>
+                    <div className="mobile-record-heading">
+                      <div>
+                        <strong>{String(row.serial || row.com_sn || 'Serial ไม่ระบุ')}</strong>
+                        <span>{String(row.model || row.model_name || row.hw_name || 'เครื่องสแกน')}</span>
+                      </div>
+                      <StatusPill label={status.label} tone={status.tone} />
+                    </div>
+                    <div className="mobile-record-branch">
+                      {String(row.branch || row.branch_name || row.loc_bld || 'สาขาไม่ระบุ')}
+                      <small>LocationCode {String(row.code || row.location_code || '—')}</small>
+                    </div>
+                    <div className="mobile-record-meta">
+                      <span>ปีข้อมูลเดิม<strong>{String(row.year || row.com_years || '—')}</strong></span>
+                    </div>
+                    <button className="mobile-card-action" onClick={() => setSelectedAsset(row)}>
+                      รายละเอียด Scanner และเริ่มงาน
+                    </button>
+                  </article>
+                )
+              })}
+            </section>
+          ))}
+        </div>
       </> : <EmptyState title={provinceFilter || statusFilter !== 'all' || search ? 'ไม่พบ Scanner ที่ตรงกับตัวกรอง' : 'ยังไม่มีทะเบียนอุปกรณ์'} detail={provinceFilter || statusFilter !== 'all' || search ? 'ลองเปลี่ยนจังหวัด สถานะ หรือคำค้นหา แล้วตรวจอีกครั้ง' : 'ทะเบียนจะแสดงหลังนำเข้าไฟล์ที่ผ่านการตรวจสอบแล้ว'} />}
       <div className="list-footer"><span>{demo ? 'แสดง ' + filteredRows.length + ' จาก ' + rows.length + ' รายการตัวอย่าง' : error ? 'โหลดข้อมูลไม่สำเร็จ' : 'แสดง ' + (total ? pageOffset + 1 : 0) + '–' + Math.min(pageOffset + rows.length, total) + ' จาก ' + total.toLocaleString('th-TH') + ' เครื่อง · ไม่ตัดจังหวัดข้ามหน้า'}</span><div><button className="icon-button" aria-label="ก่อนหน้า" disabled={demo || loading || page === 0} onClick={() => setPage(page - 1)}><ChevronLeft size={16} /></button><span className="page-number">{demo ? 1 : page + 1}</span><button className="icon-button" aria-label="ถัดไป" disabled={demo || loading || pageOffset + rows.length >= total} onClick={() => setPage(page + 1)}><ChevronRight size={16} /></button></div></div>
     </section>

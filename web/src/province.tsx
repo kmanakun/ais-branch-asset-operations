@@ -10,6 +10,7 @@ export type BranchGroup<T extends Record<string, unknown>> = {
   key: string
   name: string
   locationCode: string
+  province: string
   addressNote?: string
   phone?: string
   rows: T[]
@@ -45,10 +46,12 @@ export function groupRowsByBranch<T extends Record<string, unknown>>(rows: reado
     const branchId = String(row.branch_id || '').trim()
     const locationCode = String(row.location_code || row.code || '').trim()
     const name = String(row.branch_name || row.branch || row.loc_bld || '').trim() || 'สาขาไม่ระบุชื่อ'
+    const province = String(row.province || '').trim() || 'ไม่ระบุจังหวัด'
     const addressNote = String(row.address_note || '').trim()
     const phone = String(row.phone || '').trim()
     const key = branchId || (locationCode ? `${locationCode}\u0000${name}` : `row-${index}`)
-    const group = groups.get(key) || { key, name, locationCode, addressNote, phone, rows: [] }
+    const group = groups.get(key) || { key, name, locationCode, province, addressNote, phone, rows: [] }
+    if (province && (!group.province || group.province === 'ไม่ระบุจังหวัด')) group.province = province
     if (addressNote && !group.addressNote) group.addressNote = addressNote
     if (phone && !group.phone) group.phone = phone
     group.rows.push(row)
