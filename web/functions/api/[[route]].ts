@@ -1392,7 +1392,7 @@ app.get('/export/raw-data', async (c) => {
   })
 })
 
-// 14. รายงานเครื่องสแกนเนอร์นอกทะเบียน (Scanner Discovery)
+// 14. เพิ่มเครื่องสแกนเนอร์นอกทะเบียนหน้างานโดยตรง (Self-Service Discovery by Technician)
 app.post('/discovery', async (c) => {
   const user = c.get('user')
   const body = await c.req.json<{
@@ -1408,37 +1408,89 @@ app.post('/discovery', async (c) => {
   }
 
   const cleanSn = serial_number.trim()
-  const existing = await c.env.DB.prepare('SELECT id FROM scanner_assets WHERE com_sn = ?').bind(cleanSn).first()
+
+  // ตรวจสอบความซ้ำซ้อนทั่วประเทศ (Uniqueness Check)
+  const existing = await c.env.DB.prepare(`
+    SELECT a.id, a.branch_id, b.loc_bld, b.location_code
+    FROM scanner_assets a
+    JOIN branches b ON b.id = a.branch_id
+    WHERE a.com_sn = ?
+  `).bind(cleanSn).first<{ id: string; branch_id: string; loc_bld: string; location_code: string }>()
+
   if (existing) {
-    return c.json({ error: 'Serial Number นี้มีอยู่ในทะเบียนอุปกรณ์แล้ว' }, 409)
+    if (existing.branch_id === branch_id) {
+      return c.json({ error: `Serial Number นี้มีอยู่ในทะเบียนของสาขานี้แล้ว (${existing.loc_bld}) สามารถเลือกเปลี่ยนได้จากรายการ` }, 409)
+    }
+    return c.json({ error: `Serial Number นี้ลงทะเบียนอยู่ที่สาขา ${existing.loc_bld} (${existing.location_code}) แล้ว กรุณาตรวจสอบกับแอดมิน` }, 409)
   }
 
   const id = `dsc-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-  await c.env.DB.prepare(`
-    INSERT INTO scanner_discovery_reports (id, branch_id, serial_number, observed_model, notes, reported_by)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(id, branch_id, cleanSn, observed_model?.trim() || null, notes?.trim() || null, user.email).run()
+  const assetId = `ast-${cleanSn.replace(/[^a-zA-Z0-9_-]/g, '_')}`
 
-  return c.json({ success: true, id })
+  // ค้นหาหรือสร้าง Branch Work Order
+  let workOrder = await c.env.DB.prepare('SELECT id FROM branch_work_orders WHERE branch_id = ? AND status != "completed"').bind(branch_id).first<{ id: string }>()
+  if (!workOrder) {
+    const woId = `wo-${branch_id}-${Date.now()}`
+    const woCode = `WO-${Date.now().toString().slice(-6)}`
+    await c.env.DB.prepare(`
+      INSERT INTO branch_work_orders (id, branch_id, work_order_code, status, created_by)
+      VALUES (?, ?, ?, 'in_progress', ?)
+    `).bind(woId, branch_id, woCode, user.email).run()
+    workOrder = { id: woId }
+  }
+
+  const taskId = `tsk-${assetId}`
+
+  // ดำเนินการเพิ่ม Asset, เปิด Replacement Task, และบันทึก Audit Discovery Report แบบ Atomic Batch
+  await c.env.DB.batch([
+    // 1. เพิ่มเครื่องเข้าทะเบียนทรัพย์สินของสาขานี้ทันที
+    c.env.DB.prepare(`
+      INSERT INTO scanner_assets (id, branch_id, model_name, com_sn, hw_name, brand)
+      VALUES (?, ?, ?, ?, 'Scan Barcode USB', 'Unregistered Discovery')
+    `).bind(assetId, branch_id, observed_model?.trim() || 'Scan Barcode USB', cleanSn),
+
+    // 2. สร้าง Replacement Task ในสถานะ in_progress ให้ช่างเริ่มงานได้ทันที
+    c.env.DB.prepare(`
+      INSERT INTO replacement_tasks (
+        id, branch_work_order_id, scanner_asset_id, status, outcome, 
+        started_at, started_by, version
+      ) VALUES (?, ?, ?, 'in_progress', 'replaced', datetime('now'), ?, 1)
+    `).bind(taskId, workOrder.id, assetId, user.email),
+
+    // 3. บันทึก Discovery Report พร้อมสถานะ approved อัตโนมัติ เพื่อเป็น Audit Trail สำหรับ Admin
+    c.env.DB.prepare(`
+      INSERT INTO scanner_discovery_reports (
+        id, branch_id, serial_number, observed_model, notes, status, reported_by, reviewed_by, review_note, reviewed_at
+      ) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, 'ช่างเพิ่มหน้างานและเปิดใบงานทันที (Self-Service Onsite)', datetime('now'))
+    `).bind(id, branch_id, cleanSn, observed_model?.trim() || null, notes?.trim() || null, user.email, user.email)
+  ])
+
+  return c.json({
+    success: true,
+    id,
+    asset_id: assetId,
+    task_id: taskId,
+    status: 'approved',
+    message: 'เพิ่มเครื่องเข้าสาขาและเปิดใบงานสำเร็จ ช่างสามารถดำเนินการเปลี่ยนเครื่องได้ทันที'
+  })
 })
 
-// 15. คิวการตรวจรับเครื่องนอกทะเบียน (สำหรับ Admin)
+// 15. คิวการตรวจรับและประวัติเครื่องนอกทะเบียน (สำหรับ Admin)
 app.get('/discovery/queue', async (c) => {
   const limit = Math.min(Number(c.req.query('limit')) || 50, 100)
   const offset = Number(c.req.query('offset')) || 0
 
   const countRow = await c.env.DB.prepare(
-    "SELECT COUNT(*) as count FROM scanner_discovery_reports WHERE status = 'pending'"
+    "SELECT COUNT(*) as count FROM scanner_discovery_reports"
   ).first<{ count: number }>()
 
   const rows = await c.env.DB.prepare(`
     SELECT 
       d.id, d.id as report_id, d.branch_id, d.serial_number, d.observed_model, d.notes,
-      d.status, d.reported_by, d.created_at,
+      d.status, d.reported_by, d.created_at, d.reviewed_by, d.review_note, d.reviewed_at,
       b.loc_bld as branch_name, b.location_code, b.province
     FROM scanner_discovery_reports d
     JOIN branches b ON b.id = d.branch_id
-    WHERE d.status = 'pending'
     ORDER BY d.created_at DESC
     LIMIT ? OFFSET ?
   `).bind(limit, offset).all()
@@ -1466,7 +1518,9 @@ app.post('/discovery/:id/review', async (c) => {
 
   const report = await c.env.DB.prepare('SELECT * FROM scanner_discovery_reports WHERE id = ?').bind(id).first<any>()
   if (!report) return c.json({ error: 'ไม่พบรายการรายงานนี้' }, 404)
-  if (report.status !== 'pending') return c.json({ error: 'รายการนี้ได้รับการพิจารณาไปแล้ว' }, 409)
+  if (report.status === 'approved') {
+    return c.json({ success: true, status: 'approved', message: 'รายการนี้ได้รับการอนุมัติเข้าทะเบียนแล้ว' })
+  }
 
   if (decision === 'approve') {
     const dup = await c.env.DB.prepare('SELECT id FROM scanner_assets WHERE com_sn = ?').bind(report.serial_number).first()

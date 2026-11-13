@@ -100,17 +100,13 @@ export function ScannerDiscoveryDialog({ branch, onClose, onReported }: { branch
       })
       onReported()
     } catch (err: any) {
-      if (err?.message?.includes('already registered')) {
-        setError('SN นี้อยู่ในทะเบียนหรือมีรายงานรอตรวจแล้ว หากพบผิดสาขาให้บันทึกเป็นกรณีเครื่องที่พบไม่ตรงกับงาน')
-      } else {
-        setError('ส่งรายงานไม่สำเร็จ โปรดตรวจ SN และการเชื่อมต่อ')
-      }
+      setError(err?.message || 'เพิ่มเครื่องไม่สำเร็จ โปรดตรวจ SN และการเชื่อมต่อ')
     }
     finally { setBusy(false) }
   }
   return <div className="detail-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !busy) onClose() }}>
     <section ref={dialogRef} className="detail-dialog scanner-discovery-dialog" role="dialog" aria-modal="true" aria-labelledby="scanner-discovery-title" tabIndex={-1}>
-      <header className="detail-dialog-header"><div><span className="detail-eyebrow">รายงานให้ Admin ตรวจสอบ</span><h2 id="scanner-discovery-title">พบ Scanner นอกทะเบียน</h2></div><button type="button" className="detail-close" aria-label="ปิดหน้ารายงาน" disabled={busy} onClick={onClose}><X size={18} /></button></header>
+      <header className="detail-dialog-header"><div><span className="detail-eyebrow">เพิ่มอุปกรณ์หน้างานทันที</span><h2 id="scanner-discovery-title">พบ Scanner นอกทะเบียน</h2></div><button type="button" className="detail-close" aria-label="ปิดหน้ารายงาน" disabled={busy} onClick={onClose}><X size={18} /></button></header>
       <div className="detail-section scanner-discovery-branch"><strong>{String(branch.name || 'สาขา')}</strong><span>LocationCode {String(branch.code || '—')} · {String(branch.province || 'ไม่ระบุจังหวัด')}</span></div>
       <form className="scanner-discovery-form" onSubmit={submit}>
         <label>
@@ -127,11 +123,13 @@ export function ScannerDiscoveryDialog({ branch, onClose, onReported }: { branch
           </div>
           <input value={serial} onChange={event => setSerial(event.target.value)} maxLength={100} required autoFocus autoComplete="off" placeholder="กรอกหรือกดปุ่มสแกนบาร์โค้ด" />
         </label>
-        <label>รุ่น (ถ้าทราบ)<input value={model} onChange={event => setModel(event.target.value)} maxLength={160} autoComplete="off" /></label>
-        <label>รายละเอียด/จุดที่พบ<textarea value={notes} onChange={event => setNotes(event.target.value)} maxLength={1000} rows={3} /></label>
-        <p>รายงานนี้จะเข้าคิวให้ Admin ตรวจ SN และสาขาก่อนเพิ่มเข้าในทะเบียน ระบบจะไม่เพิ่มอุปกรณ์ซ้ำหรือย้ายเครื่องให้อัตโนมัติ</p>
+        <label>รุ่น (ถ้าทราบ)<input value={model} onChange={event => setModel(event.target.value)} maxLength={160} autoComplete="off" placeholder="เช่น Honeywell 1900GSR หรือ Zebra DS2208" /></label>
+        <label>รายละเอียด/จุดที่พบ<textarea value={notes} onChange={event => setNotes(event.target.value)} maxLength={1000} rows={3} placeholder="เช่น พบเครื่องสำรองใช้งานอยู่ที่เคาน์เตอร์ 3" /></label>
+        <p style={{ background: '#f0fdf4', color: '#166534', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #bbf7d0', lineHeight: 1.5 }}>
+          ✓ ระบบจะเพิ่มเครื่องเข้าทะเบียนของสาขานี้และเปิดใบงานให้ทันที ช่างสามารถเริ่มดำเนินการเปลี่ยนเครื่องได้เลยโดยไม่ต้องรอ Admin อนุมัติ
+        </p>
         {error && <Alert>{error}</Alert>}
-        <footer><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>ยกเลิก</button><button className="primary-button" disabled={busy}>{busy ? 'กำลังส่งรายงาน…' : 'ส่งให้ Admin ตรวจสอบ'}</button></footer>
+        <footer><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>ยกเลิก</button><button className="primary-button" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'เพิ่มเครื่องและเริ่มงานทันที'}</button></footer>
       </form>
       <BarcodeScannerModal
         isOpen={showScanner}
@@ -207,12 +205,32 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
     {loading && pageReports.length === 0 ? <p className="evidence-status">กำลังโหลดรายการรายงาน…</p> : pageReports.length ? <>
       {pageReports.map(report => {
         const id = String(report.id || '')
+        const isApproved = report.status === 'approved'
         return <article className="scanner-discovery-report" key={id}>
-          <div><strong>SN {String(report.serial_number || '—')}</strong><span>{String(report.observed_model || 'ไม่ทราบรุ่น')}</span><small>{String(report.branch_name || 'สาขา')} · {String(report.location_code || '—')} · {String(report.province || '—')}</small><small>รายงานโดย {String(report.reported_by || 'ผู้ใช้')} · {formatDate(report.created_at)}</small>{Boolean(report.notes) && <p>{String(report.notes)}</p>}</div>
-          <div className="scanner-discovery-actions"><input aria-label={`หมายเหตุ Admin สำหรับ SN ${String(report.serial_number || '')}`} placeholder="หมายเหตุ (ถ้ามี)" maxLength={1000} value={notesByReport[id] || ''} onChange={event => setNotesByReport(current => ({ ...current, [id]: event.target.value }))} /><button type="button" className="secondary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'reject')}>{busyReport === id ? 'กำลังบันทึก…' : 'ปฏิเสธ'}</button><button type="button" className="primary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'approve')}>{busyReport === id ? 'กำลังบันทึก…' : <><Check size={15} /> ตรวจแล้วเพิ่มทะเบียน</>}</button></div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <strong>SN {String(report.serial_number || '—')}</strong>
+              {isApproved && <span style={{ fontSize: '11px', background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>✓ เพิ่มเข้าทะเบียนแล้ว</span>}
+            </div>
+            <span>{String(report.observed_model || 'ไม่ทราบรุ่น')}</span>
+            <small>{String(report.branch_name || 'สาขา')} · {String(report.location_code || '—')} · {String(report.province || '—')}</small>
+            <small>รายงานโดย {String(report.reported_by || 'ผู้ใช้')} · {formatDate(report.created_at)}</small>
+            {Boolean(report.notes) && <p>{String(report.notes)}</p>}
+          </div>
+          <div className="scanner-discovery-actions">
+            {isApproved ? (
+              <span style={{ fontSize: '12px', color: '#166534', fontWeight: 500 }}>ช่างเริ่มงานแล้ว (เปิดใบงานอัตโนมัติ)</span>
+            ) : (
+              <>
+                <input aria-label={`หมายเหตุ Admin สำหรับ SN ${String(report.serial_number || '')}`} placeholder="หมายเหตุ (ถ้ามี)" maxLength={1000} value={notesByReport[id] || ''} onChange={event => setNotesByReport(current => ({ ...current, [id]: event.target.value }))} />
+                <button type="button" className="secondary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'reject')}>{busyReport === id ? 'กำลังบันทึก…' : 'ปฏิเสธ'}</button>
+                <button type="button" className="primary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'approve')}>{busyReport === id ? 'กำลังบันทึก…' : <><Check size={15} /> ตรวจแล้วเพิ่มทะเบียน</>}</button>
+              </>
+            )}
+          </div>
         </article>
       })}
-    </> : error ? null : <div className="scanner-discovery-empty"><span><Plus size={17} /></span><strong>ไม่มีรายการรอตรวจ</strong><small>รายงานจากช่างจะปรากฏที่นี่ และจะยังไม่เพิ่มเข้าในทะเบียนจนกว่า Admin อนุมัติ</small></div>}
+    </> : error ? null : <div className="scanner-discovery-empty"><span><Plus size={17} /></span><strong>ไม่มีรายการรอตรวจ</strong><small>รายการเครื่องนอกทะเบียนที่ช่างเพิ่มหน้างานจะแสดงประวัติที่นี่</small></div>}
     {pageReports.length > 0 && total > 50 && <div className="list-footer"><span>แสดง {page * 50 + 1}–{Math.min(page * 50 + pageReports.length, total)} จาก {total.toLocaleString('th-TH')} รายการ</span><div><button type="button" className="icon-button" aria-label="หน้าก่อนหน้า" disabled={page === 0 || loading} onClick={() => setPage(value => Math.max(0, value - 1))}><ChevronLeft size={16} /></button><span className="page-number">{page + 1}</span><button type="button" className="icon-button" aria-label="หน้าถัดไป" disabled={(page + 1) * 50 >= total || loading} onClick={() => setPage(value => value + 1)}><ChevronRight size={16} /></button></div></div>}
   </section>
 }
