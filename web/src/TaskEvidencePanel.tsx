@@ -21,7 +21,7 @@ const PHOTO_SLOTS = [
 
 const SIGNATURE_SLOTS = [
   { key: 'technician_signature', label: 'ผู้ปฏิบัติงานที่เข้าสาขา', hint: 'ลงลายเซ็นผู้ปฏิบัติงาน' },
-  { key: 'scanner_user_signature', label: 'ผู้ใช้งาน Scanner', hint: 'ผู้ใช้งาน Scanner ลงลายเซ็นรับทราบ' },
+  { key: 'scanner_user_signature', label: 'ผู้รับมอบ', hint: 'ผู้รับมอบลงลายเซ็นรับทราบ' },
   { key: 'inspector_signature', label: 'ผู้ตรวจรับงาน', hint: 'Admin ลงลายเซ็นหลังตรวจงาน' },
 ] as const
 

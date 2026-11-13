@@ -1355,7 +1355,7 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
                 <div className="handover-sig-line">
                   <span style={{ color: '#059669', fontWeight: 600 }}>✓ ลงนามรับทราบประจำสาขา</span>
                 </div>
-                <strong>ตัวแทนผู้ใช้งานประจำสาขา AIS</strong>
+                <strong>ผู้รับมอบประจำสาขา AIS</strong>
                 <div>ผู้รับมอบเครื่องประจำสาขา</div>
               </div>
 
@@ -1372,6 +1372,24 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
       </div>
     </div>
   )
+}
+
+const evidenceTypeLabels: Record<string, string> = {
+  old_serial_photo: 'รูป SN เดิม',
+  old_device_photo: 'รูปตัวเครื่องเดิม',
+  old_condition_photo: 'รูปสภาพความเสียหายเดิม',
+  old_branch_sticker_photo: 'รูปสติกเกอร์สาขาเดิม',
+  new_serial_photo: 'รูป SN ใหม่',
+  new_front_photo: 'รูปด้านหน้าเครื่องใหม่',
+  new_side_photo: 'รูปด้านข้างเครื่องใหม่',
+  new_com_serial_photo: 'รูป COM SN / กล่องใหม่',
+  new_device_photo: 'รูปเครื่องใหม่พร้อมใช้',
+  new_cable_management_photo: 'รูปต่อสายไฟ/สัญญาณ',
+  spare_photo_1: 'รูปสำรอง 1',
+  spare_photo_2: 'รูปสำรอง 2',
+  technician_signature: 'ลายเซ็นช่างหน้างาน',
+  scanner_user_signature: 'ลายเซ็นผู้รับมอบ',
+  inspector_signature: 'ลายเซ็นผู้ตรวจรับ',
 }
 
 function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action: string) => void }) {
@@ -1860,15 +1878,15 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                             <div style={{ height: '90px', background: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                               <img
                                 src={`/api/evidence/${ev.storage_path}`}
-                                alt={ev.evidence_type}
+                                alt={evidenceTypeLabels[ev.evidence_type] || ev.evidence_type}
                                 style={{ maxHeight: '100%', maxWidth: '100%', objectFit: 'cover' }}
                                 onError={e => {
                                   (e.target as HTMLElement).style.display = 'none'
                                 }}
                               />
-                              <span style={{ fontSize: '10px', color: '#64748b' }}>{ev.evidence_type}</span>
+                              <span style={{ fontSize: '10px', color: '#64748b' }}>{evidenceTypeLabels[ev.evidence_type] || ev.evidence_type}</span>
                             </div>
-                            <div style={{ padding: '4px', fontWeight: 500 }}>{ev.evidence_type}</div>
+                            <div style={{ padding: '4px', fontWeight: 500 }}>{evidenceTypeLabels[ev.evidence_type] || ev.evidence_type}</div>
                           </div>
                         ))}
                       </div>
@@ -1902,7 +1920,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
                             alignItems: 'center'
                           }}>
                             <strong style={{ fontSize: '15px' }}>
-                              {evidenceList[zoomedEvidenceIndex].evidence_type} ({zoomedEvidenceIndex + 1}/{evidenceList.length})
+                              {evidenceTypeLabels[evidenceList[zoomedEvidenceIndex].evidence_type] || evidenceList[zoomedEvidenceIndex].evidence_type} ({zoomedEvidenceIndex + 1}/{evidenceList.length})
                             </strong>
                             <button
                               type="button"
@@ -1916,7 +1934,7 @@ function PendingReviews({ role, onUpdated }: { role?: string; onUpdated: (action
 
                           <img
                             src={`/api/evidence/${evidenceList[zoomedEvidenceIndex].storage_path}`}
-                            alt={evidenceList[zoomedEvidenceIndex].evidence_type}
+                            alt={evidenceTypeLabels[evidenceList[zoomedEvidenceIndex].evidence_type] || evidenceList[zoomedEvidenceIndex].evidence_type}
                             style={{
                               maxWidth: '100%',
                               maxHeight: '75vh',
