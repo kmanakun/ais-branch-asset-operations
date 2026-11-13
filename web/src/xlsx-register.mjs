@@ -52,7 +52,7 @@ function readZipEntries(buffer) {
   let expandedBytes = 0
   let offset = directoryOffset
   for (let index = 0; index < count; index++) {
-    if (view.getUint32(offset, true) !== 0x02014b50) throw new Error('โครงสร้างไฟล์ Excel ไม่สมบูรณ์')
+    if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) throw new Error('โครงสร้างไฟล์ Excel ไม่สมบูรณ์')
     const method = view.getUint16(offset + 10, true)
     const compressedSize = view.getUint32(offset + 20, true)
     const uncompressedSize = view.getUint32(offset + 24, true)
@@ -124,7 +124,7 @@ function columnIndex(reference) {
   const [, letters, rowText] = match
   if (Number(rowText) > maxRows) throw new Error('ไฟล์ Excel มีหมายเลขแถวเกินขอบเขต')
   let result = 0
-  for (const letter of letters) result = result * 26 + letter.charCodeAt(0) - 64
+  for (const letter of letters.toUpperCase()) result = result * 26 + letter.charCodeAt(0) - 64
   if (result > maxColumns) throw new Error('ไฟล์ Excel มีหมายเลขคอลัมน์เกินขอบเขต')
   return result - 1
 }

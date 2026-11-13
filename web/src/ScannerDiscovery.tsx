@@ -12,9 +12,15 @@ export type BranchReference = { id: unknown; name: unknown; code: unknown; provi
 type DiscoveryReport = Record<string, unknown>
 
 function formatDate(value: unknown) {
-  if (!value) return '—'
-  const date = new Date(String(value))
-  return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  const raw = String(value || '').trim()
+  if (!raw) return '—'
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)
+    ? `${raw.replace(' ', 'T')}Z`
+    : raw
+  const date = new Date(normalized)
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : new Intl.DateTimeFormat('th-TH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(date)
 }
 
 function useDialogRef(onClose: () => void, busy: boolean) {
@@ -199,7 +205,7 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
         setReload(value => value + 1)
       }
       onUpdated('refresh')
-    } catch { setError('บันทึกผลตรวจไม่สำเร็จ รายการอาจถูกตรวจไปแล้ว โปรดลองโหลดใหม่') }
+    } catch (err: any) { setError(err?.message || 'บันทึกผลตรวจไม่สำเร็จ รายการอาจถูกตรวจไปแล้ว โปรดลองโหลดใหม่') }
     finally { setBusyReport('') }
   }
   const pageReports = loadedPage === page ? reports : []

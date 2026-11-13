@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Camera, Check, RefreshCw, ScanBarcode, Upload, X } from 'lucide-react'
-import { lockBodyScroll } from './dialog'
+import { lockBodyScroll, registerActiveDialog } from './dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Alert } from '@/components/ui/alert'
@@ -21,7 +22,12 @@ export function BarcodeScannerModal({
   onClose,
 }: BarcodeScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   const streamRef = useRef<MediaStream | null>(null)
+  const cameraSessionRef = useRef(0)
+  const isDetectingRef = useRef(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraError, setCameraError] = useState('')
@@ -37,11 +43,23 @@ export function BarcodeScannerModal({
     setIsSupported(supported)
   }, [isOpen])
 
-  // ล็อกการเลื่อนหน้าจอเมื่อเปิด Modal
+  // ล็อกการเลื่อนหน้าจอ ลงทะเบียน active dialog และรองรับ Escape เมื่อเปิด Modal
   useEffect(() => {
     if (!isOpen) return
     const releaseBodyScroll = lockBodyScroll()
+    const unregisterDialog = registerActiveDialog(dialogRef.current)
+    dialogRef.current?.focus()
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        stopCamera()
+        onCloseRef.current()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
     return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      unregisterDialog()
       releaseBodyScroll()
     }
   }, [isOpen])
@@ -53,6 +71,7 @@ export function BarcodeScannerModal({
       return
     }
 
+    setManualSerial('')
     startCamera()
 
     return () => {
@@ -61,6 +80,8 @@ export function BarcodeScannerModal({
   }, [isOpen])
 
   const stopCamera = () => {
+    cameraSessionRef.current += 1
+    isDetectingRef.current = false
     if (scanIntervalRef.current) {
       clearInterval(scanIntervalRef.current)
       scanIntervalRef.current = null
@@ -76,6 +97,8 @@ export function BarcodeScannerModal({
   }
 
   const startCamera = async () => {
+    stopCamera()
+    const sessionId = cameraSessionRef.current
     setCameraError('')
     try {
       if (!navigator.mediaDevices?.getUserMedia) {
@@ -92,21 +115,34 @@ export function BarcodeScannerModal({
         audio: false,
       })
 
+      if (sessionId !== cameraSessionRef.current) {
+        stream.getTracks().forEach((track) => track.stop())
+        return
+      }
+
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
         await videoRef.current.play()
+        if (sessionId !== cameraSessionRef.current) {
+          stopCamera()
+          return
+        }
         setCameraActive(true)
-        startScanning()
+        startScanning(sessionId)
+      } else {
+        stream.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
       }
     } catch (err: any) {
+      if (sessionId !== cameraSessionRef.current) return
       console.warn('Camera stream error:', err)
       setCameraError('ไม่สามารถเข้าถึงกล้องได้ โปรดอนุญาตสิทธิ์การใช้กล้อง หรือเลือกถ่ายภาพบาร์โค้ด')
       setCameraActive(false)
     }
   }
 
-  const startScanning = () => {
+  const startScanning = (sessionId: number) => {
     if (typeof window === 'undefined' || !('BarcodeDetector' in window)) return
 
     try {
@@ -114,10 +150,13 @@ export function BarcodeScannerModal({
       const detector = new (window as any).BarcodeDetector({ formats })
 
       scanIntervalRef.current = window.setInterval(async () => {
+        if (sessionId !== cameraSessionRef.current || isDetectingRef.current) return
         if (!videoRef.current || videoRef.current.readyState < 2) return
 
+        isDetectingRef.current = true
         try {
           const barcodes = await detector.detect(videoRef.current)
+          if (sessionId !== cameraSessionRef.current) return
           if (barcodes && barcodes.length > 0) {
             const rawValue = barcodes[0].rawValue?.trim()
             if (rawValue) {
@@ -126,6 +165,8 @@ export function BarcodeScannerModal({
           }
         } catch {
           // ignore scan frame errors
+        } finally {
+          isDetectingRef.current = false
         }
       }, 250)
     } catch (e) {
@@ -153,11 +194,12 @@ export function BarcodeScannerModal({
     setDetecting(true)
     setCameraError('')
 
+    let imageBitmap: ImageBitmap | null = null
     try {
       if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
         const formats = ['code_128', 'code_39', 'qr_code', 'ean_13', 'ean_8', 'upc_a', 'data_matrix']
         const detector = new (window as any).BarcodeDetector({ formats })
-        const imageBitmap = await createImageBitmap(file)
+        imageBitmap = await createImageBitmap(file)
         const barcodes = await detector.detect(imageBitmap)
 
         if (barcodes && barcodes.length > 0) {
@@ -172,6 +214,7 @@ export function BarcodeScannerModal({
     } catch (err: any) {
       setCameraError('เกิดข้อผิดพลาดในการอ่านภาพ: ' + (err?.message || 'ไม่สามารถวิเคราะห์บาร์โค้ดได้'))
     } finally {
+      imageBitmap?.close()
       setDetecting(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
@@ -184,11 +227,11 @@ export function BarcodeScannerModal({
     }
   }
 
-  if (!isOpen) return null
+  if (!isOpen || typeof document === 'undefined') return null
 
-  return (
+  return createPortal(
     <div
-      className="detail-overlay z-[10500]"
+      className="fixed inset-0 z-[10500] flex items-center justify-center overflow-y-auto overscroll-contain bg-slate-900/60 p-3 backdrop-blur-xs sm:p-6"
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -198,26 +241,28 @@ export function BarcodeScannerModal({
       }}
     >
       <section
-        className="detail-dialog w-[92%] max-w-[520px] gap-0 p-0 overflow-hidden"
+        ref={dialogRef}
+        tabIndex={-1}
+        className="my-auto flex w-full max-w-[480px] max-h-[92dvh] flex-col overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 shadow-2xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="scanner-modal-title"
       >
-        <header className="detail-dialog-header bg-white px-5 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200">
+        <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-5 sm:py-3.5">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-600">
               <ScanBarcode size={20} />
             </div>
-            <div>
+            <div className="min-w-0">
               <h2 id="scanner-modal-title" className="m-0 text-base font-bold text-slate-900">
                 {title}
               </h2>
-              <small className="text-xs text-slate-500">{subtitle}</small>
+              <small className="block truncate text-xs text-slate-500">{subtitle}</small>
             </div>
           </div>
           <button
             type="button"
-            className="detail-close"
+            className="detail-close shrink-0"
             aria-label="ปิดกล้องสแกน"
             onClick={() => {
               stopCamera()
@@ -228,9 +273,9 @@ export function BarcodeScannerModal({
           </button>
         </header>
 
-        <div className="p-4 flex flex-col gap-3">
+        <div className="flex flex-col gap-3 p-4">
           {/* กรอบวิดีโอแสดงมุมมองกล้อง */}
-          <div className="relative flex h-[260px] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-900">
+          <div className="relative flex h-[210px] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-900 sm:h-[250px]">
             <video
               ref={videoRef}
               playsInline
@@ -318,6 +363,7 @@ export function BarcodeScannerModal({
           </form>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body
   )
 }

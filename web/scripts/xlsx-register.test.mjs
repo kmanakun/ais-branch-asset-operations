@@ -110,3 +110,10 @@ test('stops decompression when a ZIP entry expands beyond its declared size', as
   const file = makeFile(entries)
   await assert.rejects(parseRegisterWorkbook(file), /มีขนาดใหญ่เกินกำหนดหรือไม่ตรงกับขนาดที่แจ้ง/)
 })
+
+test('normalizes lowercase Excel cell column references', async () => {
+  const file = makeFile(workbookEntries(`${header}<row r="2">${cell('a2', '1204')}${cell('b2', 'Central Surat Thani')}${cell('c2', 'SCAN-0001')}</row>`))
+  assert.deepEqual(await parseRegisterWorkbook(file), [
+    { source_row: 2, location_code: '1204', loc_bld: 'Central Surat Thani', com_sn: 'SCAN-0001' },
+  ])
+})

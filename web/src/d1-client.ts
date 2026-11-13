@@ -129,14 +129,19 @@ export const d1Api = {
       outcome: string | null
       observed_serial: string | null
       new_serial_number: string | null
+      notes?: string | null
+      created_at?: string | null
       started_at: string | null
       started_by?: string | null
       closeout_submitted_at: string | null
       closeout_submitted_by?: string | null
       admin_accepted_at: string | null
+      admin_accepted_by?: string | null
       customer_accepted_at: string | null
+      customer_accepted_by?: string | null
       customer_rejected_at: string | null
       customer_reject_reason: string | null
+      work_order_code?: string | null
       version: number | null
     }>
   }>(`/api/branches/${branchId}`),
@@ -152,6 +157,7 @@ export const d1Api = {
     return request<{
       rows: any[]
       total: number
+      province_count?: number
       offset: number
       limit: number
     }>(`/api/scanners?${q.toString()}`)
@@ -171,6 +177,8 @@ export const d1Api = {
   importRegister: (rows: any[], sourceName = 'Detail1.xlsx') => request<{
     success: boolean
     message: string
+    imported_count?: number
+    skipped_count?: number
     branches_count: number
     warnings_count: number
   }>('/api/register/import', {

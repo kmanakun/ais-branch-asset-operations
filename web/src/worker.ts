@@ -14,7 +14,7 @@ function getSecurityHeaders(): Record<string, string> {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
     'X-Robots-Tag': 'noindex, nofollow',
-    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+    'Permissions-Policy': 'camera=(self), microphone=(), geolocation=()',
     'Strict-Transport-Security': 'max-age=31536000',
   }
 }

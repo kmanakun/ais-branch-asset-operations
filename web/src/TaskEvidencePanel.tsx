@@ -37,9 +37,9 @@ const PHOTO_SLOTS = [
 ] as const
 
 const SIGNATURE_SLOTS = [
-  { key: 'technician_signature', label: 'ผู้ปฏิบัติงานที่เข้าสาขา', hint: 'ลงลายเซ็นผู้ปฏิบัติงาน' },
-  { key: 'scanner_user_signature', label: 'ผู้รับมอบ', hint: 'ผู้รับมอบลงลายเซ็นรับทราบ' },
-  { key: 'inspector_signature', label: 'ผู้ตรวจรับงาน', hint: 'Admin ลงลายเซ็นหลังตรวจงาน' },
+  { key: 'technician_signature', label: 'ผู้ปฏิบัติงานที่เข้าสาขา (SYM)', hint: 'ลงลายเซ็นผู้ปฏิบัติงานหน้างาน' },
+  { key: 'scanner_user_signature', label: 'ผู้รับมอบประจำสาขา (AIS)', hint: 'พนักงานประจำสาขา AIS ลงลายเซ็นรับทราบ' },
+  { key: 'inspector_signature', label: 'ผู้ตรวจรับมอบงาน (ลูกค้า G-Able)', hint: 'ตัวแทนลูกค้าลงลายเซ็นตรวจรับมอบงาน' },
 ] as const
 
 type PhotoSlot = typeof PHOTO_SLOTS[number]['key']
@@ -59,6 +59,9 @@ const EVIDENCE_TYPE_ALIASES: Record<string, EvidenceSlot> = {
   photo_new_cable_management: 'new_cable_management_photo',
   sig_tech: 'technician_signature',
   sig_cust: 'scanner_user_signature',
+  customer_signature: 'inspector_signature',
+  sig_inspector: 'inspector_signature',
+  sig_customer: 'inspector_signature',
 }
 
 function normalizeEvidenceSlot(rawType: string): EvidenceSlot | null {
@@ -88,25 +91,33 @@ type TaskEvidencePanelProps = {
   editableSlots?: EvidenceSlot[]
   requiredSlots?: EvidenceSlot[]
   onRequiredReady: (ready: boolean) => void
+  onRequiredCompleted?: (slot: EvidenceSlot) => void
   onBusyChange: (busy: boolean) => void
   onTaskStarted?: (version: number) => void
 }
 type Point = { x: number; y: number }
 
+function normalizeOutcomeAlias(outcome?: string | null): string {
+  if (outcome === 'aborted') return 'no_damage_found'
+  if (outcome === 'scanner_missing') return 'target_device_not_found'
+  return String(outcome || '')
+}
+
 export function requiredEvidenceSlotsForOutcome(outcome?: string): EvidenceSlot[] {
+  const normalized = normalizeOutcomeAlias(outcome)
   const fieldSignatures: EvidenceSlot[] = ['technician_signature', 'scanner_user_signature']
-  if (outcome === 'replaced') return [
+  if (normalized === 'replaced') return [
     'old_serial_photo', 'old_device_photo', 'old_condition_photo', 'old_branch_sticker_photo',
     'new_serial_photo', 'new_front_photo', 'new_side_photo', 'new_com_serial_photo',
     'new_device_photo', 'new_cable_management_photo', ...fieldSignatures,
   ]
-  if (outcome === 'no_damage_found') return [
+  if (normalized === 'no_damage_found') return [
     'old_serial_photo', 'old_device_photo', 'old_condition_photo', 'old_branch_sticker_photo', ...fieldSignatures,
   ]
-  if (outcome === 'different_device_found') return [
+  if (normalized === 'different_device_found') return [
     'new_serial_photo', 'new_device_photo', ...fieldSignatures,
   ]
-  if (outcome === 'target_device_not_found') return []
+  if (normalized === 'target_device_not_found') return []
   return []
 }
 
@@ -115,13 +126,14 @@ const MAX_PHOTO_BYTES = 90 * 1024
 const MAX_SIGNATURE_BYTES = 32 * 1024
 
 function outcomeLabel(outcome?: string | null) {
+  const normalized = normalizeOutcomeAlias(outcome)
   const labels: Record<string, string> = {
     replaced: 'เปลี่ยนเครื่อง',
     no_damage_found: 'ไม่พบเครื่องชำรุด',
     different_device_found: 'พบอุปกรณ์อื่น',
     target_device_not_found: 'ไม่พบเครื่องตาม SN',
   }
-  return outcome ? labels[outcome] || outcome : 'ยังไม่ระบุผล'
+  return normalized ? labels[normalized] || normalized : 'ยังไม่ระบุผล'
 }
 
 function blobFromCanvas(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
@@ -306,7 +318,7 @@ function slotErrorMessage(error: unknown): string {
   return 'บันทึกหลักฐานไม่สำเร็จ ตรวจสัญญาณอินเทอร์เน็ต แล้วลองอีกครั้ง'
 }
 
-export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnly = false, outcome, editableSlots, requiredSlots, onRequiredReady, onBusyChange, onTaskStarted }: TaskEvidencePanelProps) {
+export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnly = false, outcome, editableSlots, requiredSlots, onRequiredReady, onRequiredCompleted, onBusyChange, onTaskStarted: _onTaskStarted }: TaskEvidencePanelProps) {
   const stageEditableSlots = editableSlots || (canEdit ? REQUIRED_SLOTS : [])
   const stageRequiredSlots = requiredSlots || REQUIRED_SLOTS
   const canEditSlot = (slot: EvidenceSlot) => Boolean(taskId) && canEdit && stageEditableSlots.includes(slot)
@@ -320,11 +332,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const photoInputRefs = useRef<Partial<Record<PhotoSlot, HTMLInputElement | null>>>({})
   const loadRequestRef = useRef(0)
-  const evidenceContextRef = useRef({ taskId, canView })
-  evidenceContextRef.current = { taskId, canView }
+  const evidenceContextRef = useRef({ taskId, canView, stageRequiredSlots, outcome })
+  evidenceContextRef.current = { taskId, canView, stageRequiredSlots, outcome }
   const requiredReadyRef = useRef(onRequiredReady)
+  const requiredCompletedRef = useRef(onRequiredCompleted)
   const busyCallbackRef = useRef(onBusyChange)
   useEffect(() => { requiredReadyRef.current = onRequiredReady }, [onRequiredReady])
+  useEffect(() => { requiredCompletedRef.current = onRequiredCompleted }, [onRequiredCompleted])
   useEffect(() => { busyCallbackRef.current = onBusyChange }, [onBusyChange])
   useEffect(() => { busyCallbackRef.current(busySlot !== null) }, [busySlot])
   useEffect(() => () => { busyCallbackRef.current(false) }, [])
@@ -333,8 +347,8 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
     requiredReadyRef.current(ready)
   }, [entries, stageRequiredSlots, outcome])
 
-  const loadEvidence = useCallback(async () => {
-    const { taskId: activeTaskId, canView: canViewActiveTask } = evidenceContextRef.current
+  const loadEvidence = useCallback(async (): Promise<boolean> => {
+    const { taskId: activeTaskId, canView: canViewActiveTask, stageRequiredSlots: activeRequiredSlots, outcome: activeOutcome } = evidenceContextRef.current
     const requestId = ++loadRequestRef.current
     const isCurrentRequest = () => requestId === loadRequestRef.current
       && activeTaskId === evidenceContextRef.current.taskId
@@ -346,7 +360,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       setLoadError('')
       requiredReadyRef.current(false)
       setLoadState('ready')
-      return
+      return false
     }
     setEntries({})
     setPreviewUrls({})
@@ -356,7 +370,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
     requiredReadyRef.current(false)
     try {
       const res = await d1Api.getTaskEvidence(activeTaskId)
-      if (!isCurrentRequest()) return
+      if (!isCurrentRequest()) return false
       const nextEntries: Record<string, EvidenceEntry> = {}
       for (const item of (res.evidence || [])) {
         const slotKey = normalizeEvidenceSlot(item.evidence_type)
@@ -367,18 +381,20 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
           path: item.storage_path,
           byte_size: Number(item.byte_size || (item as any).file_size_bytes || 0),
           signer_name: (item as any).signer_name || null,
-          outcome_context: outcome || 'replaced',
+          outcome_context: activeOutcome || 'replaced',
           uploaded_at: item.created_at,
         }
       }
       setEntries(nextEntries as Record<EvidenceSlot, EvidenceEntry>)
       setLoadState('ready')
+      return activeRequiredSlots.length > 0 && activeRequiredSlots.every(s => nextEntries[s]?.status === 'ready')
     } catch {
-      if (!isCurrentRequest()) return
+      if (!isCurrentRequest()) return false
       setEntries({})
       setLoadError('โหลดหลักฐานไม่ได้ บัญชีนี้อาจไม่มีสิทธิ์ดูใบงาน หรือการเชื่อมต่อขัดข้อง')
       setLoadState('error')
       requiredReadyRef.current(false)
+      return false
     }
   }, [])
 
@@ -392,7 +408,12 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       const readyEntries = Object.values(entries).filter((entry): entry is EvidenceEntry => entry?.status === 'ready')
       const next: Partial<Record<EvidenceSlot, string>> = {}
       for (const entry of readyEntries) {
-        const timeKey = entry.uploaded_at ? `?t=${new Date(entry.uploaded_at).getTime()}` : `?t=${Date.now()}`
+        const rawTs = entry.uploaded_at?.trim() || ''
+        const normalizedTs = rawTs
+          ? (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(rawTs) ? `${rawTs.replace(' ', 'T')}Z` : rawTs)
+          : ''
+        const parsedMs = normalizedTs ? new Date(normalizedTs).getTime() : NaN
+        const timeKey = Number.isNaN(parsedMs) ? `?t=${Date.now()}` : `?t=${parsedMs}`
         next[entry.slot] = `/api/evidence/${entry.path}${timeKey}`
       }
       if (active) {
@@ -408,7 +429,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
 
   const retryPreviews = () => setPreviewRetry(value => value + 1)
 
-  const saveBlob = async (slot: EvidenceSlot, blob: Blob, _signerName: string | null = null): Promise<boolean> => {
+  const saveBlob = async (slot: EvidenceSlot, blob: Blob): Promise<boolean> => {
     if (!canEditSlot(slot) || !taskId) return false
     setBusySlot(slot)
     setActionMessage('')
@@ -427,8 +448,10 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       setPreviewUrls(prev => ({ ...prev, [slot]: base64 }))
       await d1Api.uploadEvidence(taskId, slot, base64, blob.type || 'image/jpeg')
       setActionMessage('บันทึกหลักฐานเรียบร้อยแล้ว')
-      await loadEvidence()
-      onTaskStarted?.(1)
+      const nextReady = await loadEvidence()
+      if (nextReady) {
+        requiredCompletedRef.current?.(slot)
+      }
       return true
     } catch (err: any) {
       setActionMessage(err.message || 'บันทึกหลักฐานไม่สำเร็จ')
@@ -668,6 +691,11 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
 
     <div className="task-evidence-signatures">
       <h4>ลายเซ็นผู้เกี่ยวข้อง</h4>
+      {stageEditableSlots.some(slot => canEditSlot(slot)) && (
+        <p className="mb-3 text-xs text-slate-500">
+          เมื่อกรอก SN เครื่องใหม่ แนบรูปหลักฐาน และลงลายเซ็นผู้ปฏิบัติงาน (SYM) กับผู้รับมอบประจำสาขา (AIS) ครบแล้ว ระบบจะส่งต่อให้ Admin SYM ตรวจรับอัตโนมัติ
+        </p>
+      )}
       <div className="task-evidence-grid signature-grid">
         {SIGNATURE_SLOTS.map(slot => <SignatureEntry
           key={slot.key}
@@ -681,7 +709,6 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
           canEdit={canEditSlot(slot.key)}
           busy={busySlot === slot.key}
           disabled={busySlot !== null}
-          needsName={slot.key === 'scanner_user_signature' || slot.key === 'inspector_signature'}
           required={stageRequiredSlots.includes(slot.key)}
           onSave={saveBlob}
           onRetry={() => void retryFinalize(slot.key)}
@@ -696,7 +723,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
 }
 
 function SignatureEntry({
-  slot, label, hint, entry, outcome, previewUrl, previewStatus, canEdit, busy, disabled, needsName, required, onSave, onRetry, onRetryPreview, showEmpty,
+  slot, label, hint, entry, outcome, previewUrl, previewStatus, canEdit, busy, disabled, required, onSave, onRetry, onRetryPreview, showEmpty,
 }: {
   slot: SignatureSlot
   label: string
@@ -708,15 +735,13 @@ function SignatureEntry({
   canEdit: boolean
   busy: boolean
   disabled: boolean
-  needsName: boolean
   required: boolean
   showEmpty: boolean
-  onSave: (slot: EvidenceSlot, blob: Blob, signerName?: string | null) => Promise<boolean>
+  onSave: (slot: EvidenceSlot, blob: Blob) => Promise<boolean>
   onRetry: () => void
   onRetryPreview: () => void
 }) {
   const padRef = useRef<SignaturePadHandle>(null)
-  const [signerName, setSignerName] = useState(entry?.signer_name || '')
   const [consent, setConsent] = useState(false)
   const [consentWarning, setConsentWarning] = useState(false)
   const [error, setError] = useState('')
@@ -739,17 +764,16 @@ function SignatureEntry({
   }
 
   const isPadDisabled = disabled || !consent
-  const canSubmit = canEdit && consent && (!needsName || Boolean(signerName.trim())) && !disabled
+  const canSubmit = canEdit && consent && !disabled
   const showEditor = canEdit && (entry?.status !== 'ready' ? showEmpty : editing)
 
   useEffect(() => {
-    setSignerName(entry?.signer_name || '')
     if (entry?.status === 'ready') {
       setEditing(false)
       setConsent(false)
       setConsentWarning(false)
     }
-  }, [entry?.signer_name, entry?.status])
+  }, [entry?.status])
 
   const saveSignature = async () => {
     setError('')
@@ -758,7 +782,7 @@ function SignatureEntry({
       const blob = await padRef.current?.exportJpeg()
       if (!blob) throw new Error('กรุณาเซ็นชื่อให้ครบก่อนบันทึก')
       if (blob.size > MAX_SIGNATURE_BYTES) throw new Error('ลายเซ็นใหญ่เกิน 32 KB กรุณาเซ็นใหม่')
-      const saved = await onSave(slot, blob, needsName ? signerName.trim() : null)
+      const saved = await onSave(slot, blob)
       if (saved) {
         padRef.current?.clear()
         setConsent(false)
@@ -767,15 +791,30 @@ function SignatureEntry({
       setError(String((caught as { message?: unknown })?.message || 'กรุณาตรวจลายเซ็นแล้วลองใหม่'))
     }
   }
+  const isCustomerSlot = slot === 'inspector_signature'
+  const statusPillClass = entry?.status === 'ready'
+    ? 'evidence-pill pill-ready'
+    : isCustomerSlot
+    ? 'evidence-optional'
+    : required
+    ? 'evidence-required'
+    : 'evidence-optional'
+  const statusPillLabel = entry?.status === 'ready'
+    ? '✓ บันทึกแล้ว'
+    : isCustomerSlot
+    ? 'รอลูกค้าตรวจรับ'
+    : required
+    ? 'จำเป็นในขั้นนี้'
+    : 'ใช้ในขั้นอื่น'
+
   return <article className="task-evidence-card signature-card">
     <div className="task-evidence-card-heading">
       <strong>{label}</strong>
-      <span className={entry?.status === 'ready' ? 'evidence-pill pill-ready' : required ? 'evidence-required' : 'evidence-optional'}>
-        {entry?.status === 'ready' ? '✓ บันทึกแล้ว' : required ? 'จำเป็นในขั้นนี้' : 'ใช้ในขั้นอื่น'}
+      <span className={statusPillClass}>
+        {statusPillLabel}
       </span>
     </div>
-          <p>{hint}</p>
-    {needsName && canEdit && <label className="evidence-signer-name">ชื่อ-นามสกุลผู้ลงนาม<input value={signerName} onChange={event => setSignerName(event.target.value)} maxLength={120} autoComplete="name" required /></label>}
+    <p>{hint}</p>
     {entry?.status === 'ready' && (previewUrl ? <a className="task-evidence-preview signature-preview" href={previewUrl} target="_blank" rel="noreferrer"><img src={previewUrl} alt={`ลายเซ็น ${label}`} /></a> : previewStatus === 'loading' ? <div className="task-evidence-empty"><LoaderCircle className="evidence-spinner" size={18} /><span>กำลังโหลดลายเซ็น…</span></div> : <div className="task-evidence-image-missing">โหลดลายเซ็นไม่สำเร็จ <button type="button" className="text-button" onClick={onRetryPreview}>ลองโหลดอีกครั้ง</button></div>)}
     {entry?.status === 'ready' && (
       <div className="task-evidence-saved">
@@ -784,7 +823,7 @@ function SignatureEntry({
       </div>
     )}
     {entry?.status === 'pending' && <div className="task-evidence-pending">ลายเซ็นยังรอยืนยัน</div>}
-    {!entry && !canEdit && showEmpty && <div className="task-evidence-empty">ยังไม่มีลายเซ็น</div>}
+    {!entry && !canEdit && showEmpty && <div className="task-evidence-empty">{isCustomerSlot ? 'รอลูกค้า (G-Able) ลงลายเซ็นตรวจรับมอบ' : 'ยังไม่มีลายเซ็น'}</div>}
     {canEdit && entry?.status === 'ready' && !editing && <button type="button" className="text-button" disabled={disabled} onClick={() => setEditing(true)}>แก้ไขลายเซ็น</button>}
     {showEditor && <>
       {entry?.status === 'ready' && <button type="button" className="text-button" disabled={disabled} onClick={() => { setEditing(false); setConsent(false); }}>ยกเลิกแก้ไข</button>}
