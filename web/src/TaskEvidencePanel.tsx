@@ -107,7 +107,12 @@ function blobFromCanvas(canvas: HTMLCanvasElement, type: string, quality: number
   })
 }
 
-export const SignaturePad = forwardRef<SignaturePadHandle, { disabled: boolean; label: string }>(function SignaturePad({ disabled, label }, ref) {
+export const SignaturePad = forwardRef<SignaturePadHandle, {
+  disabled: boolean
+  label: string
+  placeholder?: string
+  onDisabledAttempt?: () => void
+}>(function SignaturePad({ disabled, label, placeholder, onDisabledAttempt }, ref) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const strokesRef = useRef<Point[][]>([])
   const drawingRef = useRef(false)
@@ -128,7 +133,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { disabled: boolean; 
       canvas.height = pixelHeight
     }
     context.setTransform(scale, 0, 0, scale, 0, 0)
-    context.fillStyle = '#fff'
+    context.fillStyle = disabled ? '#f8fafc' : '#fff'
     context.fillRect(0, 0, width, height)
     context.strokeStyle = '#171717'
     context.fillStyle = '#171717'
@@ -147,7 +152,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { disabled: boolean; 
         context.fill()
       }
     }
-  }, [])
+  }, [disabled])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -186,7 +191,10 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { disabled: boolean; 
     }
   }
   const startStroke = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (disabled) return
+    if (disabled) {
+      onDisabledAttempt?.()
+      return
+    }
     event.preventDefault()
     event.currentTarget.setPointerCapture(event.pointerId)
     strokesRef.current = [...strokesRef.current, [getPoint(event)]]
@@ -215,7 +223,7 @@ export const SignaturePad = forwardRef<SignaturePadHandle, { disabled: boolean; 
       onPointerCancel={endStroke}
       onLostPointerCapture={endStroke}
     />
-    {!hasInk && <span className="evidence-signature-placeholder">ลงลายเซ็นในช่องนี้</span>}
+    {!hasInk && <span className="evidence-signature-placeholder">{placeholder || 'ลงลายเซ็นในช่องนี้'}</span>}
   </div>
 })
 
@@ -684,17 +692,43 @@ function SignatureEntry({
   const padRef = useRef<SignaturePadHandle>(null)
   const [signerName, setSignerName] = useState(entry?.signer_name || '')
   const [consent, setConsent] = useState(false)
+  const [consentWarning, setConsentWarning] = useState(false)
   const [error, setError] = useState('')
   const [editing, setEditing] = useState(false)
+
+  const handleConsentChange = (checked: boolean) => {
+    setConsent(checked)
+    setConsentWarning(false)
+    if (!checked) {
+      // หากเผลอติ๊กยืนยันออก ก็จะเป็นการลบลายเซ็นด้วย
+      padRef.current?.clear()
+    }
+  }
+
+  const handleDisabledPadAttempt = () => {
+    if (!consent) {
+      setConsentWarning(true)
+      setTimeout(() => setConsentWarning(false), 3000)
+    }
+  }
+
+  const isPadDisabled = disabled || !consent
   const canSubmit = canEdit && consent && (!needsName || Boolean(signerName.trim())) && !disabled
   const showEditor = canEdit && (entry?.status !== 'ready' ? showEmpty : editing)
+
   useEffect(() => {
     setSignerName(entry?.signer_name || '')
-    if (entry?.status === 'ready') setEditing(false)
+    if (entry?.status === 'ready') {
+      setEditing(false)
+      setConsent(false)
+      setConsentWarning(false)
+    }
   }, [entry?.signer_name, entry?.status])
+
   const saveSignature = async () => {
     setError('')
     try {
+      if (!consent) throw new Error('กรุณากดยืนยันยินยอมข้อตกลงก่อนบันทึกลายเซ็น')
       const blob = await padRef.current?.exportJpeg()
       if (!blob) throw new Error('กรุณาเซ็นชื่อให้ครบก่อนบันทึก')
       if (blob.size > MAX_SIGNATURE_BYTES) throw new Error('ลายเซ็นใหญ่เกิน 32 KB กรุณาเซ็นใหม่')
@@ -717,10 +751,48 @@ function SignatureEntry({
     {!entry && !canEdit && showEmpty && <div className="task-evidence-empty">ยังไม่มีลายเซ็น</div>}
     {canEdit && entry?.status === 'ready' && !editing && <button type="button" className="text-button" disabled={disabled} onClick={() => setEditing(true)}>แก้ไขลายเซ็น</button>}
     {showEditor && <>
-      {entry?.status === 'ready' && <button type="button" className="text-button" disabled={disabled} onClick={() => setEditing(false)}>ยกเลิกแก้ไข</button>}
-      <SignaturePad ref={padRef} label={`ช่องลายเซ็น ${label}`} disabled={disabled} />
-      <div className="evidence-signature-controls"><button type="button" className="text-button" disabled={disabled} onClick={() => padRef.current?.clear()}><Trash2 size={14} /> ล้างลายเซ็น</button></div>
-      <label className="evidence-consent"><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} disabled={disabled} /><span>ผู้ลงนามยืนยันและยินยอมให้บันทึกลายเซ็นนี้เป็นหลักฐานในใบงาน</span></label>
+      {entry?.status === 'ready' && <button type="button" className="text-button" disabled={disabled} onClick={() => { setEditing(false); setConsent(false); }}>ยกเลิกแก้ไข</button>}
+
+      {/* ต้องกดยืนยันก่อนถึงจะเซ็นได้ */}
+      <label className={`evidence-consent ${consent ? 'is-checked' : 'is-pending'}`}>
+        <input
+          type="checkbox"
+          checked={consent}
+          onChange={event => handleConsentChange(event.target.checked)}
+          disabled={disabled}
+        />
+        <span>
+          ผู้ลงนามยืนยันและยินยอมให้บันทึกลายเซ็นนี้เป็นหลักฐานในใบงาน{' '}
+          {!consent && <strong style={{ color: '#b45309', fontWeight: 600 }}>(กดยืนยันก่อนลงลายเซ็น)</strong>}
+        </span>
+      </label>
+
+      {consentWarning && (
+        <p className="task-action-error" role="alert" style={{ fontSize: '11px', padding: '7px 10px', margin: '4px 0 0' }}>
+          ⚠️ กรุณากดยืนยันข้อตกลงด้านบนก่อน จึงจะสามารถลงลายเซ็นได้
+        </p>
+      )}
+
+      {/* ช่องลงลายเซ็น ปลดล็อกเฉพาะเมื่อติ๊กยืนยันแล้ว */}
+      <SignaturePad
+        ref={padRef}
+        label={`ช่องลายเซ็น ${label}`}
+        disabled={isPadDisabled}
+        placeholder={!consent ? '🔒 กรุณากดยืนยันด้านบนก่อนลงลายเซ็น' : 'ลงลายเซ็นในช่องนี้'}
+        onDisabledAttempt={handleDisabledPadAttempt}
+      />
+
+      <div className="evidence-signature-controls">
+        <button
+          type="button"
+          className="text-button"
+          disabled={disabled || !consent}
+          onClick={() => padRef.current?.clear()}
+        >
+          <Trash2 size={14} /> ล้างลายเซ็น
+        </button>
+      </div>
+
       {error && <p className="task-action-error" role="alert">{error}</p>}
       <button type="button" className="primary-button evidence-save-signature" disabled={!canSubmit || busy} onClick={() => void saveSignature()}>
         {busy ? <><LoaderCircle className="evidence-spinner" size={16} /> กำลังบันทึก…</> : <><Save size={16} />{entry?.status === 'ready' ? 'บันทึกลายเซ็นใหม่' : 'บันทึกลายเซ็น'}</>}

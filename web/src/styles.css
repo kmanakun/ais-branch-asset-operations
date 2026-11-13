@@ -833,13 +833,49 @@ tbody tr:last-child td { border-bottom: 0; }
 .signature-card { gap: 9px; }
 .evidence-signer-name { display: grid; gap: 5px; color: #656d77; font-size: 10px; font-weight: 600; }
 .evidence-signer-name input { width: 100%; min-width: 0; min-height: 42px; box-sizing: border-box; padding: 9px 10px; border: 1px solid #dfe2e4; border-radius: 9px; color: #303641; background: #fff; font: inherit; font-weight: 400; }
-.evidence-signature-pad { position: relative; min-width: 0; height: 150px; overflow: hidden; border: 1px solid #dfe2e4; border-radius: 10px; background: #fff; }
+.evidence-signature-pad { position: relative; min-width: 0; height: 150px; overflow: hidden; border: 1px solid #dfe2e4; border-radius: 10px; background: #fff; transition: border-color 0.2s ease; }
+.evidence-signature-pad:focus-within { border-color: #22c55e; }
 .evidence-signature-pad canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
-.evidence-signature-pad canvas.is-disabled { cursor: default; }
-.evidence-signature-placeholder { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: #b1b5bb; font-size: 10px; }
+.evidence-signature-pad canvas.is-disabled { cursor: not-allowed; opacity: 0.7; }
+.evidence-signature-placeholder { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: #64748b; font-size: 11px; font-weight: 500; text-align: center; padding: 10px; }
 .evidence-signature-controls { display: flex; justify-content: flex-end; }
-.evidence-consent { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 8px; color: #606873; font-size: 10px; line-height: 1.5; cursor: pointer; }
-.evidence-consent input { width: 19px; height: 19px; margin: 0; accent-color: var(--brand); }
+.evidence-consent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+.evidence-consent:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+.evidence-consent.is-checked {
+  background: #f0fdf4;
+  border-color: #86efac;
+  color: #166534;
+}
+.evidence-consent.is-pending {
+  border-color: #fde68a;
+  background: #fffdf5;
+  color: #92400e;
+}
+.evidence-consent input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #22c55e;
+  cursor: pointer;
+  flex-shrink: 0;
+}
 .evidence-save-signature { min-height: 43px; display: flex; align-items: center; justify-content: center; gap: 7px; }
 .evidence-spinner { animation: evidence-spin .9s linear infinite; }
 @keyframes evidence-spin { to { transform: rotate(360deg); } }
