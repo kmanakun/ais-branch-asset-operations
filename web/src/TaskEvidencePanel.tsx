@@ -83,7 +83,7 @@ export function requiredEvidenceSlotsForOutcome(outcome?: string): EvidenceSlot[
   if (outcome === 'different_device_found') return [
     'new_serial_photo', 'new_device_photo', ...fieldSignatures,
   ]
-  if (outcome === 'target_device_not_found') return ['spare_photo_1', ...fieldSignatures]
+  if (outcome === 'target_device_not_found') return []
   return []
 }
 
