@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Camera, Check, RefreshCw, ScanBarcode, Upload, X } from 'lucide-react'
 import { lockBodyScroll } from './dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Alert } from '@/components/ui/alert'
 
 interface BarcodeScannerModalProps {
   isOpen: boolean
@@ -185,7 +188,7 @@ export function BarcodeScannerModal({
 
   return (
     <div
-      className="detail-overlay"
+      className="detail-overlay z-[10500]"
       role="presentation"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -193,23 +196,23 @@ export function BarcodeScannerModal({
           onClose()
         }
       }}
-      style={{ zIndex: 10500 }}
     >
       <section
-        className="detail-dialog"
+        className="detail-dialog w-[92%] max-w-[520px] gap-0 p-0 overflow-hidden"
         role="dialog"
         aria-modal="true"
         aria-labelledby="scanner-modal-title"
-        style={{ maxWidth: '520px', width: '92%' }}
       >
-        <header className="detail-dialog-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ScanBarcode size={22} color="#73c23a" />
+        <header className="detail-dialog-header bg-white px-5 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-9 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 border border-emerald-200">
+              <ScanBarcode size={20} />
+            </div>
             <div>
-              <h2 id="scanner-modal-title" style={{ margin: 0, fontSize: '17px' }}>
+              <h2 id="scanner-modal-title" className="m-0 text-base font-bold text-slate-900">
                 {title}
               </h2>
-              <small style={{ color: '#64748b' }}>{subtitle}</small>
+              <small className="text-xs text-slate-500">{subtitle}</small>
             </div>
           </div>
           <button
@@ -225,140 +228,71 @@ export function BarcodeScannerModal({
           </button>
         </header>
 
-        <div style={{ padding: '16px' }}>
+        <div className="p-4 flex flex-col gap-3">
           {/* กรอบวิดีโอแสดงมุมมองกล้อง */}
-          <div
-            style={{
-              position: 'relative',
-              width: '100%',
-              height: '260px',
-              background: '#0f172a',
-              borderRadius: '10px',
-              overflow: 'hidden',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
+          <div className="relative flex h-[260px] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-900">
             <video
               ref={videoRef}
               playsInline
               muted
-              style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
-                display: cameraActive ? 'block' : 'none',
-              }}
+              className={cameraActive ? 'block h-full w-full object-cover' : 'hidden'}
             />
 
             {/* Viewfinder Target Overlay */}
             {cameraActive && (
-              <div
-                style={{
-                  position: 'absolute',
-                  width: '75%',
-                  height: '140px',
-                  border: '2px dashed #73c23a',
-                  borderRadius: '8px',
-                  boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.45)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  pointerEvents: 'none',
-                }}
-              >
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: '50%',
-                    left: 0,
-                    right: 0,
-                    height: '2px',
-                    background: '#73c23a',
-                    boxShadow: '0 0 8px #73c23a',
-                  }}
-                />
+              <div className="pointer-events-none absolute flex h-[140px] w-3/4 items-center justify-center rounded-lg border-2 border-dashed border-emerald-400 shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
+                <div className="absolute inset-x-0 top-1/2 h-0.5 bg-emerald-400 shadow-[0_0_8px_#4ade80]" />
               </div>
             )}
 
             {!cameraActive && (
-              <div
-                style={{
-                  color: '#94a3b8',
-                  textAlign: 'center',
-                  padding: '20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '10px',
-                }}
-              >
-                <Camera size={36} color="#64748b" />
-                <span style={{ fontSize: '13px' }}>
+              <div className="flex flex-col items-center gap-2.5 p-5 text-center text-slate-400">
+                <Camera size={36} className="text-slate-500" />
+                <span className="text-[13px]">
                   {cameraError || 'กำลังเตรียมกล้องสแกน...'}
                 </span>
-                <button
+                <Button
                   type="button"
-                  className="secondary-button"
+                  variant="ghost"
+                  size="sm"
                   onClick={startCamera}
-                  style={{ background: '#334155', color: '#fff', border: 'none' }}
+                  className="bg-slate-700 text-white hover:bg-slate-600 hover:text-white"
                 >
                   <RefreshCw size={14} /> ลองเปิดกล้องใหม่
-                </button>
+                </Button>
               </div>
             )}
           </div>
 
           {/* แถบคำแนะนำหรือแจ้งเตือนข้อผิดพลาด */}
           {cameraError && (
-            <div
-              style={{
-                marginTop: '12px',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                background: '#fef2f2',
-                color: '#b91c1c',
-                fontSize: '13px',
-              }}
-            >
-              {cameraError}
-            </div>
+            <Alert variant="destructive">{cameraError}</Alert>
           )}
 
           {isSupported === false && (
-            <div
-              style={{
-                marginTop: '10px',
-                padding: '8px 12px',
-                borderRadius: '6px',
-                background: '#fffbeb',
-                color: '#b45309',
-                fontSize: '12px',
-              }}
-            >
-              ℹ️ เบราว์เซอร์นี้ไม่รองรับ Real-time Barcode API แนะนำให้กดปุ่ม <strong>"ถ่ายภาพบาร์โค้ด"</strong> ด้านล่าง หรือกรอก Serial ด้วยตนเอง
-            </div>
+            <Alert variant="warning" className="text-xs">
+              <span>ℹ️ เบราว์เซอร์นี้ไม่รองรับ Real-time Barcode API แนะนำให้กดปุ่ม <strong>"ถ่ายภาพบาร์โค้ด"</strong> ด้านล่าง หรือกรอก Serial ด้วยตนเอง</span>
+            </Alert>
           )}
 
           {/* ทางเลือก: ถ่ายภาพบาร์โค้ด หรือ อัปโหลดภาพ */}
-          <div style={{ marginTop: '14px', display: 'flex', gap: '8px' }}>
-            <button
+          <div className="flex gap-2">
+            <Button
               type="button"
-              className="secondary-button"
-              style={{ flex: 1, justifyContent: 'center' }}
+              variant="outline"
+              className="flex-1 justify-center"
               disabled={detecting}
               onClick={() => fileInputRef.current?.click()}
             >
               <Upload size={16} />
               {detecting ? 'กำลังอ่านภาพ...' : 'ถ่ายภาพ / เลือกรูปบาร์โค้ด'}
-            </button>
+            </Button>
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
               capture="environment"
-              style={{ display: 'none' }}
+              className="hidden"
               onChange={handleFileUpload}
             />
           </div>
@@ -366,35 +300,21 @@ export function BarcodeScannerModal({
           {/* ทางเลือกสำรอง: กรอก Serial ด้วยตนเอง */}
           <form
             onSubmit={handleManualSubmit}
-            style={{
-              marginTop: '14px',
-              paddingTop: '12px',
-              borderTop: '1px solid #e2e8f0',
-              display: 'flex',
-              gap: '8px',
-            }}
+            className="flex gap-2 border-t border-slate-200 pt-3"
           >
-            <input
+            <Input
               type="text"
               placeholder="หรือพิมพ์ Serial Number ที่นี่..."
               value={manualSerial}
               onChange={(e) => setManualSerial(e.target.value)}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                borderRadius: '6px',
-                border: '1px solid #cbd5e1',
-                fontSize: '14px',
-              }}
+              className="flex-1 text-sm"
             />
-            <button
+            <Button
               type="submit"
-              className="primary-button"
               disabled={!manualSerial.trim()}
-              style={{ padding: '8px 16px', display: 'flex', alignItems: 'center', gap: '6px' }}
             >
               <Check size={16} /> ใช้งาน
-            </button>
+            </Button>
           </form>
         </div>
       </section>

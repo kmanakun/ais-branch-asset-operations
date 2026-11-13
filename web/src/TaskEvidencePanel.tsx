@@ -575,13 +575,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
                     <p className="evidence-photo-card-hint" title={hint}>{hint}</p>
 
                     {entry?.status === 'ready' && (
-                      <div className="task-evidence-saved" style={{ fontSize: '10px', gap: '5px' }}>
+                      <div className="task-evidence-saved text-[11px] gap-1.5">
                         <Check size={13} />
                         <span>บันทึกแล้วสำหรับ “{outcomeLabel(entry.outcome_context)}” · {(entry.byte_size / 1024).toFixed(0)} KB</span>
                       </div>
                     )}
                     {entry?.status === 'pending' && (
-                      <div className="task-evidence-pending" style={{ fontSize: '10px', gap: '5px' }}>
+                      <div className="task-evidence-pending text-[11px] gap-1.5">
                         <span>การบันทึกยังไม่สมบูรณ์</span>
                         {canEditSlot(slot.key) && entry.can_finalize && (
                           <button type="button" className="text-button" disabled={busySlot !== null} onClick={() => void retryFinalize(slot.key)}>
@@ -630,7 +630,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
                           event.currentTarget.value = ''
                           void savePhoto(slot.key, file)
                         }}
-                        style={{ display: 'none' }}
+                        className="hidden"
                       />
                     )}
                   </div>
@@ -765,12 +765,12 @@ function SignatureEntry({
         />
         <span>
           ผู้ลงนามยืนยันและยินยอมให้บันทึกลายเซ็นนี้เป็นหลักฐานในใบงาน{' '}
-          {!consent && <strong style={{ color: '#b45309', fontWeight: 600 }}>(กดยืนยันก่อนลงลายเซ็น)</strong>}
+          {!consent && <strong className="font-semibold text-amber-700">(กดยืนยันก่อนลงลายเซ็น)</strong>}
         </span>
       </label>
 
       {consentWarning && (
-        <p className="task-action-error" role="alert" style={{ fontSize: '11px', padding: '7px 10px', margin: '4px 0 0' }}>
+        <p className="task-action-error mt-1 px-2.5 py-1.5 text-[11.5px]" role="alert">
           ⚠️ กรุณากดยืนยันข้อตกลงด้านบนก่อน จึงจะสามารถลงลายเซ็นได้
         </p>
       )}

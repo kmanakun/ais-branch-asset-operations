@@ -37,6 +37,12 @@ import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } f
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
 import { d1Api, getDevEmail, setDevEmail } from './d1-client'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 
 type UserContext = {
   email?: string
@@ -175,7 +181,23 @@ function formatDate(value: unknown) {
 }
 
 function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: string }) {
-  return <span className={'status-pill ' + tone}><span className="status-dot" />{label}</span>
+  const variantMap: Record<string, 'done' | 'ready' | 'progress' | 'blocked' | 'green' | 'orange' | 'red' | 'neutral'> = {
+    done: 'done',
+    green: 'green',
+    ready: 'ready',
+    progress: 'progress',
+    blocked: 'blocked',
+    orange: 'orange',
+    red: 'red',
+    neutral: 'neutral',
+  }
+  const toneVariant = variantMap[tone] || 'neutral'
+  return (
+    <Badge variant={toneVariant} className={cn('status-pill', tone)}>
+      <span className="status-dot" />
+      {label}
+    </Badge>
+  )
 }
 
 function DevAuthBar({ currentEmail, onSwitch }: { currentEmail: string; onSwitch: (email: string) => void }) {
@@ -814,38 +836,12 @@ function App() {
     <>
     <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />
     {!isOnline && (
-      <div style={{
-        background: '#b91c1c',
-        color: '#fff',
-        padding: '8px 16px',
-        fontSize: '13px',
-        fontWeight: 600,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 9999
-      }}>
+      <div className="sticky top-0 z-[9999] flex items-center justify-center gap-2 bg-red-700 px-4 py-2 text-[13px] font-semibold text-white">
         <WifiOff size={16} /> คุณกำลังออฟไลน์ (Offline) สัญญาณอินเทอร์เน็ตขาดหาย โปรดตรวจสอบสัญญาณก่อนทำรายการ
       </div>
     )}
     {showOnlineRestored && isOnline && (
-      <div style={{
-        background: '#15803d',
-        color: '#fff',
-        padding: '8px 16px',
-        fontSize: '13px',
-        fontWeight: 600,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
-        position: 'sticky',
-        top: 0,
-        zIndex: 9999
-      }}>
+      <div className="sticky top-0 z-[9999] flex items-center justify-center gap-2 bg-emerald-700 px-4 py-2 text-[13px] font-semibold text-white">
         <Wifi size={16} /> เชื่อมต่อสัญญาณอินเทอร์เน็ตเรียบร้อยแล้ว
       </div>
     )}
@@ -916,9 +912,9 @@ function App() {
           </div>}
           <div className="page-heading">
             <div><div className="eyebrow">AIS BRANCH & ASSET OPERATIONS</div><h1>{currentPage.title}</h1><p>{currentPage.subtitle}</p></div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <button type="button" className="secondary-button" onClick={handleExportRawData}><FileDown size={16} /> ส่งออก Raw Data (.csv)</button>
-              {activeMenu === 'assets' && canUseAdminModules && <button type="button" className="secondary-button" onClick={() => setActiveMenu('imports')}><FileSpreadsheet size={16} /> นำเข้าทะเบียน</button>}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={handleExportRawData}><FileDown size={16} /> ส่งออก Raw Data (.csv)</Button>
+              {activeMenu === 'assets' && canUseAdminModules && <Button type="button" variant="outline" onClick={() => setActiveMenu('imports')}><FileSpreadsheet size={16} /> นำเข้าทะเบียน</Button>}
             </div>
           </div>
 
@@ -1225,7 +1221,7 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
           />
           <button
             type="button"
-            className="icon-button"
+            className="icon-button ml-auto p-1"
             title="สแกนบาร์โค้ดค้นหา"
             aria-label="สแกนบาร์โค้ดค้นหา"
             onClick={(e) => {
@@ -1233,18 +1229,17 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
               e.stopPropagation()
               setScanSearchOpen(true)
             }}
-            style={{ padding: '4px', marginLeft: 'auto' }}
           >
             <ScanBarcode size={17} />
           </button>
         </label>
         <label className="asset-filter-field"><span>จังหวัด</span><select aria-label="กรองตามจังหวัด" value={provinceFilter} onChange={event => setProvinceFilter(event.target.value)}><option value="">ทุกจังหวัด</option>{provinceOptions.map(province => <option value={province} key={province}>{province}</option>)}</select></label>
         <label className="asset-filter-field"><span>สถานะงาน</span><select aria-label="กรองตามสถานะงาน" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">ทุกสถานะ</option><option value="open">รอเปิดใบงาน</option><option value="on_process">On Process · กำลังดำเนินการ</option><option value="complete">Complete · เสร็จสมบูรณ์</option></select></label>
-        {(provinceFilter || statusFilter !== 'all' || search) && <button type="button" className="secondary-button asset-filter-reset" onClick={() => { setProvinceFilter(''); setStatusFilter('all'); setSearch(''); setPage(0) }}>ล้างตัวกรอง</button>}
+        {(provinceFilter || statusFilter !== 'all' || search) && <Button type="button" variant="outline" className="asset-filter-reset h-10" onClick={() => { setProvinceFilter(''); setStatusFilter('all'); setSearch(''); setPage(0) }}>ล้างตัวกรอง</Button>}
         {branchGroups.length > 0 && (
-          <button type="button" className="text-button" onClick={toggleAllBranches} style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+          <Button type="button" variant="ghost" size="sm" onClick={toggleAllBranches} className="ml-auto whitespace-nowrap text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800">
             {allBranchesExpanded ? 'ยุบทุกสาขา' : 'ขยายทุกสาขา'}
-          </button>
+          </Button>
         )}
       </div>
       {focusMessage && <div className="detail-readonly-note" role="status">{focusMessage}</div>}
@@ -1280,25 +1275,25 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
                         <small>LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small>
                       </button>
                       {branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto' }}>
-                        <button
+                      <div className="ml-auto flex items-center gap-2">
+                        <Button
                           type="button"
-                          className="secondary-button"
-                          style={{ minHeight: '32px', padding: '5px 10px', fontSize: '12px' }}
+                          variant="outline"
+                          size="sm"
                           onClick={() => onOpenHandover?.(branch.rows[0])}
                           title="ดูและพิมพ์เอกสารตรวจรับส่งมอบงาน (PDF)"
                         >
                           <Printer size={13} /> ใบตรวจรับ (PDF)
-                        </button>
+                        </Button>
                         {!demo && ['admin', 'field_technician'].includes(String(role)) && (
-                          <button
+                          <Button
                             type="button"
-                            className="secondary-button"
-                            style={{ minHeight: '32px', padding: '5px 10px', fontSize: '12px', color: '#15803d', borderColor: '#bbf7d0', background: '#f0fdf4' }}
+                            variant="secondary"
+                            size="sm"
                             onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: branch.province })}
                           >
                             + พบ Scanner นอกทะเบียน
-                          </button>
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -1334,31 +1329,32 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
             <section className="branch-mobile-group" key={'mobile-branch-' + branch.key}>
               <div className="branch-mobile-heading">
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <div className="flex flex-wrap items-center gap-2">
                     <strong>{branch.name}</strong>
                     <span className="branch-province-tag">📍 {branch.province}</span>
                   </div>
                   <small>LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small>
                   {branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                  <button
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Button
                     type="button"
-                    className="secondary-button"
-                    style={{ padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    variant="outline"
+                    size="sm"
                     onClick={() => onOpenHandover?.(branch.rows[0])}
                     title="ดูและพิมพ์เอกสารตรวจรับส่งมอบงาน (PDF)"
                   >
                     <Printer size={12} /> ใบตรวจรับ (PDF)
-                  </button>
+                  </Button>
                   {!demo && ['admin', 'field_technician'].includes(String(role)) && (
-                    <button
+                    <Button
                       type="button"
-                      className="text-button"
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: branch.province })}
                     >
-                      พบ Scanner นอกทะเบียน
-                    </button>
+                      + พบ Scanner นอกทะเบียน
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1442,17 +1438,17 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
       <div className="handover-modal-content" onClick={e => e.stopPropagation()}>
         <div className="handover-modal-bar">
           <strong>เอกสารตรวจรับส่งมอบงาน (Handover Certificate)</strong>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button type="button" className="primary-button" onClick={() => window.print()}>
+          <div className="flex gap-2">
+            <Button type="button" onClick={() => window.print()}>
               <Printer size={15} /> พิมพ์ / บันทึก PDF
-            </button>
-            <button type="button" className="secondary-button" onClick={onClose}>
+            </Button>
+            <Button type="button" variant="outline" onClick={onClose}>
               <X size={15} /> ปิด
-            </button>
+            </Button>
           </div>
         </div>
         {loading ? (
-          <div style={{ padding: '40px', textAlign: 'center' }}>กำลังโหลดเอกสาร…</div>
+          <div className="p-10 text-center text-sm text-slate-500">กำลังโหลดเอกสาร…</div>
         ) : (
           <div className="handover-sheet">
             <div className="handover-header">
@@ -1461,7 +1457,7 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
                 <p>AIS Branch Scanner Replacement Project</p>
                 <p>คู่สัญญา: AIS — บมจ. จีเอเบิล (G-Able) — บริษัท สยามมัลติมีเดีย จำกัด (SYM)</p>
               </div>
-              <div style={{ textAlign: 'right', fontSize: '12px', color: '#64748b' }}>
+              <div className="text-right text-xs text-slate-500">
                 <div>วันที่พิมพ์: {new Date().toLocaleDateString('th-TH')}</div>
                 <div>สถานะ: ส่งมอบเสร็จสมบูรณ์ (Delivered)</div>
               </div>
@@ -1476,11 +1472,11 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
               <div><strong>เบอร์โทรติดต่อ:</strong> {detail?.branch?.phone || branch.phone || '—'}</div>
             </div>
 
-            <h3 style={{ fontSize: '14px', margin: '0 0 10px' }}>รายการอุปกรณ์ที่ดำเนินการเปลี่ยน</h3>
+            <h3 className="m-0 mb-2.5 text-sm font-bold">รายการอุปกรณ์ที่ดำเนินการเปลี่ยน</h3>
             <table className="handover-table">
               <thead>
                 <tr>
-                  <th style={{ width: '40px', textAlign: 'center' }}>ลำดับ</th>
+                  <th className="w-12 text-center">ลำดับ</th>
                   <th>Serial เดิม</th>
                   <th>Serial ใหม่</th>
                   <th>ยี่ห้อ / รุ่น</th>
@@ -1491,7 +1487,7 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
               <tbody>
                 {scannersList.map((sc, index) => (
                   <tr key={sc.scanner_id || sc.id || index}>
-                    <td style={{ textAlign: 'center' }}>{index + 1}</td>
+                    <td className="text-center">{index + 1}</td>
                     <td>{sc.com_sn || sc.serial || '—'}</td>
                     <td><strong>{sc.new_serial_number || sc.new_serial || '—'}</strong></td>
                     <td>{sc.brand || ''} {sc.model_name || sc.model || ''}</td>
@@ -1509,16 +1505,16 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
                     <img
                       src={`/api/evidence/tasks/${firstCompletedTask.task_id}/technician_signature.jpg`}
                       alt="ลายเซ็นช่าง"
-                      style={{ maxHeight: '55px', maxWidth: '100%', objectFit: 'contain' }}
+                      className="max-h-[55px] max-w-full object-contain"
                       onError={e => { (e.currentTarget as HTMLElement).style.display = 'none' }}
                     />
                   ) : null}
-                  <span style={{ color: '#059669', fontWeight: 600, fontSize: '11px' }}>✓ ลงนามผ่านระบบ</span>
+                  <span className="text-[11px] font-semibold text-emerald-600">✓ ลงนามผ่านระบบ</span>
                 </div>
                 <strong>ผู้ปฏิบัติงานหน้างาน (Onsite Technician)</strong>
                 <div>บริษัท สยามมัลติมีเดีย จำกัด (SYM)</div>
                 {firstCompletedTask?.closeout_submitted_at && (
-                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px' }}>
+                  <div className="mt-1 text-[10px] text-slate-500">
                     {new Date(firstCompletedTask.closeout_submitted_at).toLocaleDateString('th-TH')}
                   </div>
                 )}
@@ -1530,16 +1526,16 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
                     <img
                       src={`/api/evidence/tasks/${firstCompletedTask.task_id}/scanner_user_signature.jpg`}
                       alt="ลายเซ็นผู้รับมอบประจำสาขา"
-                      style={{ maxHeight: '55px', maxWidth: '100%', objectFit: 'contain' }}
+                      className="max-h-[55px] max-w-full object-contain"
                       onError={e => { (e.currentTarget as HTMLElement).style.display = 'none' }}
                     />
                   ) : null}
-                  <span style={{ color: '#059669', fontWeight: 600, fontSize: '11px' }}>✓ ลงนามรับทราบประจำสาขา</span>
+                  <span className="text-[11px] font-semibold text-emerald-600">✓ ลงนามรับทราบประจำสาขา</span>
                 </div>
                 <strong>ผู้รับมอบประจำสาขา AIS</strong>
                 <div>ผู้รับมอบเครื่องประจำสาขา</div>
                 {firstCompletedTask?.closeout_submitted_at && (
-                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px' }}>
+                  <div className="mt-1 text-[10px] text-slate-500">
                     {new Date(firstCompletedTask.closeout_submitted_at).toLocaleDateString('th-TH')}
                   </div>
                 )}
@@ -1547,15 +1543,15 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
 
               <div className="handover-sig-box">
                 <div className="handover-sig-line">
-                  <span style={{ color: '#059669', fontWeight: 600, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
-                    <ShieldCheck size={22} color="#15803d" />
-                    <span style={{ fontSize: '11px' }}>✓ ตรวจรับมอบงาน (Batch Accepted)</span>
+                  <span className="flex flex-col items-center gap-1 font-semibold text-emerald-600">
+                    <ShieldCheck size={22} className="text-emerald-700" />
+                    <span className="text-[11px]">✓ ตรวจรับมอบงาน (Batch Accepted)</span>
                   </span>
                 </div>
                 <strong>ผู้ตรวจรับมอบงาน (Customer Reviewer)</strong>
                 <div>บมจ. จีเอเบิล (G-Able)</div>
                 {firstCompletedTask?.customer_accepted_at && (
-                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '4px' }}>
+                  <div className="mt-1 text-[10px] text-slate-500">
                     {new Date(firstCompletedTask.customer_accepted_at).toLocaleDateString('th-TH')}
                   </div>
                 )}
@@ -1829,7 +1825,7 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
         </form>
 
         {actionError && !batchBranch && !rejectingTask && !selectedAdminTask && !viewingEvidenceTask && (
-          <div className="form-error" role="alert" style={{ marginBottom: '12px' }}>
+          <div className="form-error mb-3" role="alert">
             {actionError}
           </div>
         )}
@@ -1852,31 +1848,30 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                         <h3>{group.name}</h3>
                         <p>LocationCode: {group.code} · จังหวัด: {group.province} · {group.tasks.length} เครื่อง</p>
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <div className="flex flex-wrap items-center gap-2">
                         {group.isOverdue && (
                           <span className="overdue-sla-badge">
                             <AlertTriangle size={12} /> เกินกำหนด SLA 2 วันทำการ
                           </span>
                         )}
-                        <button
+                        <Button
                           type="button"
-                          className="secondary-button"
-                          style={{ padding: '6px 12px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                          variant="outline"
+                          size="sm"
                           onClick={() => onOpenHandover?.(group)}
                           title="ดูและพิมพ์เอกสารตรวจรับส่งมอบงานประจำสาขานี้ (PDF)"
                         >
                           <Printer size={13} /> ใบตรวจรับ (PDF)
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                           type="button"
-                          className="primary-button"
                           onClick={() => handleOpenBatchAccept(group)}
                         >
                           <ShieldCheck size={15} />{' '}
                           {selectedInGroupCount > 0 && selectedInGroupCount < group.tasks.length
                             ? `ตรวจรับที่เลือก (${selectedInGroupCount} เครื่อง)`
                             : `ตรวจรับทั้งสาขา (${group.tasks.length} เครื่อง)`}
-                        </button>
+                        </Button>
                       </div>
                     </div>
 
@@ -1887,43 +1882,44 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
 
                         return (
                           <div className="branch-review-scanner-item" key={taskId}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                            <label className="flex cursor-pointer items-center gap-2.5">
                               <input
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => handleToggleSelectTask(taskId)}
+                                className="size-4 accent-emerald-600"
                               />
                               <div className="branch-review-scanner-info">
                                 <strong>SN เดิม: {String(task.com_sn || task.serial || '—')} → SN ใหม่: {String(task.new_serial_number || '—')}</strong>
                                 <span>รุ่น: {String(task.model_name || task.model || 'Scanner')} · ผล: {String(task.outcome || 'replaced')}</span>
                               </div>
                             </label>
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                              <button
+                            <div className="flex flex-wrap gap-2">
+                              <Button
                                 type="button"
-                                className="secondary-button"
-                                style={{ minHeight: '34px', padding: '6px 12px', fontSize: '12.5px' }}
+                                variant="outline"
+                                size="sm"
                                 onClick={() => handleOpenEvidence(task)}
                               >
                                 ดูรูปหลักฐาน
-                              </button>
-                              <button
+                              </Button>
+                              <Button
                                 type="button"
-                                className="primary-button"
-                                style={{ minHeight: '34px', padding: '6px 12px', fontSize: '12.5px' }}
+                                size="sm"
                                 onClick={() => handleOpenBatchAccept(group, taskId)}
                                 title="ตรวจรับเฉพาะเครื่องนี้ (1 เครื่อง)"
                               >
                                 <ShieldCheck size={14} /> ตรวจรับเครื่องนี้
-                              </button>
-                              <button
+                              </Button>
+                              <Button
                                 type="button"
-                                className="secondary-button"
-                                style={{ minHeight: '34px', padding: '6px 12px', fontSize: '12.5px', color: '#dc2626', borderColor: '#fecaca', background: '#fff5f5' }}
+                                variant="outline"
+                                size="sm"
+                                className="border-red-200 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800"
                                 onClick={() => setRejectingTask(task)}
                               >
                                 ปฏิเสธ
-                              </button>
+                              </Button>
                             </div>
                           </div>
                         )
@@ -1979,7 +1975,7 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
       {/* Modal: Batch / Single Acceptance by Gable */}
       {batchBranch && (
         <div className="handover-modal-backdrop" onClick={() => { setBatchBranch(null); setActionError('') }}>
-          <div className="handover-modal-content" style={{ maxWidth: '600px' }} onClick={e => e.stopPropagation()}>
+          <div className="handover-modal-content max-w-[600px]" onClick={e => e.stopPropagation()}>
             <div className="handover-modal-bar">
               <strong>
                 {selectedTaskIds.length === 1
@@ -1990,26 +1986,26 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                 <X size={16} />
               </button>
             </div>
-            <div style={{ padding: '20px' }}>
+            <div className="p-5">
               {actionError && (
-                <div className="form-error" role="alert" style={{ marginBottom: '14px' }}>
+                <div className="form-error mb-3.5" role="alert">
                   {actionError}
                 </div>
               )}
-              <div style={{ marginBottom: '16px' }}>
-                <h3 style={{ margin: '0 0 4px', fontSize: '16px' }}>{batchBranch.name}</h3>
-                <p style={{ margin: 0, fontSize: '13px', color: '#64748b' }}>
+              <div className="mb-4">
+                <h3 className="m-0 mb-1 text-base font-bold text-slate-900">{batchBranch.name}</h3>
+                <p className="m-0 text-[13px] text-slate-500">
                   LocationCode: {batchBranch.code} · {selectedTaskIds.length === 1 ? 'ตรวจรับเฉพาะเครื่องนี้ (1 เครื่อง)' : `กำลังตรวจรับจำนวน ${selectedTaskIds.length} เครื่อง`}
                 </p>
               </div>
 
-              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '6px', marginBottom: '14px', fontSize: '12px', lineHeight: 1.5 }}>
+              <div className="mb-3.5 rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">
                 {selectedTaskIds.length === 1
                   ? 'ข้าพเจ้าในฐานะตัวแทน บมจ. จีเอเบิล (G-Able) ได้ตรวจสอบผลงานและหลักฐานของเครื่องนี้แล้ว ขอลงนามตรวจรับมอบงานเข้าสู่สถานะส่งมอบสมบูรณ์ (Delivered)'
                   : 'ข้าพเจ้าในฐานะตัวแทน บมจ. จีเอเบิล (G-Able) ได้ตรวจสอบผลงานและหลักฐานการเปลี่ยนเครื่องสแกนเนอร์ของสาขานี้แล้ว ขอลงนามตรวจรับมอบงานเข้าสู่สถานะส่งมอบสมบูรณ์ (Delivered)'}
               </div>
 
-              <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', marginBottom: '14px', fontSize: '13px' }}>
+              <label className="mb-3.5 flex cursor-pointer items-start gap-2 text-[13px] text-slate-700">
                 <input
                   type="checkbox"
                   checked={batchConsent}
@@ -2021,12 +2017,13 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                     }
                   }}
                   disabled={submitting}
+                  className="mt-0.5 size-4 accent-emerald-600"
                 />
                 <span>ผู้ตรวจรับมอบยืนยันว่าได้ตรวจสอบหลักฐานและยินยอมให้บันทึกลายเซ็นนี้เป็นหลักฐานตรวจรับงาน</span>
               </label>
 
-              <div style={{ marginBottom: '12px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+              <div className="mb-3">
+                <span className="mb-1.5 block text-[13px] font-semibold text-slate-800">
                   ลายเซ็นผู้ตรวจรับมอบงาน (Gable Representative)
                 </span>
                 <SignaturePad
@@ -2035,21 +2032,21 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                   label="ช่องลายเซ็นผู้ตรวจรับมอบงาน"
                   placeholder={!batchConsent ? 'โปรดกดยืนยันข้อความด้านบนก่อนลงลายเซ็น' : undefined}
                 />
-                <div style={{ marginTop: '6px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <button type="button" className="text-button" onClick={() => sigPadRef.current?.clear()} disabled={!batchConsent || submitting}>
+                <div className="mt-1.5 flex items-center justify-between">
+                  <Button type="button" variant="link" size="sm" className="px-0 text-slate-600" onClick={() => sigPadRef.current?.clear()} disabled={!batchConsent || submitting}>
                     ล้างลายเซ็น
-                  </button>
-                  {!batchConsent && <small style={{ color: '#94a3b8' }}>ติ๊กยืนยันเพื่อเปิดใช้งานช่องลายเซ็น</small>}
+                  </Button>
+                  {!batchConsent && <small className="text-xs text-slate-400">ติ๊กยืนยันเพื่อเปิดใช้งานช่องลายเซ็น</small>}
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '20px' }}>
-                <button type="button" className="secondary-button" onClick={() => setBatchBranch(null)} disabled={submitting}>
+              <div className="mt-5 flex justify-end gap-2.5">
+                <Button type="button" variant="outline" onClick={() => setBatchBranch(null)} disabled={submitting}>
                   ยกเลิก
-                </button>
-                <button type="button" className="primary-button" onClick={handleConfirmBatchAccept} disabled={submitting || !batchConsent || selectedTaskIds.length === 0}>
+                </Button>
+                <Button type="button" onClick={handleConfirmBatchAccept} disabled={submitting || !batchConsent || selectedTaskIds.length === 0}>
                   {submitting ? 'กำลังบันทึก…' : selectedTaskIds.length === 1 ? 'ยืนยันตรวจรับเครื่องนี้' : `ยืนยันตรวจรับทั้ง ${selectedTaskIds.length} เครื่อง`}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -2059,41 +2056,40 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
       {/* Modal: Rejection Reason */}
       {rejectingTask && (
         <div className="handover-modal-backdrop" onClick={() => { setRejectingTask(null); setActionError('') }}>
-          <div className="handover-modal-content" style={{ maxWidth: '500px' }} onClick={e => e.stopPropagation()}>
+          <div className="handover-modal-content max-w-[500px]" onClick={e => e.stopPropagation()}>
             <div className="handover-modal-bar">
               <strong>ระบุเหตุผลการปฏิเสธงาน (Reject)</strong>
               <button type="button" className="icon-button" onClick={() => { setRejectingTask(null); setActionError('') }}>
                 <X size={16} />
               </button>
             </div>
-            <div style={{ padding: '20px' }}>
+            <div className="p-5">
               {actionError && (
-                <div className="form-error" role="alert" style={{ marginBottom: '14px' }}>
+                <div className="form-error mb-3.5" role="alert">
                   {actionError}
                 </div>
               )}
-              <p style={{ margin: '0 0 10px', fontSize: '13px', color: '#475569' }}>
+              <p className="m-0 mb-2.5 text-[13px] text-slate-600">
                 ใบงานจะถูกส่งกลับไปให้ช่างแก้ไขหน้างานโดยตรง โปรดระบุข้อบกพร่องที่ต้องแก้ไข:
               </p>
-              <textarea
-                style={{ width: '100%', minHeight: '100px', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '10px', fontSize: '13px' }}
+              <Textarea
+                className="min-h-[100px]"
                 placeholder="เช่น ภาพถ่ายหมายเลข Serial ไม่ชัดเจน หรือไม่ได้เดินสายแบบไส้ไก่ตามมาตรฐาน"
                 value={rejectReason}
                 onChange={e => setRejectReason(e.target.value)}
               />
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <button type="button" className="secondary-button" onClick={() => setRejectingTask(null)} disabled={submitting}>
+              <div className="mt-4 flex justify-end gap-2.5">
+                <Button type="button" variant="outline" onClick={() => setRejectingTask(null)} disabled={submitting}>
                   ยกเลิก
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="primary-button"
-                  style={{ background: '#b91c1c' }}
+                  variant="destructive"
                   onClick={handleConfirmReject}
                   disabled={submitting || !rejectReason.trim()}
                 >
                   {submitting ? 'กำลังส่งกลับ…' : 'ยืนยันปฏิเสธและส่งกลับช่าง'}
-                </button>
+                </Button>
               </div>
             </div>
           </div>
@@ -2190,19 +2186,19 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                         {currentTask.admin_accepted_at ? (
                           <span className="review-pill-tag is-green">✓ SYM Admin ตรวจรับแล้ว</span>
                         ) : (
-                          <span className="review-pill-tag" style={{ background: '#fef3c7', color: '#b45309' }}>รอ SYM Admin ตรวจรับ</span>
+                          <span className="review-pill-tag bg-amber-100 text-amber-800">รอ SYM Admin ตรวจรับ</span>
                         )}
                       </div>
 
                       <div className="review-summary-grid">
                         <div className="review-metric-item">
                           <span className="metric-label">SN เครื่องเดิม</span>
-                          <strong className="metric-val mono">{String(currentTask.com_sn || currentTask.serial || '—')}</strong>
+                          <strong className="metric-val font-mono">{String(currentTask.com_sn || currentTask.serial || '—')}</strong>
                           <span className="metric-sub">รุ่น {String(currentTask.model_name || currentTask.scanner_model || 'Honeywell')}</span>
                         </div>
                         <div className="review-metric-item is-highlight">
                           <span className="metric-label">SN เครื่องใหม่</span>
-                          <strong className="metric-val mono">{String(currentTask.new_serial_number || '—')}</strong>
+                          <strong className="metric-val font-mono">{String(currentTask.new_serial_number || '—')}</strong>
                           <span className="metric-sub">ผล: {String(currentTask.outcome || 'replaced')}</span>
                         </div>
                         <div className="review-metric-item">
@@ -2212,7 +2208,7 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                         </div>
                         <div className="review-metric-item">
                           <span className="metric-label">การตรวจสอบ Stage 1 (SYM)</span>
-                          <strong className="metric-val" style={{ color: currentTask.admin_accepted_at ? '#15803d' : '#d97706' }}>
+                          <strong className={cn('metric-val', currentTask.admin_accepted_at ? 'text-emerald-700' : 'text-amber-600')}>
                             {currentTask.admin_accepted_at ? '✓ ผ่านการตรวจแล้ว' : 'รอ SYM พิจารณา'}
                           </strong>
                           <span className="metric-sub">{currentTask.admin_accepted_at ? `${String(currentTask.admin_accepted_by || 'Admin')} · ${formatDate(currentTask.admin_accepted_at)}` : 'รอคิว'}</span>
@@ -2220,15 +2216,15 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                       </div>
 
                       {Boolean(currentTask.notes) && (
-                        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: '8px', fontSize: '12px', color: '#475569', border: '1px solid #edf2f7' }}>
-                          <strong style={{ color: '#1e293b' }}>หมายเหตุจากหน้างาน:</strong> {String(currentTask.notes)}
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
+                          <strong className="text-slate-800">หมายเหตุจากหน้างาน:</strong> {String(currentTask.notes)}
                         </div>
                       )}
                     </div>
 
                     {/* Evidence Photo Sections */}
                     {evidenceLoading ? (
-                      <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>กำลังโหลดรูปภาพและลายเซ็น…</div>
+                      <div className="p-10 text-center text-sm text-slate-500">กำลังโหลดรูปภาพและลายเซ็น…</div>
                     ) : (
                       <div className="review-sections-list">
                         {EVIDENCE_GROUPS_DEF.map(group => {
@@ -2242,7 +2238,7 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                                   <span>{group.icon}</span>
                                   <span>{group.title}</span>
                                 </h4>
-                                <span className={`review-section-counter ${isComplete ? '' : 'is-incomplete'}`} style={!isComplete ? { background: '#fef3c7', color: '#b45309' } : undefined}>
+                                <span className={cn('review-section-counter', !isComplete && 'bg-amber-100 text-amber-800')}>
                                   แนบแล้ว {uploadedCount}/{group.slots.length}
                                 </span>
                               </div>
@@ -2269,7 +2265,7 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                                       {isUploaded ? (
                                         <span className="review-ready-pill">✓ แนบแล้ว</span>
                                       ) : (
-                                        <span className="review-ready-pill" style={{ background: '#f1f5f9', color: '#64748b', borderColor: '#e2e8f0' }}>ยังไม่มีรูป</span>
+                                        <span className="review-ready-pill border border-slate-200 bg-slate-100 text-slate-500">ยังไม่มีรูป</span>
                                       )}
 
                                       <div className="review-card-thumb">
@@ -2313,42 +2309,25 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                   {/* Lightbox Zoom Modal */}
                   {zoomedEvidenceIndex !== null && lightboxList[zoomedEvidenceIndex] && (
                     <div
-                      className="handover-modal-backdrop"
-                      style={{ zIndex: 10000, background: 'rgba(15, 23, 42, 0.92)', backdropFilter: 'blur(4px)' }}
+                      className="handover-modal-backdrop z-[10000] bg-slate-900/90 backdrop-blur-xs"
                       onClick={() => setZoomedEvidenceIndex(null)}
                     >
                       <div
-                        style={{
-                          position: 'relative',
-                          maxWidth: '94vw',
-                          maxHeight: '94vh',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
+                        className="relative flex max-h-[94vh] max-w-[94vw] flex-col items-center justify-center"
                         onClick={e => e.stopPropagation()}
                       >
-                        <div style={{
-                          color: '#ffffff',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          width: '100%',
-                          marginBottom: '12px',
-                          alignItems: 'center'
-                        }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <strong style={{ fontSize: '16px' }}>
+                        <div className="mb-3 flex w-full items-center justify-between text-white">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-base">
                               {lightboxList[zoomedEvidenceIndex].title}
                             </strong>
-                            <span style={{ fontSize: '12px', background: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '999px' }}>
+                            <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs">
                               {lightboxList[zoomedEvidenceIndex].groupTitle} · ภาพที่ {zoomedEvidenceIndex + 1} จาก {lightboxList.length}
                             </span>
                           </div>
                           <button
                             type="button"
-                            className="icon-button"
-                            style={{ color: '#ffffff', background: 'rgba(255,255,255,0.2)' }}
+                            className="icon-button bg-white/20 text-white hover:bg-white/30 hover:text-white"
                             onClick={() => setZoomedEvidenceIndex(null)}
                           >
                             <X size={18} />
@@ -2358,35 +2337,28 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                         <img
                           src={`/api/evidence/${lightboxList[zoomedEvidenceIndex].path}`}
                           alt={lightboxList[zoomedEvidenceIndex].title}
-                          style={{
-                            maxWidth: '100%',
-                            maxHeight: '78vh',
-                            borderRadius: '12px',
-                            objectFit: 'contain',
-                            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
-                            background: '#0f172a'
-                          }}
+                          className="max-h-[78vh] max-w-full rounded-xl bg-slate-900 object-contain shadow-2xl"
                         />
 
-                        <div style={{ display: 'flex', gap: '14px', marginTop: '14px' }}>
-                          <button
+                        <div className="mt-3.5 flex gap-3.5">
+                          <Button
                             type="button"
-                            className="secondary-button"
-                            style={{ color: '#ffffff', background: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)' }}
+                            variant="ghost"
+                            className="border border-white/25 bg-white/15 text-white hover:bg-white/25 hover:text-white"
                             disabled={zoomedEvidenceIndex === 0}
                             onClick={() => setZoomedEvidenceIndex(i => Math.max(0, (i || 0) - 1))}
                           >
                             <ChevronLeft size={16} /> ภาพก่อนหน้า
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="secondary-button"
-                            style={{ color: '#ffffff', background: 'rgba(255,255,255,0.15)', borderColor: 'rgba(255,255,255,0.25)' }}
+                            variant="ghost"
+                            className="border border-white/25 bg-white/15 text-white hover:bg-white/25 hover:text-white"
                             disabled={zoomedEvidenceIndex === lightboxList.length - 1}
                             onClick={() => setZoomedEvidenceIndex(i => Math.min(lightboxList.length - 1, (i || 0) + 1))}
                           >
                             ภาพถัดไป <ChevronRight size={16} />
-                          </button>
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -2394,10 +2366,10 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
 
                   {/* Modal Footer Actions */}
                   <div className="review-modal-actions">
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
+                    <div className="flex gap-2">
+                      <Button
                         type="button"
-                        className="secondary-button"
+                        variant="outline"
                         onClick={() => {
                           setViewingEvidenceTask(null)
                           setSelectedAdminTask(null)
@@ -2406,36 +2378,34 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                         }}
                       >
                         ปิดหน้าต่าง
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         type="button"
-                        className="secondary-button"
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                        variant="outline"
                         onClick={() => onOpenHandover?.(currentTask)}
                         title="ดูและพิมพ์เอกสารตรวจรับมอบงานประจำสาขานี้ (PDF)"
                       >
                         <Printer size={15} /> ใบตรวจรับ (PDF)
-                      </button>
+                      </Button>
                     </div>
 
-                    <div style={{ display: 'flex', gap: '10px' }}>
+                    <div className="flex flex-wrap gap-2.5">
                       {isCustomerReviewer ? (
                         <>
-                          <button
+                          <Button
                             type="button"
-                            className="secondary-button"
-                            style={{ color: '#b91c1c', borderColor: '#fca5a5' }}
+                            variant="outline"
+                            className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
                             onClick={() => {
                               setRejectingTask(currentTask)
                               setViewingEvidenceTask(null)
                             }}
                           >
                             ปฏิเสธงานนี้ (Reject)
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="secondary-button"
-                            style={{ borderColor: '#15803d', color: '#15803d' }}
+                            variant="secondary"
                             onClick={() => {
                               const bId = String(currentTask.branch_id || '')
                               const group = branchGroups.find(g => g.id === bId)
@@ -2447,10 +2417,9 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                             }}
                           >
                             <ShieldCheck size={16} /> ตรวจรับเฉพาะเครื่องนี้
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="primary-button"
                             onClick={() => {
                               const bId = String(currentTask.branch_id || '')
                               const group = branchGroups.find(g => g.id === bId)
@@ -2461,29 +2430,28 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                             }}
                           >
                             <ShieldCheck size={16} /> ตรวจรับทั้งสาขา
-                          </button>
+                          </Button>
                         </>
                       ) : selectedAdminTask ? (
                         <>
-                          <button
+                          <Button
                             type="button"
-                            className="secondary-button"
-                            style={{ color: '#b91c1c', borderColor: '#fca5a5' }}
+                            variant="outline"
+                            className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
                             onClick={() => {
                               setRejectingTask(selectedAdminTask)
                               setSelectedAdminTask(null)
                             }}
                           >
                             ปฏิเสธ / ส่งกลับช่าง
-                          </button>
-                          <button
+                          </Button>
+                          <Button
                             type="button"
-                            className="primary-button"
                             disabled={submitting}
                             onClick={() => handleSymPass(selectedAdminTask)}
                           >
                             <CheckCircle2 size={16} /> ตรวจผ่าน (ส่งต่อ Gable)
-                          </button>
+                          </Button>
                         </>
                       ) : null}
                     </div>
@@ -2556,17 +2524,17 @@ function WorkOrders({ role, demo, onUpdated, view = 'all', onOpenHandover }: { r
         const serial = String(row.com_sn || row.serial || row.old_serial_snapshot || 'ไม่พบ Serial')
         return <article className="pending-review-row" key={id}>
           <div className="pending-review-main"><div className="pending-review-title"><strong>{String(row.branch_name || 'สาขาไม่ระบุ')} · SN {serial}</strong><StatusPill label={status.label} tone={status.tone} /></div><span>{String(row.scanner_model || 'Scanner')} · จังหวัด{String(row.province || 'ไม่ระบุ')} · LocationCode {String(row.location_code || '—')}</span><small>ใบงาน {String(row.work_order_code || '—')} · {row.performed_by_name ? `ผู้ปฏิบัติงาน ${String(row.performed_by_name)}` : 'ยังไม่มีผู้ส่งผล'} · {row.performed_at ? formatDate(row.performed_at) : formatDate(row.created_at)}</small></div>
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-            <button
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
               type="button"
-              className="secondary-button"
-              style={{ padding: '5px 10px', fontSize: '12px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              variant="outline"
+              size="sm"
               onClick={() => onOpenHandover?.(row)}
               title="ดูและพิมพ์ใบตรวจรับมอบงานประจำสาขานี้ (PDF)"
             >
               <Printer size={13} /> ใบตรวจรับ
-            </button>
-            <button type="button" className="secondary-button" onClick={() => { if (!demo) setSelectedTask(row) }} disabled={demo}>เปิดรายละเอียด <ArrowRight size={14} /></button>
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => { if (!demo) setSelectedTask(row) }} disabled={demo}>เปิดรายละเอียด <ArrowRight size={14} /></Button>
           </div>
         </article>
       })}</div> : <EmptyState compact title={completedView ? 'ยังไม่มีใบงานที่เสร็จแล้ว' : 'ยังไม่มีใบงาน'} detail={query ? 'ไม่พบใบงานที่ตรงกับคำค้นหา' : completedView ? 'งานจะแสดงที่นี่เมื่อส่งมอบแล้วหรือ Admin ปิดผลเรียบร้อย' : 'ใบงานที่เปิดแล้วจะแสดงที่นี่'} />}
@@ -2775,15 +2743,16 @@ function AssetDetailDialog({ asset, role, demo, onClose, onUpdated, onOpenHandov
       <div className="detail-readonly-note">
         <ShieldCheck size={16} />
         <span>แสดงข้อมูลทะเบียน ประวัติ รูปภาพ และลายเซ็นของ Scanner เครื่องนี้</span>
-        <button
+        <Button
           type="button"
-          className="secondary-button"
-          style={{ marginLeft: 'auto', padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+          variant="outline"
+          size="sm"
+          className="ml-auto h-7 gap-1 px-2 text-[11px]"
           onClick={() => onOpenHandover?.(asset)}
           title="ดูและพิมพ์ใบตรวจรับมอบงานประจำสาขานี้ (PDF)"
         >
           <Printer size={12} /> ใบตรวจรับ (PDF)
-        </button>
+        </Button>
       </div>
     </section>
     {selectedWorkTask && <WorkOrderDetailDialog task={selectedWorkTask} role={role} demo={demo} onClose={() => { setSelectedWorkTask(null); setHistoryRetry(value => value + 1) }} onUpdated={action => { setHistoryRetry(value => value + 1); onUpdated(action) }} onOpenHandover={onOpenHandover} />}
@@ -2989,38 +2958,35 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
       <div className="work-order-layout">
         <div className="work-order-main">
           <section className="detail-section"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
-          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}><span>SN เครื่องใหม่ *</span><button type="button" className="secondary-button" style={{ padding: '2px 8px', fontSize: '12px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' }} onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</button></div><input aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
+          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div><Input aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
           <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} /><DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} /><DetailField label="รุ่นเครื่องที่พบ" value={task.observed_model} /><DetailField label="ผลการติดตั้งและทดสอบ" value={installResult || 'ยังไม่มีข้อมูล'} /><DetailField label="สถานะเครื่องเดิม" value={recordedOldStatus ? oldStatusLabels[String(recordedOldStatus)] || String(recordedOldStatus) : 'ยังไม่มีข้อมูล'} /><DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || 'ยังไม่มีข้อมูล'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
           {reviews.length > 0 && (
             <section className="detail-section">
               <h3>ประวัติการตรวจรับ (Governance Audit Trail)</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div className="flex flex-col gap-2">
                 {reviews.map(rev => {
                   const isSym = rev.stage === 'sym'
                   const isPass = rev.decision === 'pass'
                   return (
                     <div
                       key={rev.id}
-                      style={{
-                        padding: '10px 14px',
-                        borderRadius: '6px',
-                        border: '1px solid #e2e8f0',
-                        background: isPass ? '#f0fdf4' : '#fef2f2',
-                        fontSize: '13px'
-                      }}
+                      className={cn(
+                        'rounded-lg border px-3.5 py-2.5 text-[13px]',
+                        isPass ? 'border-emerald-200 bg-emerald-50' : 'border-red-200 bg-red-50',
+                      )}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <div className="mb-1 flex items-center justify-between gap-2">
                         <strong>{isSym ? 'ด่านที่ 1: SYM Admin ตรวจรับงาน' : 'ด่านที่ 2: Gable Customer ตรวจรับมอบ'}</strong>
-                        <span style={{ fontSize: '11px', fontWeight: 600, color: isPass ? '#15803d' : '#b91c1c' }}>
+                        <Badge variant={isPass ? 'done' : 'destructive'}>
                           {isPass ? '✔ ผ่านการตรวจรับ' : '✖ ปฏิเสธงาน / ส่งกลับช่าง'}
-                        </span>
+                        </Badge>
                       </div>
-                      <div style={{ fontSize: '12px', color: '#64748b' }}>
+                      <div className="text-xs text-slate-500">
                         ผู้ตรวจ: {rev.reviewer_email} · เมื่อ {formatDate(rev.created_at)}
                       </div>
                       {rev.reason && (
-                        <div style={{ marginTop: '6px', fontSize: '12px', color: '#b91c1c' }}>
+                        <div className="mt-1.5 text-xs text-red-700">
                           <strong>เหตุผล:</strong> {rev.reason}
                         </div>
                       )}
@@ -3058,17 +3024,17 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
           {canResolvePending && <section className="detail-section task-action-panel"><h3>{outcome === 'replaced' ? 'ตรวจรับและส่งมอบงาน' : 'พิจารณารายการ Pending'}</h3><p>ตรวจรูปและข้อมูลที่ช่างบันทึก แล้วลงลายเซ็นตรวจรับด้วยบัญชี Admin อีกบัญชีหนึ่ง สำหรับเครื่องอื่น ระบบจะเพิ่ม SN ได้เมื่อยืนยันแล้วว่าไม่ซ้ำกับทะเบียนทุกสาขา หากต้องกลับไปทำงานหน้างาน ให้ยกเลิกรายการนี้พร้อมเหตุผลแล้วเปิดใบงานใหม่</p>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<button type="button" className="primary-button task-action-submit" disabled={busy || evidenceBusy || !requiredEvidenceReady} onClick={() => void resolvePending()}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : outcome === 'replaced' ? 'ลงนามรับผ่านและส่งมอบงาน' : 'บันทึกผลตรวจ Pending'}</button></section>}
           {canManage && !['completed', 'cancelled'].includes(status) && <section className="detail-section task-action-panel"><h3>การจัดการรายการ Scanner</h3>{showCancelForm ? <form className="task-action-form" onSubmit={event => void submitCancel(event)}><label>เหตุผลที่ยกเลิก<textarea value={cancelReason} onChange={event => setCancelReason(event.target.value)} maxLength={500} rows={3} required /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(false); setCancelReason(''); setActionError('') }}>กลับ</button><button type="submit" className="primary-button" disabled={busy || !cancelReason.trim()}>{busy ? 'กำลังบันทึก…' : 'ยืนยันยกเลิกรายการนี้'}</button></div></form> : <><p>Admin ยกเลิกรายการเครื่องนี้แยกจากเครื่องอื่นในใบงานได้ โดยระบุเหตุผลและระบบจะเก็บประวัติไว้</p><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(true); setActionError('') }}>ยกเลิกรายการเครื่องนี้</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</>}</section>}
           {['delivered', 'exception_resolved', 'legacy_completed', 'cancelled'].includes(stage) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="flex flex-col gap-2">
               <div className="detail-readonly-note"><ShieldCheck size={16} /><span>{stage === 'delivered' ? 'รายการนี้ Completed แล้ว และทะเบียนอัปเดตตามผลเปลี่ยนเครื่อง' : stage === 'exception_resolved' ? 'Admin พิจารณา Pending แล้ว รายการนี้ปิดโดยคง SN เดิมไว้' : 'รายการนี้ปิดแล้วและแก้ไขไม่ได้'}</span></div>
-              <button
+              <Button
                 type="button"
-                className="secondary-button"
-                style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '8px' }}
+                variant="outline"
+                className="w-full"
                 onClick={() => onOpenHandover?.(task)}
                 title="ดูและพิมพ์เอกสารตรวจรับส่งมอบงาน (PDF)"
               >
                 <Printer size={15} /> พิมพ์ใบตรวจรับส่งมอบงาน (PDF)
-              </button>
+              </Button>
             </div>
           )}
           {!demo && !['field_technician', 'admin'].includes(String(role)) && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>บัญชีปัจจุบันดูข้อมูลได้อย่างเดียว</span></div>}
@@ -3391,15 +3357,15 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
         ) : error ? (
           <EmptyState compact title="โหลดรายชื่อไม่สำเร็จ" detail={error} onRetry={() => setReload(r => r + 1)} />
         ) : (
-          <div className="allowlist-table-wrapper" style={{ overflowX: 'auto', marginBottom: '24px' }}>
-            <table className="summary-table" style={{ width: '100%', fontSize: '13px' }}>
+          <div className="mb-6 overflow-x-auto">
+            <table className="summary-table w-full text-[13px]">
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'left' }}>อีเมล (Google Account)</th>
-                  <th style={{ textAlign: 'left' }}>ชื่อ-นามสกุล</th>
-                  <th style={{ textAlign: 'left' }}>บทบาท (Role)</th>
-                  <th style={{ textAlign: 'center' }}>สถานะ</th>
-                  {isAdmin && <th style={{ textAlign: 'right' }}>การจัดการ</th>}
+                  <th className="text-left">อีเมล (Google Account)</th>
+                  <th className="text-left">ชื่อ-นามสกุล</th>
+                  <th className="text-left">บทบาท (Role)</th>
+                  <th className="text-center">สถานะ</th>
+                  {isAdmin && <th className="text-right">การจัดการ</th>}
                 </tr>
               </thead>
               <tbody>
@@ -3407,39 +3373,35 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
                   const rolePres = roleLabels[u.role] || { label: u.role, tone: 'neutral' }
                   const isCurrent = u.email === currentEmail
                   return (
-                    <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.6 }}>
+                    <tr key={u.id} className={u.is_active ? 'opacity-100' : 'opacity-60'}>
                       <td>
                         <strong>{u.email}</strong>
-                        {isCurrent && <span style={{ marginLeft: '6px', fontSize: '11px', color: '#16a34a' }}>(คุณ)</span>}
+                        {isCurrent && <span className="ml-1.5 text-[11px] font-semibold text-emerald-600">(คุณ)</span>}
                       </td>
                       <td>{u.full_name || '—'}</td>
                       <td>
                         <StatusPill label={rolePres.label} tone={rolePres.tone} />
                       </td>
-                      <td style={{ textAlign: 'center' }}>
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '2px 8px',
-                          borderRadius: '12px',
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          background: u.is_active ? '#dcfce7' : '#f1f5f9',
-                          color: u.is_active ? '#15803d' : '#64748b'
-                        }}>
+                      <td className="text-center">
+                        <Badge variant={u.is_active ? 'done' : 'neutral'}>
                           {u.is_active ? 'เปิดใช้งาน' : 'ระงับชั่วคราว'}
-                        </span>
+                        </Badge>
                       </td>
                       {isAdmin && (
-                        <td style={{ textAlign: 'right' }}>
-                          <button
+                        <td className="text-right">
+                          <Button
                             type="button"
-                            className="text-button"
-                            style={{ fontSize: '12px', color: isCurrent ? '#94a3b8' : u.is_active ? '#b91c1c' : '#16a34a' }}
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                              'text-xs font-semibold',
+                              isCurrent ? 'text-slate-400' : u.is_active ? 'text-red-700 hover:bg-red-50 hover:text-red-800' : 'text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800',
+                            )}
                             disabled={isCurrent}
                             onClick={() => handleToggleActive(u)}
                           >
                             {u.is_active ? 'ระงับสิทธิ์' : 'เปิดสิทธิ์'}
-                          </button>
+                          </Button>
                         </td>
                       )}
                     </tr>
@@ -3452,38 +3414,36 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
 
         {/* ฟอร์มเพิ่มผู้ใช้งาน (สำหรับ Admin) */}
         {isAdmin && (
-          <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '16px' }}>
-            <h3 style={{ margin: '0 0 12px', fontSize: '14px' }}>เพิ่มผู้ใช้งานใหม่เข้า Allowlist</h3>
-            {formError && <div className="form-error" role="alert" style={{ marginBottom: '12px' }}>{formError}</div>}
-            {formSuccess && <div style={{ color: '#16a34a', fontSize: '13px', marginBottom: '12px', background: '#dcfce7', padding: '8px 12px', borderRadius: '6px' }}>{formSuccess}</div>}
-            <form onSubmit={handleAddUser} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', alignItems: 'end' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', gap: '4px' }}>
+          <Card className="mt-4 bg-slate-50 p-4 shadow-none">
+            <h3 className="m-0 mb-3 text-sm font-bold text-slate-900">เพิ่มผู้ใช้งานใหม่เข้า Allowlist</h3>
+            {formError && <div className="form-error mb-3" role="alert">{formError}</div>}
+            {formSuccess && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] font-medium text-emerald-700">{formSuccess}</div>}
+            <form onSubmit={handleAddUser} className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] items-end gap-3">
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
                 อีเมล Google (@sym.co.th / @gmail.com)
-                <input
+                <Input
                   type="email"
                   required
                   placeholder="technician@sym.co.th"
                   value={newEmail}
                   onChange={e => setNewEmail(e.target.value)}
-                  style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 />
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', gap: '4px' }}>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
                 ชื่อ-นามสกุล (ไม่บังคับ)
-                <input
+                <Input
                   type="text"
                   placeholder="สมชาย ใจดี"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
-                  style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
                 />
               </label>
-              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '12px', gap: '4px' }}>
+              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
                 บทบาท (Role)
                 <select
                   value={newRole}
                   onChange={e => setNewRole(e.target.value)}
-                  style={{ padding: '8px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '13px' }}
+                  className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-[13px] text-slate-900 focus:border-emerald-600 focus:outline-none"
                 >
                   <option value="field_technician">ช่าง Onsite (Field Technician)</option>
                   <option value="admin">Admin ประจำ Office</option>
@@ -3491,16 +3451,15 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
                   <option value="viewer">Viewer (ดูได้อย่างเดียว)</option>
                 </select>
               </label>
-              <button
+              <Button
                 type="submit"
-                className="primary-button"
                 disabled={submitting}
-                style={{ height: '36px' }}
+                className="h-10"
               >
                 {submitting ? 'กำลังบันทึก…' : 'เพิ่มผู้ใช้งาน'}
-              </button>
+              </Button>
             </form>
-          </div>
+          </Card>
         )}
       </section>
     </div>

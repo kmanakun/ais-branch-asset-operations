@@ -3,6 +3,10 @@ import { Check, ChevronLeft, ChevronRight, Plus, ScanBarcode, X } from 'lucide-r
 import { d1Api } from './d1-client'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 
 export type BranchReference = { id: unknown; name: unknown; code: unknown; province: unknown }
 type DiscoveryReport = Record<string, unknown>
@@ -110,26 +114,27 @@ export function ScannerDiscoveryDialog({ branch, onClose, onReported }: { branch
       <div className="detail-section scanner-discovery-branch"><strong>{String(branch.name || 'สาขา')}</strong><span>LocationCode {String(branch.code || '—')} · {String(branch.province || 'ไม่ระบุจังหวัด')}</span></div>
       <form className="scanner-discovery-form" onSubmit={submit}>
         <label>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="flex items-center justify-between gap-2">
             <span>Serial Number ที่พบ *</span>
-            <button
+            <Button
               type="button"
-              className="secondary-button"
-              style={{ padding: '2px 8px', fontSize: '12px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+              variant="outline"
+              size="sm"
+              className="h-7 px-2.5 text-xs"
               onClick={() => setShowScanner(true)}
             >
               <ScanBarcode size={13} /> สแกนบาร์โค้ด
-            </button>
+            </Button>
           </div>
-          <input value={serial} onChange={event => setSerial(event.target.value)} maxLength={100} required autoFocus autoComplete="off" placeholder="กรอกหรือกดปุ่มสแกนบาร์โค้ด" />
+          <Input value={serial} onChange={event => setSerial(event.target.value)} maxLength={100} required autoFocus autoComplete="off" placeholder="กรอกหรือกดปุ่มสแกนบาร์โค้ด" />
         </label>
-        <label>รุ่น (ถ้าทราบ)<input value={model} onChange={event => setModel(event.target.value)} maxLength={160} autoComplete="off" placeholder="เช่น Honeywell 1900GSR หรือ Zebra DS2208" /></label>
-        <label>รายละเอียด/จุดที่พบ<textarea value={notes} onChange={event => setNotes(event.target.value)} maxLength={1000} rows={3} placeholder="เช่น พบเครื่องสำรองใช้งานอยู่ที่เคาน์เตอร์ 3" /></label>
-        <p style={{ background: '#f0fdf4', color: '#166534', padding: '8px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #bbf7d0', lineHeight: 1.5 }}>
+        <label>รุ่น (ถ้าทราบ)<Input value={model} onChange={event => setModel(event.target.value)} maxLength={160} autoComplete="off" placeholder="เช่น Honeywell 1900GSR หรือ Zebra DS2208" /></label>
+        <label>รายละเอียด/จุดที่พบ<Textarea value={notes} onChange={event => setNotes(event.target.value)} maxLength={1000} rows={3} placeholder="เช่น พบเครื่องสำรองใช้งานอยู่ที่เคาน์เตอร์ 3" /></label>
+        <p className="m-0 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-relaxed text-emerald-800">
           ✓ ระบบจะเพิ่มเครื่องเข้าทะเบียนของสาขานี้และเปิดใบงานให้ทันที ช่างสามารถเริ่มดำเนินการเปลี่ยนเครื่องได้เลยโดยไม่ต้องรอ Admin อนุมัติ
         </p>
         {error && <Alert>{error}</Alert>}
-        <footer><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>ยกเลิก</button><button className="primary-button" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'เพิ่มเครื่องและเริ่มงานทันที'}</button></footer>
+        <footer><Button type="button" variant="outline" disabled={busy} onClick={onClose}>ยกเลิก</Button><Button type="submit" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'เพิ่มเครื่องและเริ่มงานทันที'}</Button></footer>
       </form>
       <BarcodeScannerModal
         isOpen={showScanner}
@@ -208,9 +213,9 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
         const isApproved = report.status === 'approved'
         return <article className="scanner-discovery-report" key={id}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div className="flex items-center gap-2 flex-wrap">
               <strong>SN {String(report.serial_number || '—')}</strong>
-              {isApproved && <span style={{ fontSize: '11px', background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: '999px', fontWeight: 600 }}>✓ เพิ่มเข้าทะเบียนแล้ว</span>}
+              {isApproved && <Badge variant="done">✓ เพิ่มเข้าทะเบียนแล้ว</Badge>}
             </div>
             <span>{String(report.observed_model || 'ไม่ทราบรุ่น')}</span>
             <small>{String(report.branch_name || 'สาขา')} · {String(report.location_code || '—')} · {String(report.province || '—')}</small>
@@ -219,12 +224,12 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
           </div>
           <div className="scanner-discovery-actions">
             {isApproved ? (
-              <span style={{ fontSize: '12px', color: '#166534', fontWeight: 500 }}>ช่างเริ่มงานแล้ว (เปิดใบงานอัตโนมัติ)</span>
+              <span className="text-xs font-semibold text-emerald-800">ช่างเริ่มงานแล้ว (เปิดใบงานอัตโนมัติ)</span>
             ) : (
               <>
-                <input aria-label={`หมายเหตุ Admin สำหรับ SN ${String(report.serial_number || '')}`} placeholder="หมายเหตุ (ถ้ามี)" maxLength={1000} value={notesByReport[id] || ''} onChange={event => setNotesByReport(current => ({ ...current, [id]: event.target.value }))} />
-                <button type="button" className="secondary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'reject')}>{busyReport === id ? 'กำลังบันทึก…' : 'ปฏิเสธ'}</button>
-                <button type="button" className="primary-button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'approve')}>{busyReport === id ? 'กำลังบันทึก…' : <><Check size={15} /> ตรวจแล้วเพิ่มทะเบียน</>}</button>
+                <Input className="w-[210px] h-9.5" aria-label={`หมายเหตุ Admin สำหรับ SN ${String(report.serial_number || '')}`} placeholder="หมายเหตุ (ถ้ามี)" maxLength={1000} value={notesByReport[id] || ''} onChange={event => setNotesByReport(current => ({ ...current, [id]: event.target.value }))} />
+                <Button type="button" variant="outline" disabled={Boolean(busyReport)} onClick={() => void review(id, 'reject')}>{busyReport === id ? 'กำลังบันทึก…' : 'ปฏิเสธ'}</Button>
+                <Button type="button" disabled={Boolean(busyReport)} onClick={() => void review(id, 'approve')}>{busyReport === id ? 'กำลังบันทึก…' : <><Check size={15} /> ตรวจแล้วเพิ่มทะเบียน</>}</Button>
               </>
             )}
           </div>
