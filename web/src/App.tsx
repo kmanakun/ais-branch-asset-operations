@@ -1284,19 +1284,20 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
                         <button
                           type="button"
                           className="secondary-button"
-                          style={{ padding: '3px 8px', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                          style={{ minHeight: '32px', padding: '5px 10px', fontSize: '12px' }}
                           onClick={() => onOpenHandover?.(branch.rows[0])}
                           title="ดูและพิมพ์เอกสารตรวจรับส่งมอบงาน (PDF)"
                         >
-                          <Printer size={12} /> ใบตรวจรับ (PDF)
+                          <Printer size={13} /> ใบตรวจรับ (PDF)
                         </button>
                         {!demo && ['admin', 'field_technician'].includes(String(role)) && (
                           <button
                             type="button"
-                            className="text-button"
+                            className="secondary-button"
+                            style={{ minHeight: '32px', padding: '5px 10px', fontSize: '12px', color: '#15803d', borderColor: '#bbf7d0', background: '#f0fdf4' }}
                             onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: branch.province })}
                           >
-                            พบ Scanner นอกทะเบียน
+                            + พบ Scanner นอกทะเบียน
                           </button>
                         )}
                       </div>
@@ -1897,11 +1898,11 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                                 <span>รุ่น: {String(task.model_name || task.model || 'Scanner')} · ผล: {String(task.outcome || 'replaced')}</span>
                               </div>
                             </label>
-                            <div style={{ display: 'flex', gap: '6px' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                               <button
                                 type="button"
                                 className="secondary-button"
-                                style={{ padding: '4px 10px', fontSize: '12px' }}
+                                style={{ minHeight: '34px', padding: '6px 12px', fontSize: '12.5px' }}
                                 onClick={() => handleOpenEvidence(task)}
                               >
                                 ดูรูปหลักฐาน
@@ -1909,16 +1910,16 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                               <button
                                 type="button"
                                 className="primary-button"
-                                style={{ padding: '4px 10px', fontSize: '12px', background: '#15803d' }}
+                                style={{ minHeight: '34px', padding: '6px 12px', fontSize: '12.5px' }}
                                 onClick={() => handleOpenBatchAccept(group, taskId)}
                                 title="ตรวจรับเฉพาะเครื่องนี้ (1 เครื่อง)"
                               >
-                                <ShieldCheck size={13} /> ตรวจรับเครื่องนี้
+                                <ShieldCheck size={14} /> ตรวจรับเครื่องนี้
                               </button>
                               <button
                                 type="button"
                                 className="secondary-button"
-                                style={{ padding: '4px 10px', fontSize: '12px', color: '#b91c1c' }}
+                                style={{ minHeight: '34px', padding: '6px 12px', fontSize: '12.5px', color: '#dc2626', borderColor: '#fecaca', background: '#fff5f5' }}
                                 onClick={() => setRejectingTask(task)}
                               >
                                 ปฏิเสธ
