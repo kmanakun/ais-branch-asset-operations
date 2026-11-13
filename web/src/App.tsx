@@ -887,14 +887,20 @@ function App() {
           <button ref={mobileMenuTriggerRef} className="icon-button mobile-nav-toggle" aria-label="เปิดเมนูหลัก" aria-expanded={mobileMenuOpen} aria-controls="primary-navigation" onClick={() => setMobileMenuOpen(open => !open)}>
             <Menu size={18} />
           </button>
-          <div className="breadcrumb"><span>ระบบปฏิบัติการ</span><ChevronRight size={14} /><strong>{currentPage.title}</strong></div>
+          <div className="breadcrumb">
+            <span className="hidden sm:inline">ระบบปฏิบัติการ</span>
+            <ChevronRight size={14} className="hidden sm:inline shrink-0" />
+            <strong className="truncate">{currentPage.title}</strong>
+          </div>
           <div className="top-actions">
             {demoMode && <span className="demo-indicator"><span /> DEMO · ข้อมูลตัวอย่าง</span>}
             <button className="icon-button notification-button" aria-label="การแจ้งเตือน" onClick={() => setNotice('ยังไม่มีการแจ้งเตือนใหม่')}><Bell size={18} /><i /></button>
-            <div className="top-divider" />
+            <div className="top-divider hidden sm:block" />
             <div ref={accountMenuRef} className="account-menu-wrap">
               <button type="button" className="top-user" aria-haspopup="menu" aria-expanded={accountMenuOpen} aria-label={`เมนูบัญชี ${accountName}`} onClick={() => { setAccountMenuOpen(open => !open); setWorkspaceMenuOpen(false) }}>
-                <div className="avatar avatar-small">{(userContext?.display_name || 'ท').slice(0, 1)}</div><span>{accountName}</span><ChevronDown size={14} />
+                <div className="avatar avatar-small">{(userContext?.display_name || 'ท').slice(0, 1)}</div>
+                <span className="hidden max-w-[140px] truncate sm:inline">{accountName}</span>
+                <ChevronDown size={14} className="shrink-0" />
               </button>
               {accountMenuOpen && <div className="account-menu" role="menu" aria-label="เมนูบัญชี">
                 <div className="account-menu-identity"><strong>{accountName}</strong><span>{getFriendlyRole(role)}</span>{!demoMode && session?.user.email && <small>{session.user.email}</small>}</div>
@@ -1328,19 +1334,20 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
           {branchGroups.map(branch => (
             <section className="branch-mobile-group" key={'mobile-branch-' + branch.key}>
               <div className="branch-mobile-heading">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <strong>{branch.name}</strong>
+                <div className="branch-mobile-title-block">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <strong className="text-sm font-bold text-slate-900">{branch.name}</strong>
                     <span className="branch-province-tag">📍 {branch.province}</span>
+                    {branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}
                   </div>
-                  <small>LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small>
-                  {branch.addressNote && <span className="address-note-badge" title={branch.addressNote}>⚠️ ที่อยู่ต้องตรวจ</span>}
+                  <small className="block text-xs text-slate-500">LocationCode {branch.locationCode || '—'} · {branch.rows.length} เครื่อง</small>
                 </div>
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="branch-mobile-actions">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
+                    className="flex-1"
                     onClick={() => onOpenHandover?.(branch.rows[0])}
                     title="ดูและพิมพ์เอกสารตรวจรับส่งมอบงาน (PDF)"
                   >
@@ -1351,6 +1358,7 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
                       type="button"
                       variant="secondary"
                       size="sm"
+                      className="flex-1"
                       onClick={() => setReportBranch({ id: branch.rows[0]?.branch_id, name: branch.name, code: branch.locationCode, province: branch.province })}
                     >
                       + พบ Scanner นอกทะเบียน
@@ -1364,22 +1372,22 @@ function Assets({ role, demo, items, loading, error, onRetry, onTaskUpdated, sea
                 return (
                   <article className="mobile-record-card" key={rowKey}>
                     <div className="mobile-record-heading">
-                      <div>
-                        <strong>{String(row.serial || row.com_sn || 'Serial ไม่ระบุ')}</strong>
-                        <span>{String(row.model || row.model_name || row.hw_name || 'เครื่องสแกน')}</span>
+                      <div className="mobile-record-serial-group">
+                        <strong className="font-mono text-[13.5px] font-bold text-slate-900 break-all">{String(row.serial || row.com_sn || 'Serial ไม่ระบุ')}</strong>
+                        <span className="text-xs font-medium text-slate-500">{String(row.model || row.model_name || row.hw_name || 'เครื่องสแกน')}</span>
                       </div>
                       <StatusPill label={status.label} tone={status.tone} />
                     </div>
                     <div className="mobile-record-branch">
-                      {String(row.branch || row.branch_name || row.loc_bld || 'สาขาไม่ระบุ')}
-                      <small>LocationCode {String(row.code || row.location_code || '—')}</small>
+                      <span className="text-[13px] font-semibold text-slate-700">{String(row.branch || row.branch_name || row.loc_bld || 'สาขาไม่ระบุ')}</span>
+                      <small className="text-xs text-slate-500">LocationCode: {String(row.code || row.location_code || '—')}</small>
                     </div>
                     <div className="mobile-record-meta">
-                      <span>ปีข้อมูลเดิม<strong>{String(row.year || row.com_years || '—')}</strong></span>
+                      <span>ปีข้อมูลเดิม: <strong>{String(row.year || row.com_years || '—')}</strong></span>
                     </div>
-                    <button className="mobile-card-action" onClick={() => setSelectedAsset(row)}>
+                    <Button type="button" variant="secondary" className="w-full font-bold" onClick={() => setSelectedAsset(row)}>
                       รายละเอียด Scanner และเริ่มงาน
-                    </button>
+                    </Button>
                   </article>
                 )
               })}
@@ -1437,13 +1445,15 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
     <div className="handover-modal-backdrop" onClick={onClose}>
       <div className="handover-modal-content" onClick={e => e.stopPropagation()}>
         <div className="handover-modal-bar">
-          <strong>เอกสารตรวจรับส่งมอบงาน (Handover Certificate)</strong>
-          <div className="flex gap-2">
-            <Button type="button" onClick={() => window.print()}>
-              <Printer size={15} /> พิมพ์ / บันทึก PDF
+          <strong className="text-sm leading-snug sm:text-base">
+            เอกสารตรวจรับส่งมอบงาน <span className="hidden sm:inline">(Handover Certificate)</span>
+          </strong>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" size="sm" onClick={() => window.print()}>
+              <Printer size={14} /> พิมพ์ PDF
             </Button>
-            <Button type="button" variant="outline" onClick={onClose}>
-              <X size={15} /> ปิด
+            <Button type="button" variant="outline" size="sm" onClick={onClose}>
+              <X size={14} /> ปิด
             </Button>
           </div>
         </div>
@@ -1457,7 +1467,7 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
                 <p>AIS Branch Scanner Replacement Project</p>
                 <p>คู่สัญญา: AIS — บมจ. จีเอเบิล (G-Able) — บริษัท สยามมัลติมีเดีย จำกัด (SYM)</p>
               </div>
-              <div className="text-right text-xs text-slate-500">
+              <div className="handover-header-meta text-left text-xs text-slate-500 sm:text-right">
                 <div>วันที่พิมพ์: {new Date().toLocaleDateString('th-TH')}</div>
                 <div>สถานะ: ส่งมอบเสร็จสมบูรณ์ (Delivered)</div>
               </div>
@@ -1473,30 +1483,32 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
             </div>
 
             <h3 className="m-0 mb-2.5 text-sm font-bold">รายการอุปกรณ์ที่ดำเนินการเปลี่ยน</h3>
-            <table className="handover-table">
-              <thead>
-                <tr>
-                  <th className="w-12 text-center">ลำดับ</th>
-                  <th>Serial เดิม</th>
-                  <th>Serial ใหม่</th>
-                  <th>ยี่ห้อ / รุ่น</th>
-                  <th>ผลการเปลี่ยน</th>
-                  <th>วันที่ดำเนินการ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scannersList.map((sc, index) => (
-                  <tr key={sc.scanner_id || sc.id || index}>
-                    <td className="text-center">{index + 1}</td>
-                    <td>{sc.com_sn || sc.serial || '—'}</td>
-                    <td><strong>{sc.new_serial_number || sc.new_serial || '—'}</strong></td>
-                    <td>{sc.brand || ''} {sc.model_name || sc.model || ''}</td>
-                    <td>{sc.outcome === 'replaced' ? 'เปลี่ยนเครื่องสำเร็จ' : sc.outcome || 'สำเร็จ'}</td>
-                    <td>{sc.closeout_submitted_at ? new Date(sc.closeout_submitted_at).toLocaleDateString('th-TH') : '—'}</td>
+            <div className="table-wrap mb-6">
+              <table className="handover-table mb-0">
+                <thead>
+                  <tr>
+                    <th className="w-12 text-center">ลำดับ</th>
+                    <th>Serial เดิม</th>
+                    <th>Serial ใหม่</th>
+                    <th>ยี่ห้อ / รุ่น</th>
+                    <th>ผลการเปลี่ยน</th>
+                    <th>วันที่ดำเนินการ</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {scannersList.map((sc, index) => (
+                    <tr key={sc.scanner_id || sc.id || index}>
+                      <td className="text-center">{index + 1}</td>
+                      <td>{sc.com_sn || sc.serial || '—'}</td>
+                      <td><strong>{sc.new_serial_number || sc.new_serial || '—'}</strong></td>
+                      <td>{sc.brand || ''} {sc.model_name || sc.model || ''}</td>
+                      <td>{sc.outcome === 'replaced' ? 'เปลี่ยนเครื่องสำเร็จ' : sc.outcome || 'สำเร็จ'}</td>
+                      <td>{sc.closeout_submitted_at ? new Date(sc.closeout_submitted_at).toLocaleDateString('th-TH') : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             <div className="handover-signatures-grid">
               <div className="handover-sig-box">
@@ -2366,10 +2378,11 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
 
                   {/* Modal Footer Actions */}
                   <div className="review-modal-actions">
-                    <div className="flex gap-2">
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         type="button"
                         variant="outline"
+                        size="sm"
                         onClick={() => {
                           setViewingEvidenceTask(null)
                           setSelectedAdminTask(null)
@@ -2382,30 +2395,33 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                       <Button
                         type="button"
                         variant="outline"
+                        size="sm"
                         onClick={() => onOpenHandover?.(currentTask)}
                         title="ดูและพิมพ์เอกสารตรวจรับมอบงานประจำสาขานี้ (PDF)"
                       >
-                        <Printer size={15} /> ใบตรวจรับ (PDF)
+                        <Printer size={14} /> ใบตรวจรับ (PDF)
                       </Button>
                     </div>
 
-                    <div className="flex flex-wrap gap-2.5">
+                    <div className="flex flex-wrap gap-2">
                       {isCustomerReviewer ? (
                         <>
                           <Button
                             type="button"
                             variant="outline"
+                            size="sm"
                             className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
                             onClick={() => {
                               setRejectingTask(currentTask)
                               setViewingEvidenceTask(null)
                             }}
                           >
-                            ปฏิเสธงานนี้ (Reject)
+                            ปฏิเสธ (Reject)
                           </Button>
                           <Button
                             type="button"
                             variant="secondary"
+                            size="sm"
                             onClick={() => {
                               const bId = String(currentTask.branch_id || '')
                               const group = branchGroups.find(g => g.id === bId)
@@ -2416,10 +2432,11 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                               }
                             }}
                           >
-                            <ShieldCheck size={16} /> ตรวจรับเฉพาะเครื่องนี้
+                            <ShieldCheck size={14} /> รับเฉพาะเครื่องนี้
                           </Button>
                           <Button
                             type="button"
+                            size="sm"
                             onClick={() => {
                               const bId = String(currentTask.branch_id || '')
                               const group = branchGroups.find(g => g.id === bId)
@@ -2429,7 +2446,7 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                               }
                             }}
                           >
-                            <ShieldCheck size={16} /> ตรวจรับทั้งสาขา
+                            <ShieldCheck size={14} /> ตรวจรับทั้งสาขา
                           </Button>
                         </>
                       ) : selectedAdminTask ? (
@@ -2437,6 +2454,7 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                           <Button
                             type="button"
                             variant="outline"
+                            size="sm"
                             className="border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
                             onClick={() => {
                               setRejectingTask(selectedAdminTask)
@@ -2447,10 +2465,11 @@ function PendingReviews({ role, onUpdated, onOpenHandover }: { role?: string; on
                           </Button>
                           <Button
                             type="button"
+                            size="sm"
                             disabled={submitting}
                             onClick={() => handleSymPass(selectedAdminTask)}
                           >
-                            <CheckCircle2 size={16} /> ตรวจผ่าน (ส่งต่อ Gable)
+                            <CheckCircle2 size={14} /> ตรวจผ่าน (ส่งต่อ Gable)
                           </Button>
                         </>
                       ) : null}
@@ -2740,14 +2759,14 @@ function AssetDetailDialog({ asset, role, demo, onClose, onUpdated, onOpenHandov
               </>
                 : <p className="detail-empty-result">ยังไม่มีประวัติการเปลี่ยนเครื่องหรือหลักฐานสำหรับ Scanner นี้</p>}
       </section>
-      <div className="detail-readonly-note">
-        <ShieldCheck size={16} />
+      <div className="detail-readonly-note flex-wrap sm:flex-nowrap">
+        <ShieldCheck size={16} className="shrink-0" />
         <span>แสดงข้อมูลทะเบียน ประวัติ รูปภาพ และลายเซ็นของ Scanner เครื่องนี้</span>
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="ml-auto h-7 gap-1 px-2 text-[11px]"
+          className="ml-auto h-7 gap-1 px-2 text-[11px] shrink-0"
           onClick={() => onOpenHandover?.(asset)}
           title="ดูและพิมพ์ใบตรวจรับมอบงานประจำสาขานี้ (PDF)"
         >
@@ -3003,20 +3022,20 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
           {!demo && !canViewEvidence && <section className="detail-section"><h3>หลักฐานประกอบ</h3><p className="detail-empty-result">หลักฐานใบงานดูได้โดย Admin และช่างที่มีสิทธิ์เข้าระบบ</p></section>}
           {canAct && stage === 'in_progress' && <section className="detail-section task-action-panel"><h3>บันทึกผลปฏิบัติงาน</h3><p>กรอกผลตรวจสอบและแนบหลักฐานตามหัวข้อในส่วนรูปภาพด้านบน ระบบจะตรวจรายการที่ยังขาดก่อนบันทึก</p><form className="task-action-form" onSubmit={submitCloseout}>
             <label>ผลการเข้าหน้างาน<select value={outcomeInput} onChange={event => { setOutcomeInput(event.target.value); setActionError('') }}><option value="replaced">เปลี่ยนเครื่องสำเร็จ</option><option value="no_damage_found">ไม่พบเครื่องชำรุด</option><option value="different_device_found">ไม่พบ SN ตามใบงาน แต่พบเครื่องอื่น</option><option value="target_device_not_found">ไม่พบ SN ตามใบงานและไม่พบเครื่องอื่น</option></select></label>
-            {outcomeInput === 'different_device_found' && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>บันทึก SN ที่พบและเหตุผล รายการนี้จะเป็น Pending; ระบบยังไม่เพิ่มหรือเปลี่ยนข้อมูลทะเบียนจนกว่า Admin ตรวจ</span></p>}
-            {outcomeInput === 'target_device_not_found' && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>บันทึกเหตุผลว่าไม่พบเครื่องในสาขา รายการนี้จะปรับสถานะเป็น Pending ทันทีโดยไม่ต้องแนบรูปภาพ</span></p>}
+            {outcomeInput === 'different_device_found' && <p className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>บันทึก SN ที่พบและเหตุผล รายการนี้จะเป็น Pending; ระบบยังไม่เพิ่มหรือเปลี่ยนข้อมูลทะเบียนจนกว่า Admin ตรวจ</span></p>}
+            {outcomeInput === 'target_device_not_found' && <p className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>บันทึกเหตุผลว่าไม่พบเครื่องในสาขา รายการนี้จะปรับสถานะเป็น Pending ทันทีโดยไม่ต้องแนบรูปภาพ</span></p>}
             {outcomeInput === 'different_device_found' && <><label>Serial ของอุปกรณ์ที่พบ<input value={observedSerialInput} onChange={event => setObservedSerialInput(event.target.value)} maxLength={100} required autoComplete="off" /></label><label>รุ่นของอุปกรณ์ที่พบ (ถ้าทราบ)<input value={observedModelInput} onChange={event => setObservedModelInput(event.target.value)} maxLength={100} autoComplete="off" /></label></>}
             <label>ผลการติดตั้ง/ตรวจสอบ<textarea value={installResultInput} onChange={event => setInstallResultInput(event.target.value)} maxLength={500} required rows={3} /></label>
             {isReplacement && <label>สถานะเครื่องเดิม<select value={oldStatusInput} onChange={event => setOldStatusInput(event.target.value)} required><option value="" disabled>เลือกสถานะเครื่องเดิม</option>{Object.entries(oldStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
             {isReplacement && oldStatusInput === 'other' && <label>หมายเหตุเครื่องเดิม<textarea value={oldStatusNote} onChange={event => setOldStatusNote(event.target.value)} maxLength={1000} required rows={3} /></label>}
             {!isReplacement && <label>เหตุผล/รายละเอียด<textarea value={exceptionReasonInput} onChange={event => setExceptionReasonInput(event.target.value)} maxLength={1000} required rows={3} /></label>}
             {actionError && !showBlockForm && <p className="task-action-error" role="alert">{actionError}</p>}
-            {isReplacement && <p className="detail-readonly-note"><ShieldCheck size={16} /><span>{requiredEvidenceReady ? 'หลักฐานที่จำเป็นครบแล้ว พร้อมส่งผลให้ Admin ตรวจรับ' : 'ยังขาดหลักฐานที่จำเป็น ดูหัวข้อที่ระบุว่า “จำเป็นในขั้นนี้” ในส่วนรูปภาพด้านบน'}</span></p>}
+            {isReplacement && <p className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>{requiredEvidenceReady ? 'หลักฐานที่จำเป็นครบแล้ว พร้อมส่งผลให้ Admin ตรวจรับ' : 'ยังขาดหลักฐานที่จำเป็น ดูหัวข้อที่ระบุว่า “จำเป็นในขั้นนี้” ในส่วนรูปภาพด้านบน'}</span></p>}
             <button type="submit" className="primary-button task-action-submit" disabled={busy || evidenceBusy}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : isReplacement ? 'บันทึกผลและปิดงาน' : 'บันทึกผลเป็น Pending'}</button>
           </form><button type="button" className="secondary-button task-block-toggle" disabled={busy} onClick={() => { setShowBlockForm(value => !value); setActionError('') }}>{showBlockForm ? 'ซ่อนฟอร์ม Pending' : 'พักรายการนี้เป็น Pending'}</button>{showBlockForm && <form className="task-action-form" onSubmit={submitBlock}><label>เหตุผลที่ทำงานต่อไม่ได้<textarea value={blockReason} onChange={event => setBlockReason(event.target.value)} maxLength={500} required rows={3} /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<button type="submit" className="secondary-button" disabled={busy}>{busy ? 'กำลังบันทึก…' : 'บันทึก Pending'}</button></form>}</section>}
-          {isPendingReview && !canResolvePending && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>บัญชีที่ปฏิบัติงานหรือส่งผลหน้างานไม่สามารถตรวจรับงานเดียวกันได้ โปรดให้ Admin อีกบัญชีหนึ่งลงนามตรวจรับ</span></div>}
+          {isPendingReview && !canResolvePending && <div className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>บัญชีที่ปฏิบัติงานหรือส่งผลหน้างานไม่สามารถตรวจรับงานเดียวกันได้ โปรดให้ Admin อีกบัญชีหนึ่งลงนามตรวจรับ</span></div>}
           {canResolvePending && outcome === 'different_device_found' && <section className="detail-section task-action-panel"><label className="task-exception-register"><input type="checkbox" checked={registerObservedSerial} onChange={event => setRegisterObservedSerial(event.target.checked)} />เพิ่ม SN ที่ตรวจแล้วว่าเป็นเครื่องใหม่ในทะเบียนสาขานี้</label><p>ตรวจ SN สาขาและทะเบียนทุกสาขาก่อนเลือก ระบบจะเพิ่มเฉพาะ SN ที่ยังไม่อยู่ในทะเบียน หากต้องเปลี่ยนเครื่องต่อ ให้เปิดใบงานใหม่ด้วย SN ที่เพิ่มแล้ว การพบ SN ซ้ำต่างสาขาจะถูกปฏิเสธโดยไม่ย้ายข้อมูล</p></section>}
-          {demo && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>ใบงานตัวอย่างเป็นแบบอ่านอย่างเดียว ไม่บันทึกข้อมูลจริง</span></div>}
+          {demo && <div className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>ใบงานตัวอย่างเป็นแบบอ่านอย่างเดียว ไม่บันทึกข้อมูลจริง</span></div>}
         </div>
         <aside className="work-order-side" aria-label="ขั้นตอน สาขา และการจัดการใบงาน">
           <section className="detail-section"><h3>ข้อมูลการเปิดใบงาน</h3><div className="detail-grid"><DetailField label="เปิดใบงานเมื่อ" value={formatDate(task.created_at)} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="สถานะใบงาน" value={presentation.label} /><DetailField label="ผู้ปฏิบัติงาน" value={task.performed_by_name} /></div></section>
@@ -3025,7 +3044,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
           {canManage && !['completed', 'cancelled'].includes(status) && <section className="detail-section task-action-panel"><h3>การจัดการรายการ Scanner</h3>{showCancelForm ? <form className="task-action-form" onSubmit={event => void submitCancel(event)}><label>เหตุผลที่ยกเลิก<textarea value={cancelReason} onChange={event => setCancelReason(event.target.value)} maxLength={500} rows={3} required /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(false); setCancelReason(''); setActionError('') }}>กลับ</button><button type="submit" className="primary-button" disabled={busy || !cancelReason.trim()}>{busy ? 'กำลังบันทึก…' : 'ยืนยันยกเลิกรายการนี้'}</button></div></form> : <><p>Admin ยกเลิกรายการเครื่องนี้แยกจากเครื่องอื่นในใบงานได้ โดยระบุเหตุผลและระบบจะเก็บประวัติไว้</p><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(true); setActionError('') }}>ยกเลิกรายการเครื่องนี้</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</>}</section>}
           {['delivered', 'exception_resolved', 'legacy_completed', 'cancelled'].includes(stage) && (
             <div className="flex flex-col gap-2">
-              <div className="detail-readonly-note"><ShieldCheck size={16} /><span>{stage === 'delivered' ? 'รายการนี้ Completed แล้ว และทะเบียนอัปเดตตามผลเปลี่ยนเครื่อง' : stage === 'exception_resolved' ? 'Admin พิจารณา Pending แล้ว รายการนี้ปิดโดยคง SN เดิมไว้' : 'รายการนี้ปิดแล้วและแก้ไขไม่ได้'}</span></div>
+              <div className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>{stage === 'delivered' ? 'รายการนี้ Completed แล้ว และทะเบียนอัปเดตตามผลเปลี่ยนเครื่อง' : stage === 'exception_resolved' ? 'Admin พิจารณา Pending แล้ว รายการนี้ปิดโดยคง SN เดิมไว้' : 'รายการนี้ปิดแล้วและแก้ไขไม่ได้'}</span></div>
               <Button
                 type="button"
                 variant="outline"
@@ -3037,7 +3056,7 @@ function WorkOrderDetailDialog({ task, role, demo, readOnly = false, onClose, on
               </Button>
             </div>
           )}
-          {!demo && !['field_technician', 'admin'].includes(String(role)) && <div className="detail-readonly-note"><ShieldCheck size={16} /><span>บัญชีปัจจุบันดูข้อมูลได้อย่างเดียว</span></div>}
+          {!demo && !['field_technician', 'admin'].includes(String(role)) && <div className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>บัญชีปัจจุบันดูข้อมูลได้อย่างเดียว</span></div>}
         </aside>
       </div>
       </div>

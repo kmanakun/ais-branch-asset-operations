@@ -45,6 +45,29 @@ const SIGNATURE_SLOTS = [
 type PhotoSlot = typeof PHOTO_SLOTS[number]['key']
 type SignatureSlot = typeof SIGNATURE_SLOTS[number]['key']
 export type EvidenceSlot = PhotoSlot | SignatureSlot
+
+const EVIDENCE_TYPE_ALIASES: Record<string, EvidenceSlot> = {
+  photo_old_serial: 'old_serial_photo',
+  photo_old_device: 'old_device_photo',
+  photo_old_condition: 'old_condition_photo',
+  photo_old_branch_sticker: 'old_branch_sticker_photo',
+  photo_new_serial: 'new_serial_photo',
+  photo_new_front: 'new_front_photo',
+  photo_new_side: 'new_side_photo',
+  photo_new_com_serial: 'new_com_serial_photo',
+  photo_new_device: 'new_device_photo',
+  photo_new_cable_management: 'new_cable_management_photo',
+  sig_tech: 'technician_signature',
+  sig_cust: 'scanner_user_signature',
+}
+
+function normalizeEvidenceSlot(rawType: string): EvidenceSlot | null {
+  if (EVIDENCE_TYPE_ALIASES[rawType]) return EVIDENCE_TYPE_ALIASES[rawType]
+  if (PHOTO_SLOTS.some(s => s.key === rawType) || SIGNATURE_SLOTS.some(s => s.key === rawType)) {
+    return rawType as EvidenceSlot
+  }
+  return null
+}
 type EvidenceEntry = {
   slot: EvidenceSlot
   status: 'pending' | 'ready'
@@ -306,7 +329,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
   useEffect(() => { busyCallbackRef.current(busySlot !== null) }, [busySlot])
   useEffect(() => () => { busyCallbackRef.current(false) }, [])
   useEffect(() => {
-    const ready = stageRequiredSlots.every(slot => entries[slot]?.status === 'ready' && entries[slot]?.outcome_context === outcome)
+    const ready = stageRequiredSlots.every(slot => entries[slot]?.status === 'ready')
     requiredReadyRef.current(ready)
   }, [entries, stageRequiredSlots, outcome])
 
@@ -336,14 +359,15 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       if (!isCurrentRequest()) return
       const nextEntries: Record<string, EvidenceEntry> = {}
       for (const item of (res.evidence || [])) {
-        const slotKey = item.evidence_type as EvidenceSlot
+        const slotKey = normalizeEvidenceSlot(item.evidence_type)
+        if (!slotKey) continue
         nextEntries[slotKey] = {
           slot: slotKey,
           status: 'ready',
           path: item.storage_path,
-          byte_size: item.byte_size,
-          signer_name: null,
-          outcome_context: null,
+          byte_size: Number(item.byte_size || (item as any).file_size_bytes || 0),
+          signer_name: (item as any).signer_name || null,
+          outcome_context: outcome || 'replaced',
           uploaded_at: item.created_at,
         }
       }
@@ -453,8 +477,8 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
   return <section className="detail-section task-evidence-panel" aria-labelledby="task-evidence-title">
     <div className="task-evidence-heading">
       <div><h3 id="task-evidence-title">รูปภาพและลายเซ็นประกอบใบงาน</h3><p>แนบหลักฐานของ “{outcomeLabel(outcome)}” ได้ทันที ระบบเริ่มบันทึกการปฏิบัติงานเมื่อเริ่มแนบหลักฐาน</p></div>
-      {stageRequiredSlots.length > 0 ? <span className={'evidence-completion-badge' + (stageRequiredSlots.every(slot => entries[slot]?.status === 'ready' && entries[slot]?.outcome_context === outcome) ? ' is-ready' : '')}>
-        {stageRequiredSlots.filter(slot => entries[slot]?.status === 'ready' && entries[slot]?.outcome_context === outcome).length}/{stageRequiredSlots.length} รายการ
+      {stageRequiredSlots.length > 0 ? <span className={'evidence-completion-badge' + (stageRequiredSlots.every(slot => entries[slot]?.status === 'ready') ? ' is-ready' : '')}>
+        {stageRequiredSlots.filter(slot => entries[slot]?.status === 'ready').length}/{stageRequiredSlots.length} รายการ
       </span> : <span className="evidence-completion-badge">ไม่บังคับ</span>}
     </div>
     {previewOnly && <p className="detail-empty-result">ตัวอย่างนี้ไม่มีรูปหรือลายเซ็นจริงให้ดู และไม่เชื่อมต่อเพื่อบันทึกหลักฐาน</p>}
@@ -466,7 +490,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
         const groupSlots = group.slots
         const groupUploadedCount = groupSlots.filter(s => entries[s.key]?.status === 'ready').length
         const groupRequiredSlots = groupSlots.filter(s => stageRequiredSlots.includes(s.key))
-        const isGroupAllRequiredReady = groupRequiredSlots.length > 0 && groupRequiredSlots.every(s => entries[s.key]?.status === 'ready' && entries[s.key]?.outcome_context === outcome)
+        const isGroupAllRequiredReady = groupRequiredSlots.length > 0 && groupRequiredSlots.every(s => entries[s.key]?.status === 'ready')
 
         return (
           <div key={group.id} className="evidence-section-group">
@@ -484,7 +508,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
               {groupSlots.map(slot => {
                 const entry = entries[slot.key]
                 const imageUrl = previewUrls[slot.key]
-                const matchesOutcome = entry?.outcome_context === outcome
+                const matchesOutcome = entry?.status === 'ready'
                 const label = outcome === 'different_device_found' && slot.key === 'new_serial_photo'
                   ? 'SN เครื่องที่พบ'
                   : outcome === 'different_device_found' && slot.key === 'new_device_photo'
@@ -576,8 +600,8 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
 
                     {entry?.status === 'ready' && (
                       <div className="task-evidence-saved text-[11px] gap-1.5">
-                        <Check size={13} />
-                        <span>บันทึกแล้วสำหรับ “{outcomeLabel(entry.outcome_context)}” · {(entry.byte_size / 1024).toFixed(0)} KB</span>
+                        <Check size={13} className="shrink-0" />
+                        <span>บันทึกแล้ว{entry.byte_size > 0 ? ` · ${Math.max(1, Math.round(entry.byte_size / 1024))} KB` : ''}</span>
                       </div>
                     )}
                     {entry?.status === 'pending' && (
@@ -744,11 +768,21 @@ function SignatureEntry({
     }
   }
   return <article className="task-evidence-card signature-card">
-    <div className="task-evidence-card-heading"><strong>{label}</strong><span className={required ? 'evidence-required' : 'evidence-optional'}>{required ? (entry?.status === 'ready' && entry.outcome_context !== outcome ? 'ต้องบันทึกใหม่' : 'จำเป็นในขั้นนี้') : entry?.status === 'ready' ? 'บันทึกแล้ว' : 'ใช้ในขั้นอื่น'}</span></div>
+    <div className="task-evidence-card-heading">
+      <strong>{label}</strong>
+      <span className={entry?.status === 'ready' ? 'evidence-pill pill-ready' : required ? 'evidence-required' : 'evidence-optional'}>
+        {entry?.status === 'ready' ? '✓ บันทึกแล้ว' : required ? 'จำเป็นในขั้นนี้' : 'ใช้ในขั้นอื่น'}
+      </span>
+    </div>
           <p>{hint}</p>
     {needsName && canEdit && <label className="evidence-signer-name">ชื่อ-นามสกุลผู้ลงนาม<input value={signerName} onChange={event => setSignerName(event.target.value)} maxLength={120} autoComplete="name" required /></label>}
     {entry?.status === 'ready' && (previewUrl ? <a className="task-evidence-preview signature-preview" href={previewUrl} target="_blank" rel="noreferrer"><img src={previewUrl} alt={`ลายเซ็น ${label}`} /></a> : previewStatus === 'loading' ? <div className="task-evidence-empty"><LoaderCircle className="evidence-spinner" size={18} /><span>กำลังโหลดลายเซ็น…</span></div> : <div className="task-evidence-image-missing">โหลดลายเซ็นไม่สำเร็จ <button type="button" className="text-button" onClick={onRetryPreview}>ลองโหลดอีกครั้ง</button></div>)}
-    {entry?.status === 'ready' && <div className="task-evidence-saved"><Check size={14} />{entry.signer_name ? `ลงชื่อโดย ${entry.signer_name}` : 'บันทึกลายเซ็นแล้ว'} · {outcomeLabel(entry.outcome_context)}</div>}
+    {entry?.status === 'ready' && (
+      <div className="task-evidence-saved">
+        <Check size={14} className="shrink-0" />
+        <span>{entry.signer_name ? `ลงชื่อโดย ${entry.signer_name}` : 'บันทึกลายเซ็นแล้ว'}{outcome ? ` · ${outcomeLabel(outcome)}` : ''}</span>
+      </div>
+    )}
     {entry?.status === 'pending' && <div className="task-evidence-pending">ลายเซ็นยังรอยืนยัน</div>}
     {!entry && !canEdit && showEmpty && <div className="task-evidence-empty">ยังไม่มีลายเซ็น</div>}
     {canEdit && entry?.status === 'ready' && !editing && <button type="button" className="text-button" disabled={disabled} onClick={() => setEditing(true)}>แก้ไขลายเซ็น</button>}
