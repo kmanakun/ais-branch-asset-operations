@@ -613,7 +613,7 @@ function App() {
         }
       } catch {
         if (active) {
-          setListError('โหลดข้อมูล Scanner จาก Cloudflare D1 ไม่สำเร็จ')
+          setListError('โหลดข้อมูล Scanner จากระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง')
         }
       } finally {
         if (active) setPageLoading(false)
@@ -1135,7 +1135,7 @@ function LoginPage({ onGoogleSignIn, onDemo, onHelp, error, configured, submitti
         <h2>เข้าสู่ระบบ</h2>
         <p>ใช้บัญชี Google ที่ Identity Admin อนุมัติไว้</p>
         {error && <div className="form-error" role="alert">{error}</div>}
-        {!configured && <div className="config-note">ระบบยังไม่ได้เชื่อมต่อ Cloudflare Edge D1 จึงยังเข้าสู่ระบบไม่ได้</div>}
+        {!configured && <div className="config-note">ระบบยืนยันตัวตนยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ</div>}
         <button className="google-sign-in-button" type="button" onClick={onGoogleSignIn} disabled={submitting || !configured}>
           <GoogleMark />
           <span>{submitting ? 'กำลังเชื่อมต่อ Google…' : 'เข้าสู่ระบบด้วย Google'}</span>
@@ -2546,7 +2546,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                                       {isUploaded ? (
                                         <span className="review-ready-pill">✓ แนบแล้ว</span>
                                       ) : slot.key === 'inspector_signature' ? (
-                                        <span className="review-ready-pill border border-sky-200 bg-sky-50 text-sky-700">รอ Gable ลงนาม</span>
+                                        <span className="review-ready-pill border border-sky-200 bg-sky-50 text-sky-700">รอด่านที่ 2 (G-Able)</span>
                                       ) : (
                                         <span className="review-ready-pill border border-slate-200 bg-slate-100 text-slate-500">ยังไม่มีรูป</span>
                                       )}
@@ -2569,7 +2569,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                                         ) : slot.key === 'inspector_signature' ? (
                                           <div className="review-thumb-missing text-sky-700">
                                             <ShieldCheck size={20} />
-                                            <span>รอ Gable ลงนาม</span>
+                                            <span>รอด่านลูกค้า (G-Able)</span>
                                           </div>
                                         ) : (
                                           <div className="review-thumb-missing">
@@ -2809,7 +2809,7 @@ function WorkOrders({ role, currentEmail, demo, onUpdated, view = 'all', onOpenH
         setTotalOrders(res.total)
       } catch {
         if (!active) return
-        setRows([]); setTotalOrders(0); setError('โหลดใบงานจาก Cloudflare D1 ไม่สำเร็จ')
+        setRows([]); setTotalOrders(0); setError('โหลดข้อมูลใบงานจากระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง')
       } finally { if (active) setLoading(false) }
     })()
     return () => { active = false }
@@ -3716,8 +3716,8 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
       {error && <div className="import-error" role="alert">{error}</div>}
       {preview && <section className="import-preview" aria-live="polite"><div className="import-preview-heading"><div><h3>ผลตรวจสอบชุดข้อมูล</h3><p>{preview.row_count.toLocaleString('th-TH')} เครื่อง · {preview.branch_count.toLocaleString('th-TH')} สาขา · {preview.issue_count.toLocaleString('th-TH')} ปัญหา</p></div><button className="secondary-button" disabled={busy} onClick={resetImport}>เลือกไฟล์ใหม่</button></div>
         {(preview as any).warnings > 0 && <div className="address-warning-box"><span>⚠️ พบ {(preview as any).warnings.toLocaleString('th-TH')} รายการที่มี "หมายเหตุการแยกที่อยู่" (ระบบอนุญาตให้นำเข้าได้ โดยจะติดป้ายเตือนในหน้าทะเบียน)</span></div>}
-        {preview.issue_count === 0 ? <div className="rule"><CheckCircle2 size={16} /><span>ไม่พบข้อผิดพลาด รหัสสาขาและ Serial ครบถ้วน ระบบพร้อมบันทึกลง Cloudflare D1</span></div> : <div className="import-issues"><strong>ต้องแก้ปัญหาในไฟล์ก่อนนำเข้า</strong>{preview.issues.map((issue, index) => <div className="import-issue" key={`${issue.row_number}-${issue.field}-${index}`}><span>แถว {issue.row_number}</span><strong>{issue.field}</strong><span>{issue.message}</span></div>)}{preview.issues_truncated && <small>แสดง 100 ปัญหาแรกจากทั้งหมด {preview.issue_count}</small>}</div>}
-        <div className="import-actions"><button className="secondary-button" disabled={busy || commitUncertain} onClick={resetImport}>ยกเลิกชุดนี้</button><button className="primary-button" disabled={busy || preview.issue_count > 0} onClick={() => void commitImport()}>{busy ? 'กำลังบันทึก…' : commitUncertain ? 'ตรวจสอบผลนำเข้า' : `บันทึก ${preview.row_count.toLocaleString('th-TH')} รายการลง D1`}</button></div>
+        {preview.issue_count === 0 ? <div className="rule"><CheckCircle2 size={16} /><span>ไม่พบข้อผิดพลาด รหัสสาขาและ Serial ครบถ้วน ระบบพร้อมบันทึกเข้าระบบ</span></div> : <div className="import-issues"><strong>ต้องแก้ปัญหาในไฟล์ก่อนนำเข้า</strong>{preview.issues.map((issue, index) => <div className="import-issue" key={`${issue.row_number}-${issue.field}-${index}`}><span>แถว {issue.row_number}</span><strong>{issue.field}</strong><span>{issue.message}</span></div>)}{preview.issues_truncated && <small>แสดง 100 ปัญหาแรกจากทั้งหมด {preview.issue_count}</small>}</div>}
+        <div className="import-actions"><button className="secondary-button" disabled={busy || commitUncertain} onClick={resetImport}>ยกเลิกชุดนี้</button><button className="primary-button" disabled={busy || preview.issue_count > 0} onClick={() => void commitImport()}>{busy ? 'กำลังบันทึก…' : commitUncertain ? 'ตรวจสอบผลนำเข้า' : `บันทึก ${preview.row_count.toLocaleString('th-TH')} รายการเข้าระบบ`}</button></div>
       </section>}
       {result && <div className="import-success" role="status"><CheckCircle2 size={18} /><span>นำเข้าสำเร็จ: เพิ่ม {result.inserted.toLocaleString('th-TH')} เครื่อง · อัปเดต {result.updated.toLocaleString('th-TH')} เครื่อง</span><button className="secondary-button" onClick={resetImport}>ปิดผลลัพธ์</button></div>}
       <div className="file-rules"><h3>กติกาตรวจสอบก่อนบันทึก</h3><div className="rule"><CheckCircle2 size={16} /><span><strong>comSN</strong> เป็นกุญแจจับคู่; ค่าเดิมอัปเดตเฉพาะช่องที่อนุญาตและไม่ว่าง</span></div><div className="rule"><CheckCircle2 size={16} /><span>Serial ใหม่เพิ่มรายการ; Serial ซ้ำในไฟล์หรืออยู่คนละสาขาจะปฏิเสธทั้งชุด</span></div><div className="rule"><CheckCircle2 size={16} /><span>สาขาต้องตรงกับ LocationCode และชื่อที่ปรับช่องว่างแล้ว; ไม่ย้ายเครื่องข้ามสาขา</span></div><div className="rule"><CheckCircle2 size={16} /><span>ไฟล์ที่มีแถวผิดจะบันทึกไม่ได้ และการนำเข้าไม่เปลี่ยนประวัติงาน</span></div></div>
@@ -3731,7 +3731,7 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
         })}</div> : <EmptyState compact title="ยังไม่มีประวัติการนำเข้า" detail="ชุดข้อมูลที่ตรวจสอบแล้วจะแสดงที่นี่" />}
       </section>
     </section>
-    <aside className="panel import-side"><div className="panel-heading"><div><h2>ขั้นตอนนำเข้า</h2><p>บันทึกเป็นชุดเพื่อทวนสอบย้อนหลัง</p></div></div><div className="step-list"><div className="import-step active"><span>1</span><div><strong>เลือกไฟล์</strong><small>อ่านเฉพาะชีต Detail1</small></div></div><div className="step-line" /><div className="import-step"><span>2</span><div><strong>ตรวจสอบข้อมูล</strong><small>ตรวจบนฐานข้อมูลก่อนบันทึก</small></div></div><div className="step-line" /><div className="import-step"><span>3</span><div><strong>บันทึกทั้งชุด</strong><small>ฐานข้อมูลยกเลิกทั้งหมดเมื่อผิดพลาด</small></div></div></div><div className="warning-box"><ShieldCheck size={17} /><span>ระบบบันทึกทะเบียนสาขาและเครื่องสแกน พร้อมจัดเก็บหมายเหตุการแยกที่อยู่และเบอร์ติดต่อลง Cloudflare D1</span></div></aside>
+    <aside className="panel import-side"><div className="panel-heading"><div><h2>ขั้นตอนนำเข้า</h2><p>บันทึกเป็นชุดเพื่อทวนสอบย้อนหลัง</p></div></div><div className="step-list"><div className="import-step active"><span>1</span><div><strong>เลือกไฟล์</strong><small>อ่านเฉพาะชีต Detail1</small></div></div><div className="step-line" /><div className="import-step"><span>2</span><div><strong>ตรวจสอบข้อมูล</strong><small>ตรวจบนฐานข้อมูลก่อนบันทึก</small></div></div><div className="step-line" /><div className="import-step"><span>3</span><div><strong>บันทึกทั้งชุด</strong><small>ฐานข้อมูลยกเลิกทั้งหมดเมื่อผิดพลาด</small></div></div></div><div className="warning-box"><ShieldCheck size={17} /><span>ระบบบันทึกทะเบียนสาขาและเครื่องสแกน พร้อมจัดเก็บหมายเหตุการแยกที่อยู่และเบอร์ติดต่อเข้าฐานข้อมูลกลาง</span></div></aside>
   </div>
 }
 
@@ -3832,7 +3832,7 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
         <div className="panel-heading">
           <div>
             <h2>รายชื่อผู้มีสิทธิ์ใช้งานระบบ (Google Sign-In Allowlist)</h2>
-            <p>ควบคุมการเข้าถึงระบบผ่าน Google OAuth 2.0 จัดเก็บบน Cloudflare D1 (0 บาท)</p>
+            <p>ควบคุมการเข้าถึงระบบผ่าน Google OAuth 2.0 และบัญชีรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist)</p>
           </div>
           <button type="button" className="text-button" disabled={!isAdmin || loading} onClick={() => setReload(r => r + 1)}>
             รีเฟรช
@@ -3911,9 +3911,11 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
             {formError && <div className="form-error mb-3" role="alert">{formError}</div>}
             {formSuccess && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] font-medium text-emerald-700">{formSuccess}</div>}
             <form onSubmit={handleAddUser} className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] items-end gap-3">
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+              <label htmlFor="allowlist-email" className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
                 อีเมล Google (@sym.co.th / @gmail.com)
                 <Input
+                  id="allowlist-email"
+                  name="allowlist_email"
                   type="email"
                   required
                   placeholder="technician@sym.co.th"
@@ -3921,18 +3923,22 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
                   onChange={e => setNewEmail(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+              <label htmlFor="allowlist-fullname" className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
                 ชื่อ-นามสกุล (ไม่บังคับ)
                 <Input
+                  id="allowlist-fullname"
+                  name="allowlist_fullname"
                   type="text"
                   placeholder="สมชาย ใจดี"
                   value={newName}
                   onChange={e => setNewName(e.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
+              <label htmlFor="allowlist-role" className="flex flex-col gap-1 text-xs font-semibold text-slate-700">
                 บทบาท (Role)
                 <select
+                  id="allowlist-role"
+                  name="allowlist_role"
                   value={newRole}
                   onChange={e => setNewRole(e.target.value)}
                   className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-[13px] text-slate-900 focus:border-emerald-600 focus:outline-none"

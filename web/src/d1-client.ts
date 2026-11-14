@@ -2,7 +2,7 @@
 // Zero-Baht Architecture for AIS Scanner Replacement Project
 
 const DEV_EMAIL_KEY = 'ais_dev_user_email'
-let devAuthHeadersEnabled = true
+let devAuthHeadersEnabled = false
 
 export interface AuthConfigResponse {
   auth_provider: 'google_oauth'

@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
-import { Check, ImagePlus, LoaderCircle, RotateCcw, Save, Trash2 } from 'lucide-react'
+import { AlertCircle, Check, ImagePlus, LoaderCircle, RotateCcw, Save, Trash2 } from 'lucide-react'
 import { d1Api } from './d1-client'
 
 const OLD_DEVICE_SLOTS = [
@@ -309,7 +309,7 @@ function slotErrorMessage(error: unknown): string {
   const rawMessage = String((error as { message?: unknown })?.message || '')
   if (/[\u0E00-\u0E7F]/.test(rawMessage)) return rawMessage
   const message = rawMessage.toLowerCase()
-  if (message.includes('free-plan safety limit')) return 'พื้นที่เก็บหลักฐานฟรีใกล้เต็มแล้ว กรุณาแจ้ง Admin ก่อนบันทึกเพิ่ม'
+  if (message.includes('free-plan safety limit')) return 'พื้นที่จัดเก็บหลักฐานใกล้เต็มโควตาแล้ว กรุณาแจ้งผู้ดูแลระบบ (Admin) ก่อนบันทึกเพิ่ม'
   if (message.includes('reserved by another technician')) return 'ช่างอีกคนกำลังบันทึกช่องนี้อยู่ ลองใหม่ภายหลังหรือแจ้ง Admin'
   if (message.includes('original uploader')) return 'หลักฐานนี้บันทึกโดยช่างอีกคน หากต้องแก้ไขให้แจ้ง Admin'
   if (message.includes('row-level security policy')) return 'ระบบปฏิเสธสิทธิ์บันทึกหลักฐาน กรุณาลองใหม่อีกครั้ง หากยังไม่สำเร็จให้แจ้ง Admin'
@@ -328,7 +328,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
   const [previewRetry, setPreviewRetry] = useState(0)
   const [busySlot, setBusySlot] = useState<EvidenceSlot | null>(null)
   const [loadError, setLoadError] = useState('')
-  const [actionMessage, setActionMessage] = useState('')
+  const [actionNotice, setActionNotice] = useState<{ text: string; tone: 'success' | 'error' } | null>(null)
   const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading')
   const photoInputRefs = useRef<Partial<Record<PhotoSlot, HTMLInputElement | null>>>({})
   const loadRequestRef = useRef(0)
@@ -432,7 +432,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
   const saveBlob = async (slot: EvidenceSlot, blob: Blob): Promise<boolean> => {
     if (!canEditSlot(slot) || !taskId) return false
     setBusySlot(slot)
-    setActionMessage('')
+    setActionNotice(null)
     try {
       const isSignature = SIGNATURE_SLOTS.some(item => item.key === slot)
       if (blob.size > (isSignature ? MAX_SIGNATURE_BYTES : MAX_PHOTO_BYTES)) {
@@ -447,14 +447,14 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
       const base64 = await base64Promise
       setPreviewUrls(prev => ({ ...prev, [slot]: base64 }))
       await d1Api.uploadEvidence(taskId, slot, base64, blob.type || 'image/jpeg')
-      setActionMessage('บันทึกหลักฐานเรียบร้อยแล้ว')
+      setActionNotice({ text: 'บันทึกหลักฐานเรียบร้อยแล้ว', tone: 'success' })
       const nextReady = await loadEvidence()
       if (nextReady) {
         requiredCompletedRef.current?.(slot)
       }
       return true
     } catch (err: any) {
-      setActionMessage(err.message || 'บันทึกหลักฐานไม่สำเร็จ')
+      setActionNotice({ text: err.message || 'บันทึกหลักฐานไม่สำเร็จ', tone: 'error' })
       return false
     } finally {
       setBusySlot(null)
@@ -464,13 +464,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
   const savePhoto = async (slot: PhotoSlot, file?: File) => {
     if (!file) return
     setBusySlot(slot)
-    setActionMessage('')
+    setActionNotice(null)
     try {
       const blob = await compressPhoto(file)
       await saveBlob(slot, blob)
     } catch (error) {
       setBusySlot(null)
-      setActionMessage(slotErrorMessage(error))
+      setActionNotice({ text: slotErrorMessage(error), tone: 'error' })
     }
   }
 
@@ -480,13 +480,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
     if (!window.confirm(`ลบหลักฐาน “${[...PHOTO_SLOTS, ...SIGNATURE_SLOTS].find(item => item.key === slot)?.label || slot}” ออกจากใบงานนี้หรือไม่? ระบบจะบันทึกผู้ลบไว้ในประวัติ`)) return
 
     setBusySlot(slot)
-    setActionMessage('')
+    setActionNotice(null)
     try {
       await d1Api.deleteEvidence(taskId, slot)
-      setActionMessage('ลบหลักฐานแล้ว')
+      setActionNotice({ text: 'ลบหลักฐานแล้ว', tone: 'success' })
       await loadEvidence()
     } catch (err: any) {
-      setActionMessage(err.message || 'ลบหลักฐานไม่สำเร็จ')
+      setActionNotice({ text: err.message || 'ลบหลักฐานไม่สำเร็จ', tone: 'error' })
     } finally {
       setBusySlot(null)
     }
@@ -497,10 +497,19 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
     await loadEvidence()
   }
 
+  const isTechnicianEditing = stageEditableSlots.some(slot => slot !== 'inspector_signature' && canEditSlot(slot))
+  const allRequiredReady = stageRequiredSlots.length > 0 && stageRequiredSlots.every(slot => entries[slot]?.status === 'ready')
+  const visibleSignatureSlots = SIGNATURE_SLOTS.filter(
+    slot => slot.key !== 'inspector_signature' || Boolean(entries[slot.key]) || canEditSlot(slot.key) || !isTechnicianEditing,
+  )
+  const showActionNotice = Boolean(
+    actionNotice && !(actionNotice.tone === 'success' && allRequiredReady && isTechnicianEditing),
+  )
+
   return <section className="detail-section task-evidence-panel" aria-labelledby="task-evidence-title">
     <div className="task-evidence-heading">
       <div><h3 id="task-evidence-title">รูปภาพและลายเซ็นประกอบใบงาน</h3><p>แนบหลักฐานของ “{outcomeLabel(outcome)}” ได้ทันที ระบบเริ่มบันทึกการปฏิบัติงานเมื่อเริ่มแนบหลักฐาน</p></div>
-      {stageRequiredSlots.length > 0 ? <span className={'evidence-completion-badge' + (stageRequiredSlots.every(slot => entries[slot]?.status === 'ready') ? ' is-ready' : '')}>
+      {stageRequiredSlots.length > 0 ? <span className={'evidence-completion-badge' + (allRequiredReady ? ' is-ready' : '')}>
         {stageRequiredSlots.filter(slot => entries[slot]?.status === 'ready').length}/{stageRequiredSlots.length} รายการ
       </span> : <span className="evidence-completion-badge">ไม่บังคับ</span>}
     </div>
@@ -691,13 +700,13 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
 
     <div className="task-evidence-signatures">
       <h4>ลายเซ็นผู้เกี่ยวข้อง</h4>
-      {stageEditableSlots.some(slot => canEditSlot(slot)) && (
+      {isTechnicianEditing && (
         <p className="mb-3 text-xs text-slate-500">
-          เมื่อกรอก SN เครื่องใหม่ แนบรูปหลักฐาน และลงลายเซ็นผู้ปฏิบัติงาน (SYM) กับผู้รับมอบประจำสาขา (AIS) ครบแล้ว ระบบจะส่งต่อให้ Admin SYM ตรวจรับอัตโนมัติ
+          เมื่อกรอก SN เครื่องใหม่ แนบรูปหลักฐาน และลงลายเซ็นผู้ปฏิบัติงาน (SYM) กับผู้รับมอบประจำสาขา (AIS) ครบแล้ว ระบบจะส่งต่อให้ Admin SYM ตรวจรับอัตโนมัติ (หรือกดปุ่ม “ส่งให้ Admin SYM ตรวจรับ” ด้านล่างได้ทันที)
         </p>
       )}
       <div className="task-evidence-grid signature-grid">
-        {SIGNATURE_SLOTS.map(slot => <SignatureEntry
+        {visibleSignatureSlots.map(slot => <SignatureEntry
           key={slot.key}
           slot={slot.key}
           label={slot.label}
@@ -717,8 +726,16 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
         />)}
       </div>
     </div>
-    {actionMessage && <p className="task-evidence-message" role="status">{actionMessage}</p>}
-    {stageEditableSlots.some(slot => canEditSlot(slot)) && <p className="evidence-storage-note">รูปจะถูกย่อเป็น JPEG เพื่อเก็บในพื้นที่ฟรีของระบบ (สูงสุด 90 KB ต่อรูป และ 32 KB ต่อลายเซ็น) หากอ่านเลข SN ไม่ชัด ให้ครอปเฉพาะฉลากแล้วถ่ายใหม่</p>}
+    {isTechnicianEditing && <p className="evidence-storage-note">ระบบจะย่อรูปเป็น JPEG อัตโนมัติ (สูงสุด 90 KB ต่อรูป และ 32 KB ต่อลายเซ็น) เพื่อความรวดเร็วในการอัปโหลดบนมือถือ หากอ่านเลข SN ไม่ชัด ให้ครอปเฉพาะฉลากแล้วถ่ายใหม่</p>}
+    {showActionNotice && actionNotice && (
+      <p
+        className={`task-evidence-message${actionNotice.tone === 'error' ? ' is-error' : ''}`}
+        role={actionNotice.tone === 'error' ? 'alert' : 'status'}
+      >
+        {actionNotice.tone === 'error' ? <AlertCircle size={15} className="shrink-0" /> : <Check size={15} className="shrink-0" />}
+        <span>{actionNotice.text}</span>
+      </p>
+    )}
   </section>
 }
 
@@ -802,7 +819,7 @@ function SignatureEntry({
   const statusPillLabel = entry?.status === 'ready'
     ? '✓ บันทึกแล้ว'
     : isCustomerSlot
-    ? 'รอลูกค้าตรวจรับ'
+    ? 'รอด่านที่ 2 (G-Able)'
     : required
     ? 'จำเป็นในขั้นนี้'
     : 'ใช้ในขั้นอื่น'
@@ -823,7 +840,7 @@ function SignatureEntry({
       </div>
     )}
     {entry?.status === 'pending' && <div className="task-evidence-pending">ลายเซ็นยังรอยืนยัน</div>}
-    {!entry && !canEdit && showEmpty && <div className="task-evidence-empty">{isCustomerSlot ? 'รอลูกค้า (G-Able) ลงลายเซ็นตรวจรับมอบ' : 'ยังไม่มีลายเซ็น'}</div>}
+    {!entry && !canEdit && showEmpty && <div className="task-evidence-empty">{isCustomerSlot ? 'ด่านที่ 2: ให้ลูกค้า (G-Able) ลงนามหลัง Admin SYM ตรวจรับ' : 'ยังไม่มีลายเซ็น'}</div>}
     {canEdit && entry?.status === 'ready' && !editing && <button type="button" className="text-button" disabled={disabled} onClick={() => setEditing(true)}>แก้ไขลายเซ็น</button>}
     {showEditor && <>
       {entry?.status === 'ready' && <button type="button" className="text-button" disabled={disabled} onClick={() => { setEditing(false); setConsent(false); }}>ยกเลิกแก้ไข</button>}
