@@ -550,6 +550,7 @@
    ========================================================= */
 .content-wrap {
   width: min(1280px, 100%);
+  min-width: 0;
   margin: 0 auto;
   padding: 24px 28px 36px;
   display: flex;
@@ -4114,7 +4115,7 @@ tbody tr:hover td {
     font-size: 11px;
   }
   .app-shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .sidebar {
     position: fixed;
@@ -4124,11 +4125,15 @@ tbody tr:hover td {
     width: min(280px, 86vw);
     z-index: 40;
     transform: translateX(-104%);
-    transition: transform 0.2s ease;
+    visibility: hidden;
+    pointer-events: none;
+    transition: transform 0.2s ease, visibility 0.2s ease;
     box-shadow: var(--shadow-lg);
   }
   .sidebar.open {
     transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
   }
   .mobile-nav-close {
     display: inline-grid;

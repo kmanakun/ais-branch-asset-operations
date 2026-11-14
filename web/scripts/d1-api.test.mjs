@@ -769,6 +769,14 @@ test('Production wipe SQL in switch-to-production.ps1 obeys FK constraints and p
     email: 'tech1@sym.co.th',
     body: { branch_id: scanner.branch_id, serial_number: 'SN-WIPE-DISC' },
   })
+  await apiReq(env, '/api/stock/import/commit', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'WipeStock.xlsx',
+      rows: [{ serial_number: 'SN-WIPE-STOCK', brand: 'Zebra', model_name: 'DS9308', lot_no: 'PO-WIPE' }],
+    },
+  })
   env.DB.raw.prepare("INSERT INTO audit_events (id, entity_type, entity_id, action, actor_email) VALUES ('aud-1', 'task', 't1', 'test', 'admin@sym.co.th')").run()
 
   const psScript = readFileSync('scripts/switch-to-production.ps1', 'utf-8')
@@ -777,6 +785,9 @@ test('Production wipe SQL in switch-to-production.ps1 obeys FK constraints and p
   env.DB.raw.exec(match[1])
 
   for (const table of [
+    'stock_movements',
+    'stock_items',
+    'stock_documents',
     'replacement_task_evidence',
     'task_reviews',
     'scanner_discovery_reports',

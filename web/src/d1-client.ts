@@ -14,12 +14,14 @@ export interface AuthConfigResponse {
 export class ApiError extends Error {
   status: number
   code?: string
+  details?: Record<string, unknown>
 
-  constructor(message: string, status: number, code?: string) {
+  constructor(message: string, status: number, code?: string, details?: Record<string, unknown>) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -59,8 +61,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     let errorMessage = `HTTP Error ${response.status}`
     let errorCode: string | undefined
+    let errorDetails: Record<string, unknown> | undefined
     try {
       const errorJson = await response.json()
+      if (errorJson && typeof errorJson === 'object') {
+        errorDetails = errorJson as Record<string, unknown>
+      }
       if (errorJson.error || errorJson.message) {
         errorMessage = errorJson.error || errorJson.message
       }
@@ -70,7 +76,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     } catch {
       // ignore
     }
-    throw new ApiError(errorMessage, response.status, errorCode)
+    throw new ApiError(errorMessage, response.status, errorCode, errorDetails)
   }
 
   const text = await response.text()
@@ -411,4 +417,322 @@ export const d1Api = {
   }>(`/api/allowlist/${id}/toggle`, {
     method: 'POST',
   }),
+
+  // 23. Stock Scanner — KPI & ภาพรวมคลังสต็อก (Model B + Hybrid + Reverse Logistics)
+  getStockSummary: () => request<StockSummaryResponse>('/api/stock/summary'),
+
+  // 24. Stock Scanner — รายการเครื่องในคลัง/พื้นที่/ซากเครื่องเดิม
+  getStockItems: (params: {
+    unit_type?: 'new_unit' | 'old_removed'
+    status?: string
+    source_mode?: 'registered_stock' | 'hybrid_unregistered' | 'onsite_removal'
+    dispatch_area?: string
+    lot_no?: string
+    branch_id?: string
+    search?: string
+    include_void?: boolean
+    limit?: number
+    offset?: number
+  } = {}) => {
+    const q = new URLSearchParams()
+    if (params.unit_type) q.set('unit_type', params.unit_type)
+    if (params.status) q.set('status', params.status)
+    if (params.source_mode) q.set('source_mode', params.source_mode)
+    if (params.dispatch_area) q.set('dispatch_area', params.dispatch_area)
+    if (params.lot_no) q.set('lot_no', params.lot_no)
+    if (params.branch_id) q.set('branch_id', params.branch_id)
+    if (params.search) q.set('search', params.search)
+    if (params.include_void) q.set('include_void', '1')
+    if (params.limit) q.set('limit', String(params.limit))
+    if (params.offset !== undefined) q.set('offset', String(params.offset))
+    return request<{
+      total: number
+      limit: number
+      offset: number
+      rows: StockItemRecord[]
+    }>(`/api/stock/items?${q.toString()}`)
+  },
+
+  // 25. Stock Scanner — ตรวจสอบ SN แบบ Real-time + ประวัติทั้งสาย
+  lookupStockSerial: (serial: string, taskId?: string) => {
+    const q = new URLSearchParams()
+    q.set('serial', serial)
+    if (taskId) q.set('task_id', taskId)
+    return request<StockLookupResponse>(`/api/stock/lookup?${q.toString()}`)
+  },
+
+  // 26. Stock Scanner — Preview ก่อนนำเข้าไฟล์ Supplier Excel
+  previewStockImport: (
+    rows: StockImportInputPayload[],
+    defaults?: StockImportDefaultsPayload,
+  ) => request<StockImportPreviewResponse>('/api/stock/import/preview', {
+    method: 'POST',
+    body: JSON.stringify({ rows, defaults: defaults || {} }),
+  }),
+
+  // 27. Stock Scanner — Commit นำเข้าสต็อกเครื่องใหม่เข้าคลัง (RCV / auto DSP)
+  commitStockImport: (payload: {
+    source_name?: string
+    rows: StockImportInputPayload[]
+    defaults?: StockImportDefaultsPayload
+    skip_invalid?: boolean
+  }) => request<StockImportCommitResponse>('/api/stock/import/commit', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+
+  // 28. Stock Scanner — เบิกกระจายเข้าพื้นที่/ทีม (Model B)
+  dispatchStock: (payload: { serial_numbers: string[]; dispatch_area: string; note?: string }) =>
+    request<StockBatchActionResponse & { dispatch_area: string }>('/api/stock/dispatch', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // 29. Stock Scanner — ดึงเครื่องที่ยังไม่ได้ใช้กลับคลังกลาง
+  recallStock: (payload: { serial_numbers: string[]; note?: string }) =>
+    request<StockBatchActionResponse>('/api/stock/recall', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // 30. Stock Scanner — แจ้งเครื่องใหม่เสีย/ชำรุดรอเคลม (DOA)
+  markStockDoa: (payload: { serial_numbers: string[]; note: string }) =>
+    request<StockBatchActionResponse>('/api/stock/doa', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // 31. Stock Scanner — Reverse Logistics ขาที่ 1: รับซากเครื่องเดิมเข้าคลัง (RET)
+  receiveOldReturns: (payload: { serial_numbers: string[]; note?: string }) =>
+    request<StockBatchActionResponse>('/api/stock/old-returns/receive', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // 32. Stock Scanner — Reverse Logistics ขาที่ 2: ส่งมอบซากเครื่องเดิมคืน AIS/G-Able (HOV)
+  handoverOldReturns: (payload: { serial_numbers: string[]; recipient_name: string; note?: string }) =>
+    request<StockBatchActionResponse & { recipient_name: string }>('/api/stock/old-returns/handover', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  // 33. Stock Scanner — รายการเอกสารสต็อกทั้งหมด
+  getStockDocuments: (params: { doc_type?: string; search?: string; limit?: number; offset?: number } = {}) => {
+    const q = new URLSearchParams()
+    if (params.doc_type) q.set('doc_type', params.doc_type)
+    if (params.search) q.set('search', params.search)
+    if (params.limit) q.set('limit', String(params.limit))
+    if (params.offset !== undefined) q.set('offset', String(params.offset))
+    return request<{
+      total: number
+      limit: number
+      offset: number
+      rows: StockDocumentRecord[]
+    }>(`/api/stock/documents?${q.toString()}`)
+  },
+
+  // 34. Stock Scanner — รายละเอียดเอกสารและประวัติรายการเครื่องในเอกสารนั้น
+  getStockDocumentDetail: (docId: string) => request<{
+    document: StockDocumentRecord
+    movements: Array<StockMovementRecord & {
+      serial_number: string
+      unit_type: 'new_unit' | 'old_removed'
+      current_status: string
+      brand: string | null
+      model_name: string | null
+      branch_code: string | null
+      branch_name: string | null
+    }>
+  }>(`/api/stock/documents/${encodeURIComponent(docId)}`),
+}
+
+export interface StockSummaryResponse {
+  new_units: {
+    in_warehouse: number
+    dispatched: number
+    allocated_to_task: number
+    installed: number
+    doa_defective: number
+    void_hybrid: number
+    available_total: number
+    total_active: number
+    hybrid_unregistered: number
+  }
+  old_removed: {
+    removed_onsite: number
+    returned_to_warehouse: number
+    handed_over_to_customer: number
+    cancelled_restored: number
+    total_active: number
+  }
+  by_model: Array<{
+    brand: string
+    model_name: string
+    in_warehouse: number
+    dispatched: number
+    allocated_to_task: number
+    installed: number
+    doa_defective: number
+    total: number
+  }>
+  by_dispatch_area: Array<{
+    dispatch_area: string
+    dispatched_available: number
+    allocated_to_task: number
+    installed: number
+  }>
+  documents_by_type: Record<string, number>
+}
+
+export interface StockItemRecord {
+  id: string
+  serial_number: string
+  unit_type: 'new_unit' | 'old_removed'
+  status: string
+  pre_task_status: string | null
+  source_mode: 'registered_stock' | 'hybrid_unregistered' | 'onsite_removal'
+  brand: string | null
+  model_name: string | null
+  lot_no: string | null
+  receive_doc_id: string | null
+  receive_doc_code: string | null
+  dispatch_doc_id: string | null
+  dispatch_doc_code: string | null
+  dispatch_area: string | null
+  return_doc_id: string | null
+  return_doc_code: string | null
+  handover_doc_id: string | null
+  handover_doc_code: string | null
+  linked_task_id: string | null
+  linked_task_status?: string | null
+  linked_branch_id: string | null
+  branch_code?: string | null
+  branch_name?: string | null
+  branch_province?: string | null
+  linked_old_asset_id: string | null
+  old_asset_sn?: string | null
+  received_at: string | null
+  dispatched_at: string | null
+  allocated_at: string | null
+  installed_at: string | null
+  returned_at: string | null
+  handed_over_at: string | null
+  note: string | null
+  created_by: string
+  updated_by: string | null
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+export interface StockMovementRecord {
+  id: string
+  stock_item_id: string
+  doc_id: string | null
+  doc_code?: string | null
+  task_id: string | null
+  branch_id: string | null
+  branch_code?: string | null
+  branch_name?: string | null
+  action: string
+  from_status: string | null
+  to_status: string
+  actor_email: string
+  note: string | null
+  created_at: string
+}
+
+export interface StockLookupResponse {
+  found: boolean
+  serial_number: string
+  availability: {
+    available_for_closeout: boolean
+    code: string
+    message: string
+  }
+  item: StockItemRecord | null
+  movements: StockMovementRecord[]
+}
+
+export interface StockImportInputPayload {
+  source_row?: number
+  serial_number?: string | null
+  brand?: string | null
+  model_name?: string | null
+  lot_no?: string | null
+  dispatch_area?: string | null
+  received_date?: string | null
+  note?: string | null
+}
+
+export interface StockImportDefaultsPayload {
+  brand?: string | null
+  model_name?: string | null
+  lot_no?: string | null
+  dispatch_area?: string | null
+  dispatch_mode?: 'in_warehouse' | 'dispatched' | 'auto_by_column'
+  received_date?: string | null
+  note?: string | null
+}
+
+export interface StockValidatedImportRow {
+  source_row: number
+  serial_number: string
+  action: 'create_new' | 'reconcile_hybrid' | 'reactivate' | 'error'
+  valid: boolean
+  target_status: 'in_warehouse' | 'dispatched' | null
+  existing_item_id: string | null
+  existing_status: string | null
+  existing_task_id?: string | null
+  existing_branch_id?: string | null
+  brand: string | null
+  model_name: string | null
+  lot_no: string | null
+  dispatch_area: string | null
+  received_date: string | null
+  note: string | null
+  reason: string | null
+}
+
+export interface StockImportPreviewResponse {
+  summary: {
+    total: number
+    valid: number
+    create_new: number
+    reconcile_hybrid: number
+    reactivate: number
+    errors: number
+  }
+  items: StockValidatedImportRow[]
+}
+
+export interface StockImportCommitResponse {
+  success: boolean
+  doc_id: string
+  doc_code: string
+  dispatch_doc_code: string | null
+  committed_count: number
+  summary: StockImportPreviewResponse['summary']
+  message: string
+}
+
+export interface StockBatchActionResponse {
+  success: boolean
+  doc_id: string
+  doc_code: string
+  count: number
+  message: string
+}
+
+export interface StockDocumentRecord {
+  id: string
+  doc_code: string
+  doc_type: 'receive' | 'dispatch' | 'return_in' | 'handover_out' | 'doa_claim' | 'adjustment'
+  lot_no: string | null
+  destination_area: string | null
+  recipient_name: string | null
+  note: string | null
+  item_count: number
+  created_by: string
+  created_at: string
 }

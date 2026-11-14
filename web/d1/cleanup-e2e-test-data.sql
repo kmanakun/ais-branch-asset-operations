@@ -6,6 +6,47 @@
 -- ใช้: npx wrangler d1 execute ais-scanner-db --remote --file=./d1/cleanup-e2e-test-data.sql
 -- หมายเหตุ: ไฟล์ภาพใน R2 (tasks/<task_id>/...) ไม่ถูกลบโดยสคริปต์นี้
 
+DELETE FROM stock_movements WHERE
+  task_id IN (
+    SELECT t.id FROM replacement_tasks t
+    JOIN scanner_assets s ON s.id = t.scanner_asset_id
+    JOIN branches b ON b.id = s.branch_id
+    WHERE b.loc_bld LIKE 'AIS Shop E2E %'
+  )
+  OR branch_id IN (SELECT id FROM branches WHERE loc_bld LIKE 'AIS Shop E2E %')
+  OR stock_item_id IN (
+    SELECT id FROM stock_items
+    WHERE serial_number LIKE 'SN-STOCK-E2E-%'
+       OR linked_branch_id IN (SELECT id FROM branches WHERE loc_bld LIKE 'AIS Shop E2E %')
+  )
+  OR doc_id IN (
+    SELECT id FROM stock_documents WHERE lot_no LIKE 'LOT-E2E-%' OR note LIKE 'E2E_Test_%'
+  );
+
+DELETE FROM stock_items WHERE
+  serial_number LIKE 'SN-STOCK-E2E-%'
+  OR linked_branch_id IN (SELECT id FROM branches WHERE loc_bld LIKE 'AIS Shop E2E %')
+  OR linked_task_id IN (
+    SELECT t.id FROM replacement_tasks t
+    JOIN scanner_assets s ON s.id = t.scanner_asset_id
+    JOIN branches b ON b.id = s.branch_id
+    WHERE b.loc_bld LIKE 'AIS Shop E2E %'
+  )
+  OR receive_doc_id IN (
+    SELECT id FROM stock_documents WHERE lot_no LIKE 'LOT-E2E-%' OR note LIKE 'E2E_Test_%'
+  )
+  OR dispatch_doc_id IN (
+    SELECT id FROM stock_documents WHERE lot_no LIKE 'LOT-E2E-%' OR note LIKE 'E2E_Test_%'
+  )
+  OR return_doc_id IN (
+    SELECT id FROM stock_documents WHERE lot_no LIKE 'LOT-E2E-%' OR note LIKE 'E2E_Test_%'
+  )
+  OR handover_doc_id IN (
+    SELECT id FROM stock_documents WHERE lot_no LIKE 'LOT-E2E-%' OR note LIKE 'E2E_Test_%'
+  );
+
+DELETE FROM stock_documents WHERE lot_no LIKE 'LOT-E2E-%' OR note LIKE 'E2E_Test_%';
+
 DELETE FROM replacement_task_evidence WHERE replacement_task_id IN (
   SELECT t.id FROM replacement_tasks t
   JOIN scanner_assets s ON s.id = t.scanner_asset_id

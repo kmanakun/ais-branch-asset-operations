@@ -30,7 +30,9 @@ async function getE2eCounts(isRemote) {
       (SELECT COUNT(*) FROM task_reviews r JOIN replacement_tasks t ON t.id = r.task_id JOIN scanner_assets s ON s.id = t.scanner_asset_id JOIN branches b ON b.id = s.branch_id WHERE b.loc_bld LIKE 'AIS Shop E2E %') AS task_reviews,
       (SELECT COUNT(*) FROM scanner_discovery_reports d JOIN branches b ON b.id = d.branch_id WHERE b.loc_bld LIKE 'AIS Shop E2E %') AS scanner_discovery_reports,
       (SELECT COUNT(*) FROM google_signin_allowlist WHERE email GLOB 'testtech_[0-9]*@sym.co.th') AS google_signin_allowlist,
-      (SELECT COUNT(*) FROM import_batches WHERE source_name LIKE 'E2E_Test_%') AS import_batches
+      (SELECT COUNT(*) FROM import_batches WHERE source_name LIKE 'E2E_Test_%') AS import_batches,
+      (SELECT COUNT(*) FROM stock_items WHERE serial_number LIKE 'SN-STOCK-E2E-%' OR linked_branch_id IN (SELECT id FROM branches WHERE loc_bld LIKE 'AIS Shop E2E %')) AS stock_items,
+      (SELECT COUNT(*) FROM stock_documents WHERE lot_no LIKE 'LOT-E2E-%' OR note LIKE 'E2E_Test_%') AS stock_documents
   `, isRemote)
   return counts
 }

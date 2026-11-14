@@ -21,6 +21,15 @@ import {
   verifyCookiePayload,
   verifyGoogleIdToken,
 } from '../../src/lib/google-oauth.ts'
+import { validateSerialFormat } from '../../src/lib/stock-serial.mjs'
+import {
+  buildReviewRejectStockStatements,
+  createStockRouter,
+  prepareCancelTaskStockPlan,
+  prepareCloseoutStockPlan,
+  prepareCustomerAcceptStockStatements,
+  runBatchChunks,
+} from '../../src/lib/stock-service.ts'
 
 type Bindings = {
   DB: D1Database
@@ -1686,6 +1695,7 @@ app.delete('/tasks/:id/evidence/:slot', async (c) => {
 })
 
 // 9. ช่างส่งมอบผลงาน Onsite Closeout (พร้อมตรวจหลักฐานและ Anti-Tampering Lock)
+// 9. ช่างบันทึกปิดงาน Replacement Task (Closeout) พร้อมปรับสถานะ Stock อัตโนมัติ (Stock / Hybrid Mode / Reverse Logistics)
 app.post('/tasks/:id/closeout', async (c) => {
   const user = c.get('user')
   if (!hasOperationalWriteAccess(user.role)) {
@@ -1695,9 +1705,11 @@ app.post('/tasks/:id/closeout', async (c) => {
 
   let payload: {
     new_serial_number?: string
+    new_model_name?: string
     observed_serial?: string
     notes?: string
     outcome?: string
+    previous_sn_disposition?: 'release' | 'doa'
     version?: number
   }
   try {
@@ -1706,11 +1718,39 @@ app.post('/tasks/:id/closeout', async (c) => {
     return c.json({ error: 'รูปแบบข้อมูลปิดงานไม่ถูกต้อง' }, 400)
   }
 
-  const { new_serial_number, observed_serial, notes, outcome, version } = payload
+  const {
+    new_serial_number,
+    new_model_name,
+    observed_serial,
+    notes,
+    outcome,
+    previous_sn_disposition,
+    version,
+  } = payload
 
-  const task = await c.env.DB.prepare(
-    'SELECT id, status, version, scanner_asset_id FROM replacement_tasks WHERE id = ?'
-  ).bind(taskId).first<{ id: string; status: string; version: number; scanner_asset_id: string }>()
+  const task = await c.env.DB.prepare(`
+    SELECT
+      t.id,
+      t.status,
+      t.version,
+      t.scanner_asset_id,
+      s.branch_id,
+      s.com_sn as old_com_sn,
+      s.brand as old_brand,
+      s.model_name as old_model_name
+    FROM replacement_tasks t
+    JOIN scanner_assets s ON s.id = t.scanner_asset_id
+    WHERE t.id = ?
+  `).bind(taskId).first<{
+    id: string
+    status: string
+    version: number
+    scanner_asset_id: string
+    branch_id: string
+    old_com_sn: string
+    old_brand: string | null
+    old_model_name: string | null
+  }>()
   if (!task) return c.json({ error: 'ไม่พบใบงาน' }, 404)
   if (!['open', 'in_progress'].includes(task.status)) {
     return c.json({ error: 'สถานะใบงานปัจจุบันไม่อนุญาตให้ส่งผลปิดงาน (อาจอยู่ระหว่างพักงาน รอตรวจรับ ตรวจรับแล้ว หรือยกเลิกแล้ว)' }, 400)
@@ -1724,14 +1764,20 @@ app.post('/tasks/:id/closeout', async (c) => {
     return c.json({ error: 'ประเภทผลการเข้าหน้างานไม่ถูกต้อง' }, 400)
   }
 
-  const cleanNewSn = new_serial_number?.trim() || null
-  const cleanObservedSn = observed_serial?.trim() || null
-  const cleanNotes = notes?.trim() || null
-
+  let cleanNewSn: string | null = null
   if (cleanOutcome === 'replaced') {
-    if (!cleanNewSn || cleanNewSn.length > 100) {
-      return c.json({ error: 'กรณีเปลี่ยนเครื่องสำเร็จ กรุณาระบุหมายเลขเครื่องใหม่ (New Serial Number)' }, 400)
+    const snCheck = validateSerialFormat(new_serial_number)
+    if (!snCheck.valid) {
+      return c.json(
+        {
+          error: snCheck.serial
+            ? snCheck.reason
+            : 'กรณีเปลี่ยนเครื่องสำเร็จ กรุณาระบุหมายเลขเครื่องใหม่ (New Serial Number)',
+        },
+        400
+      )
     }
+    cleanNewSn = snCheck.serial
     const dup = await c.env.DB.prepare(
       'SELECT id FROM scanner_assets WHERE com_sn = ? AND id != ?'
     ).bind(cleanNewSn, task.scanner_asset_id).first()
@@ -1739,12 +1785,22 @@ app.post('/tasks/:id/closeout', async (c) => {
       return c.json({ error: `หมายเลขเครื่องใหม่ ${cleanNewSn} ซ้ำกับอุปกรณ์ที่มีอยู่แล้วในระบบ` }, 409)
     }
   } else if (cleanOutcome === 'different_device_found') {
-    if (!cleanObservedSn || cleanObservedSn.length > 100 || !cleanNotes || cleanNotes.length > 1000) {
+    const cleanObs = observed_serial?.trim() || null
+    const cleanN = notes?.trim() || null
+    if (!cleanObs || cleanObs.length > 100 || !cleanN || cleanN.length > 1000) {
       return c.json({ error: 'กรุณาระบุ Serial ของเครื่องที่พบและคำอธิบายประกอบให้ครบถ้วน' }, 400)
     }
-  } else if (!cleanNotes || cleanNotes.length > 1000) {
-    return c.json({ error: 'กรุณาระบุเหตุผลหรือรายละเอียดเพิ่มเติมหน้างาน (ไม่เกิน 1,000 ตัวอักษร)' }, 400)
+  } else {
+    const cleanN = notes?.trim() || null
+    if (!cleanN || cleanN.length > 1000) {
+      return c.json({ error: 'กรุณาระบุเหตุผลหรือรายละเอียดเพิ่มเติมหน้างาน (ไม่เกิน 1,000 ตัวอักษร)' }, 400)
+    }
   }
+
+  const cleanObservedSn = observed_serial?.trim() || null
+  const cleanNotes = notes?.trim() || null
+  const cleanNewModel = new_model_name?.trim()?.slice(0, 120) || null
+  const prevDisposition: 'release' | 'doa' = previous_sn_disposition === 'doa' ? 'doa' : 'release'
 
   let dbOutcome = cleanOutcome
   if (cleanOutcome === 'no_damage_found') {
@@ -1754,10 +1810,37 @@ app.post('/tasks/:id/closeout', async (c) => {
   }
 
   const nextStatus = cleanOutcome === 'replaced' ? 'awaiting_admin_acceptance' : 'pending_exception'
+  const persistedNewSn = cleanOutcome === 'replaced' ? cleanNewSn : null
+  const persistedNewModel = cleanOutcome === 'replaced' ? cleanNewModel : null
 
-  const closeRes = await c.env.DB.prepare(`
+  const stockPlan = await prepareCloseoutStockPlan(c.env.DB, {
+    taskId,
+    expectedNextTaskVersion: task.version + 1,
+    expectedNextTaskStatus: nextStatus,
+    expectedNewSn: persistedNewSn,
+    branchId: task.branch_id,
+    oldAssetId: task.scanner_asset_id,
+    oldComSn: task.old_com_sn,
+    oldBrand: task.old_brand,
+    oldModelName: task.old_model_name,
+    outcome: cleanOutcome,
+    newSerialNumber: persistedNewSn,
+    newModelName: persistedNewModel,
+    previousSnDisposition: prevDisposition,
+    actorEmail: user.email,
+  })
+
+  if (!stockPlan.ok) {
+    return c.json({ error: stockPlan.error || 'ไม่สามารถตัดสต็อกสำหรับใบงานนี้ได้' }, (stockPlan.status || 409) as 400 | 409)
+  }
+
+  const raceGuardSql = stockPlan.taskRaceGuardSql ? ` AND ${stockPlan.taskRaceGuardSql}` : ''
+  const raceGuardBinds = stockPlan.taskRaceGuardBinds || []
+
+  const taskUpdateStmt = c.env.DB.prepare(`
     UPDATE replacement_tasks SET
       new_serial_number = ?,
+      new_model_name = CASE WHEN ? = 'replaced' THEN COALESCE(?, new_model_name) ELSE NULL END,
       observed_serial = ?,
       notes = ?,
       outcome = ?,
@@ -1766,25 +1849,38 @@ app.post('/tasks/:id/closeout', async (c) => {
       closeout_submitted_by = ?,
       version = version + 1,
       updated_at = datetime('now')
-    WHERE id = ? AND version = ? AND status IN ('open', 'in_progress')
+    WHERE id = ? AND version = ? AND status IN ('open', 'in_progress')${raceGuardSql}
   `).bind(
-    cleanOutcome === 'replaced' ? cleanNewSn : null,
+    persistedNewSn,
+    cleanOutcome,
+    persistedNewModel,
     cleanObservedSn,
     cleanNotes,
     dbOutcome,
     nextStatus,
     user.email,
     taskId,
-    version
-  ).run()
+    version,
+    ...raceGuardBinds
+  )
 
-  if (closeRes.meta.changes === 0) {
-    return c.json({ error: 'ไม่สามารถบันทึกปิดงานได้ ข้อมูลใบงานอาจถูกแก้ไขหรือเปลี่ยนสถานะไปก่อนหน้านี้' }, 409)
+  const batchResults = await c.env.DB.batch([
+    taskUpdateStmt,
+    ...((stockPlan.itemStatements || []) as D1PreparedStatement[]),
+  ])
+
+  if ((batchResults[0]?.meta?.changes || 0) === 0) {
+    return c.json({ error: 'ไม่สามารถบันทึกปิดงานได้ ข้อมูลใบงานหรือสต็อกอาจถูกแก้ไขไปก่อนหน้านี้' }, 409)
+  }
+
+  if (stockPlan.movementStatements && stockPlan.movementStatements.length > 0) {
+    await runBatchChunks(c.env.DB, stockPlan.movementStatements, 150)
   }
 
   return c.json({
     success: true,
-    status: nextStatus
+    status: nextStatus,
+    stock_source_mode: stockPlan.sourceMode || null,
   })
 })
 
@@ -1862,6 +1958,37 @@ app.post('/tasks/:id/action', async (c) => {
     }
     nextStatus = 'cancelled'
     notes = notes ? `${notes} | ยกเลิก: ${cleanReason}` : `ยกเลิก: ${cleanReason}`
+
+    const cancelStockPlan = await prepareCancelTaskStockPlan(c.env.DB, {
+      taskId,
+      expectedNextTaskVersion: task.version + 1,
+      reason: cleanReason,
+      actorEmail: user.email,
+    })
+    if (!cancelStockPlan.ok) {
+      return c.json({ error: cancelStockPlan.error }, 409)
+    }
+
+    const cancelTaskStmt = c.env.DB.prepare(`
+      UPDATE replacement_tasks
+      SET status = ?, notes = ?, version = version + 1, updated_at = datetime('now')
+      WHERE id = ? AND version = ?
+    `).bind(nextStatus, notes, taskId, task.version)
+
+    const cancelResults = await c.env.DB.batch([
+      cancelTaskStmt,
+      ...((cancelStockPlan.itemStatements || []) as D1PreparedStatement[]),
+    ])
+
+    if ((cancelResults[0]?.meta?.changes || 0) === 0) {
+      return c.json({ error: 'ไม่สามารถยกเลิกใบงานได้ ข้อมูลอาจถูกแก้ไขจากอีกหน้าจอ' }, 409)
+    }
+
+    if (cancelStockPlan.movementStatements && cancelStockPlan.movementStatements.length > 0) {
+      await runBatchChunks(c.env.DB, cancelStockPlan.movementStatements, 150)
+    }
+
+    return c.json({ success: true, status: nextStatus })
   }
 
   const resAction = await c.env.DB.prepare(`
@@ -2000,12 +2127,24 @@ app.post('/review/sym-verify', async (c) => {
     observedRegistered = true
   }
 
-  // บันทึกประวัติ Task Reviews
+  // บันทึกประวัติ Task Reviews (+ Stock Ledger กรณี Reject เพื่อติดตามเหตุผลโดยไม่ปลดจอง SN ทิ้ง)
   const reviewId = makeUniqueId('rev')
-  await c.env.DB.prepare(`
+  const reviewInsertStmt = c.env.DB.prepare(`
     INSERT INTO task_reviews (id, task_id, stage, decision, reason, reviewer_email)
     VALUES (?, ?, 'sym', ?, ?, ?)
-  `).bind(reviewId, task_id, decision, reason || null, user.email).run()
+  `).bind(reviewId, task_id, decision, reason || null, user.email)
+
+  if (decision === 'reject') {
+    const stockRejectStmts = await buildReviewRejectStockStatements(c.env.DB, {
+      taskId: task_id,
+      stageLabel: 'SYM Admin',
+      reason: reason!.trim(),
+      actorEmail: user.email,
+    })
+    await c.env.DB.batch([reviewInsertStmt, ...(stockRejectStmts as D1PreparedStatement[])])
+  } else {
+    await reviewInsertStmt.run()
+  }
 
   return c.json({
     success: true,
@@ -2137,7 +2276,18 @@ app.post('/review/customer-batch-accept', async (c) => {
     })
   }
 
+  // เปลี่ยนสถานะเครื่องใหม่ที่ผูกอยู่ (allocated_to_task) เป็นติดตั้งถาวร (installed) พร้อมกับอัปเดต delivered
+  const stockAcceptPlan = await prepareCustomerAcceptStockStatements(c.env.DB, {
+    taskIds: eligibleTasks.map(t => t.id),
+    actorEmail: user.email,
+  })
+  stmts.push(...(stockAcceptPlan.itemStatements as D1PreparedStatement[]))
+
   await c.env.DB.batch(stmts)
+
+  if (stockAcceptPlan.movementStatements.length > 0) {
+    await runBatchChunks(c.env.DB, stockAcceptPlan.movementStatements, 150)
+  }
 
   return c.json({
     success: true,
@@ -2176,10 +2326,19 @@ app.post('/review/customer-reject', async (c) => {
   }
 
   const revId = makeUniqueId(`rev-grj-${task_id}`)
-  await c.env.DB.prepare(`
+  const rejectReviewStmt = c.env.DB.prepare(`
     INSERT INTO task_reviews (id, task_id, stage, decision, reason, reviewer_email)
     VALUES (?, ?, 'customer', 'reject', ?, ?)
-  `).bind(revId, task_id, reason.trim(), user.email).run()
+  `).bind(revId, task_id, reason.trim(), user.email)
+
+  const stockRejectStmts = await buildReviewRejectStockStatements(c.env.DB, {
+    taskId: task_id,
+    stageLabel: 'G-Able',
+    reason: reason.trim(),
+    actorEmail: user.email,
+  })
+
+  await c.env.DB.batch([rejectReviewStmt, ...(stockRejectStmts as D1PreparedStatement[])])
 
   return c.json({
     success: true,
@@ -2512,6 +2671,9 @@ app.post('/allowlist/:id/toggle', async (c) => {
     message: nextActive === 1 ? 'เปิดใช้งานผู้ใช้เรียบร้อย' : 'ระงับการใช้งานผู้ใช้เรียบร้อย'
   })
 })
+
+// 21. ระบบคลังสต็อกเครื่องสแกนเนอร์ (Stock Scanner & Reverse Logistics)
+app.route('/stock', createStockRouter() as unknown as Hono<{ Bindings: Bindings; Variables: Variables }>)
 
 export { app }
 export const onRequest = handle(app)

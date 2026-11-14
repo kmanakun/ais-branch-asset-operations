@@ -19,6 +19,7 @@ import {
   LogOut,
   MapPin,
   Menu,
+  Package,
   Printer,
   ScanBarcode,
   Search,
@@ -37,6 +38,9 @@ import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } f
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
 import { ApiError, type AuthConfigResponse, d1Api, getDevEmail, setDevAuthHeadersEnabled, setDevEmail } from './d1-client'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
+import { StockLookupBadge } from './StockLookupBadge'
+import { StockManagementPanel } from './StockManagementPanel'
+import { validateSerialFormat } from './lib/stock-serial.mjs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -62,6 +66,7 @@ type DashboardData = {
 const navigation: Array<{ key: MenuKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: 'overview', label: 'ภาพรวม', icon: LayoutDashboard },
   { key: 'assets', label: 'ทะเบียนอุปกรณ์', icon: HardDrive },
+  { key: 'stock', label: 'สต็อกเครื่อง', icon: Package },
   { key: 'work_orders', label: 'ใบงาน', icon: ClipboardList },
   { key: 'pending', label: 'รอตรวจรับ', icon: ShieldCheck },
   { key: 'completed', label: 'เสร็จแล้ว', icon: CheckCircle2 },
@@ -74,6 +79,7 @@ const pageCopy: Record<MenuKey, { title: string; subtitle: string }> = {
   overview: { title: 'ภาพรวมการปฏิบัติงาน', subtitle: 'สถานะสาขา อุปกรณ์ และใบงานเปลี่ยน Scanner' },
   work_orders: { title: 'ใบงานเปลี่ยน Scanner', subtitle: 'เปิดดูงานทุกใบและรายละเอียด Scanner ที่ต้องดำเนินการ' },
   assets: { title: 'ทะเบียนอุปกรณ์', subtitle: 'ดูข้อมูลสาขาและเครื่องสแกนที่ผูกกับแต่ละ LocationCode' },
+  stock: { title: 'คลังสต็อกเครื่องสแกนเนอร์', subtitle: 'รับเข้า Supplier · เบิกกระจายพื้นที่ · Hybrid Mode · รับซากส่งคืน' },
   pending: { title: 'รายการ Pending รอตรวจ', subtitle: 'ตรวจผลหน้างาน รูปภาพ และลายเซ็นที่ช่างส่งมา' },
   completed: { title: 'ใบงานที่เสร็จแล้ว', subtitle: 'ดูงานที่ส่งมอบหรือปิดผลแล้ว พร้อมเปิดหลักฐานและประวัติย้อนหลัง' },
   discovery: { title: 'เครื่องนอกทะเบียน', subtitle: 'ตรวจรายการที่ช่างพบเพิ่ม โดยไม่ปะปนกับทะเบียนอุปกรณ์หลัก' },
@@ -667,6 +673,12 @@ function App() {
       setMobileMenuOpen(false)
       return
     }
+    if (activeMenu === 'stock') {
+      if (!demoMode && userContext?.role !== 'customer_reviewer') return
+      setActiveMenu('overview')
+      setMobileMenuOpen(false)
+      return
+    }
     if (demoMode || userContext?.role === 'admin' || !['imports', 'people'].includes(activeMenu)) return
     setActiveMenu('overview')
     setMobileMenuOpen(false)
@@ -909,6 +921,9 @@ function App() {
     if (item.key === 'discovery') {
       return !demoMode && role === 'admin'
     }
+    if (item.key === 'stock') {
+      return !demoMode && role !== 'customer_reviewer'
+    }
     return canUseAdminModules || !['imports', 'people'].includes(item.key)
   })
   const visibleProvinces = demoMode
@@ -1006,6 +1021,7 @@ function App() {
           {activeMenu === 'work_orders' && <WorkOrders role={role} currentEmail={userContext?.email} demo={demoMode} onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} onOpenHandover={setHandoverBranch} />}
           {activeMenu === 'completed' && <WorkOrders role={role} currentEmail={userContext?.email} demo={demoMode} view="completed" onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} onOpenHandover={setHandoverBranch} />}
           {activeMenu === 'assets' && <Assets role={role} currentEmail={userContext?.email} demo={demoMode} items={demoMode ? demoAssets : listData} loading={pageLoading} error={listError} onRetry={() => setListReloadKey(key => key + 1)} onTaskUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); if (action === 'evidence_started') setNotice(''); else setNotice(action === 'refresh' ? 'กำลังโหลดสถานะ Scanner ล่าสุด' : action === 'closeout_pending' ? 'ส่งผลหน้างานแล้ว รอ Admin ตรวจหลักฐานและลงนาม' : action === 'resolve_exception' ? 'Admin ตรวจ Pending และบันทึกผลพิจารณาแล้ว' : action === 'accept' ? 'Admin ลงนามรับผ่านและส่งมอบงานแล้ว' : action === 'block' ? 'บันทึกรายการ Pending แล้ว' : action === 'resume' ? 'รายการกลับมาดำเนินการแล้ว' : 'เริ่มปฏิบัติงานแล้ว'); void loadContext() }} search={search} searchResultsReady={demoMode || loadedAssetSearch === search} setSearch={value => { clearAssetQueryResults(); resetAssetPages(); setSearch(value) }} provinceOptions={visibleProvinces} provinceFilter={activeProvince} setProvinceFilter={value => { clearAssetQueryResults(); resetAssetPages(); setActiveProvince(value) }} statusFilter={assetStatusFilter} setStatusFilter={value => { clearAssetQueryResults(); resetAssetPages(); setAssetStatusFilter(value) }} page={assetPage} pageOffset={assetPageOffsets.current[assetPage] || 0} total={assetTotal} provinceTotal={assetProvinceTotal} setPage={value => { setListData([]); setListError(''); setAssetPage(value) }} focusSerial={pendingAssetSerial} onFocusResolved={() => setPendingAssetSerial('')} onOpenHandover={setHandoverBranch} />}
+          {activeMenu === 'stock' && !demoMode && role !== 'customer_reviewer' && <StockManagementPanel role={role} onToast={setNotice} />}
           {activeMenu === 'pending' && !demoMode && (role === 'admin' || role === 'customer_reviewer') && <PendingReviews role={role} currentEmail={userContext?.email} onUpdated={action => { setListReloadKey(key => key + 1); setNotice(action === 'accept' ? 'ตรวจรับและส่งมอบงานเรียบร้อย' : action === 'reject' ? 'ปฏิเสธงานและส่งกลับแก้ไขแล้ว' : action === 'resolve_exception' ? 'บันทึกผลตรวจ Pending แล้ว' : 'สถานะใบงานอัปเดตแล้ว'); void loadContext() }} onOpenHandover={setHandoverBranch} />}
           {activeMenu === 'discovery' && !demoMode && role === 'admin' && <ScannerDiscoveryQueue onUpdated={action => { resetAssetPages(); setListReloadKey(key => key + 1); setNotice(action === 'refresh' ? 'รายการเครื่องนอกทะเบียนอัปเดตแล้ว' : action); void loadContext() }} />}
           {!demoMode && handoverBranch && createPortal(<BranchHandoverSheetModal branch={handoverBranch} onClose={() => setHandoverBranch(null)} />, document.body)}
@@ -3242,6 +3258,8 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
   const [cancelReason, setCancelReason] = useState('')
   const [blockReason, setBlockReason] = useState('')
   const [newSerialInput, setNewSerialInput] = useState(() => String(task.new_serial_number || task.new_serial || ''))
+  const [stockLookupAllowed, setStockLookupAllowed] = useState(true)
+  const [stockLookupBlockedReason, setStockLookupBlockedReason] = useState('')
   const newSerialInputRef = useRef<HTMLInputElement>(null)
   const [showNewSnScanner, setShowNewSnScanner] = useState(false)
   const [observedSerialInput, setObservedSerialInput] = useState('')
@@ -3251,6 +3269,8 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
   useEffect(() => {
     setOutcomeInput(outcome || 'replaced')
     setNewSerialInput(String(task.new_serial_number || task.new_serial || ''))
+    setStockLookupAllowed(true)
+    setStockLookupBlockedReason('')
     setObservedSerialInput(String(task.observed_serial || ''))
     setExceptionReasonInput(String(task.exception_reason || task.notes || ''))
     setRegisterObservedSerial(false)
@@ -3266,6 +3286,8 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
     canEditTechnicianEvidence,
     outcomeInput,
     newSerialInput,
+    stockLookupAllowed,
+    stockLookupBlockedReason,
     observedSerialInput,
     exceptionReasonInput,
     version,
@@ -3322,12 +3344,19 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
     setActionError('')
     if (!snap.validTaskVersion) { setActionError('เชื่อมต่อระบบไม่ได้หรือข้อมูลใบงานล้าสมัย โปรดโหลดใบงานใหม่'); return }
     if (!overrideReady && !snap.requiredEvidenceReady) { setActionError('บันทึกรูปหลักฐานและลายเซ็นที่จำเป็นให้ครบก่อนส่งผลปิดงาน'); return }
-    const cleanSerial = snap.newSerialInput.trim()
+    let cleanSerial = snap.newSerialInput.trim()
     const cleanObserved = snap.observedSerialInput.trim()
     const cleanReason = snap.exceptionReasonInput.trim()
     if (snap.outcomeInput === 'replaced') {
-      if (!cleanSerial || cleanSerial.length > 100) {
-        setActionError('กรุณากรอก Serial เครื่องใหม่ให้ครบถ้วน')
+      const snCheck = validateSerialFormat(snap.newSerialInput)
+      if (!snCheck.valid) {
+        setActionError(snCheck.reason || 'กรุณากรอก Serial เครื่องใหม่ให้ถูกต้อง')
+        newSerialInputRef.current?.focus()
+        return
+      }
+      cleanSerial = snCheck.serial
+      if (!snap.stockLookupAllowed && snap.stockLookupBlockedReason) {
+        setActionError(snap.stockLookupBlockedReason)
         newSerialInputRef.current?.focus()
         return
       }
@@ -3442,7 +3471,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
       <div className="work-order-layout">
         <div className="work-order-main">
           <section className="detail-section"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
-          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div><Input ref={newSerialInputRef} aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
+          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div><Input ref={newSerialInputRef} aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /><StockLookupBadge serial={newSerialInput} taskId={taskId} enabled={!demo && role !== 'viewer'} mode="closeout" onAvailabilityChange={(allowed, reason) => { setStockLookupAllowed(allowed); setStockLookupBlockedReason(allowed ? '' : reason) }} /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong>{!demo && role !== 'viewer' && Boolean(newSerial) && <StockLookupBadge serial={String(newSerial)} taskId={taskId} enabled={true} mode="review" />}</div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
           <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} />{(Boolean(observedSerial) || outcome === 'different_device_found') && <DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} />}<DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || '—'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
           {reviews.length > 0 && (
@@ -3513,10 +3542,10 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
                   <Button
                     type="button"
                     size="sm"
-                    disabled={busy || evidenceBusy}
+                    disabled={busy || evidenceBusy || !stockLookupAllowed}
                     onClick={() => void submitCloseoutData(false)}
                   >
-                    {busy ? 'กำลังส่งงาน…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : 'ส่งให้ Admin SYM ตรวจรับ'}
+                    {busy ? 'กำลังส่งงาน…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : !stockLookupAllowed ? 'Serial เครื่องใหม่ไม่สามารถใช้งานได้' : 'ส่งให้ Admin SYM ตรวจรับ'}
                   </Button>
                 </div>
               )}

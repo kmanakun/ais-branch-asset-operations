@@ -34,6 +34,9 @@ if (-not $Force) {
   Write-Host "  - scanner_discovery_reports" -ForegroundColor Gray
   Write-Host "  - import_batches" -ForegroundColor Gray
   Write-Host "  - audit_events" -ForegroundColor Gray
+  Write-Host "  - stock_movements" -ForegroundColor Gray
+  Write-Host "  - stock_items" -ForegroundColor Gray
+  Write-Host "  - stock_documents" -ForegroundColor Gray
   Write-Host "`n[SAFEGUARD] google_signin_allowlist WILL BE PRESERVED (Admins will NOT be locked out).`n" -ForegroundColor Green
 
   $confirmation = Read-Host "Type 'YES' to create encrypted backup and switch to Production"
@@ -64,6 +67,9 @@ Write-Host "  ✔ Pre-wipe backup completed and verified." -ForegroundColor Gree
 Write-Host "`n[Step 2/3] Wiping test data from remote D1 database..." -ForegroundColor Cyan
 
 $wipeSql = @"
+DELETE FROM stock_movements;
+DELETE FROM stock_items;
+DELETE FROM stock_documents;
 DELETE FROM replacement_task_evidence;
 DELETE FROM task_reviews;
 DELETE FROM scanner_discovery_reports;

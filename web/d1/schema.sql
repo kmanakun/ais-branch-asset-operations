@@ -161,3 +161,104 @@ CREATE TABLE IF NOT EXISTS scanner_discovery_reports (
 CREATE INDEX IF NOT EXISTS idx_discovery_branch ON scanner_discovery_reports(branch_id);
 CREATE INDEX IF NOT EXISTS idx_discovery_status ON scanner_discovery_reports(status);
 
+-- 11. เอกสารเคลื่อนไหวสต็อกเครื่องสแกนเนอร์ (Stock Documents: RCV / DSP / RET / HOV / DOA / ADJ)
+CREATE TABLE IF NOT EXISTS stock_documents (
+    id TEXT PRIMARY KEY,
+    doc_code TEXT NOT NULL UNIQUE,
+    doc_type TEXT NOT NULL CHECK (doc_type IN ('receive', 'dispatch', 'return_in', 'handover_out', 'doa_claim', 'adjustment')),
+    lot_no TEXT,
+    destination_area TEXT,
+    recipient_name TEXT,
+    note TEXT,
+    item_count INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stock_docs_type ON stock_documents(doc_type);
+CREATE INDEX IF NOT EXISTS idx_stock_docs_created ON stock_documents(created_at DESC);
+
+-- 12. ทะเบียนสต็อกเครื่องสแกนเนอร์รายตัวแบบ Serialized (Stock Items: New Units & Old Removed Units)
+CREATE TABLE IF NOT EXISTS stock_items (
+    id TEXT PRIMARY KEY,
+    serial_number TEXT NOT NULL UNIQUE,
+    unit_type TEXT NOT NULL CHECK (unit_type IN ('new_unit', 'old_removed')),
+    status TEXT NOT NULL CHECK (status IN (
+        'in_warehouse',
+        'dispatched',
+        'allocated_to_task',
+        'installed',
+        'doa_defective',
+        'void_hybrid',
+        'removed_onsite',
+        'returned_to_warehouse',
+        'handed_over_to_customer',
+        'cancelled_restored'
+    )),
+    pre_task_status TEXT CHECK (pre_task_status IS NULL OR pre_task_status IN ('in_warehouse', 'dispatched')),
+    source_mode TEXT NOT NULL DEFAULT 'registered_stock' CHECK (source_mode IN ('registered_stock', 'hybrid_unregistered', 'onsite_removal')),
+    brand TEXT,
+    model_name TEXT,
+    lot_no TEXT,
+    receive_doc_id TEXT REFERENCES stock_documents(id) ON DELETE RESTRICT,
+    dispatch_doc_id TEXT REFERENCES stock_documents(id) ON DELETE RESTRICT,
+    dispatch_area TEXT,
+    return_doc_id TEXT REFERENCES stock_documents(id) ON DELETE RESTRICT,
+    handover_doc_id TEXT REFERENCES stock_documents(id) ON DELETE RESTRICT,
+    linked_task_id TEXT REFERENCES replacement_tasks(id) ON DELETE RESTRICT,
+    linked_branch_id TEXT REFERENCES branches(id) ON DELETE RESTRICT,
+    linked_old_asset_id TEXT REFERENCES scanner_assets(id) ON DELETE RESTRICT,
+    received_at TEXT,
+    dispatched_at TEXT,
+    allocated_at TEXT,
+    installed_at TEXT,
+    returned_at TEXT,
+    handed_over_at TEXT,
+    note TEXT,
+    created_by TEXT NOT NULL,
+    updated_by TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stock_items_type_status ON stock_items(unit_type, status);
+CREATE INDEX IF NOT EXISTS idx_stock_items_task ON stock_items(linked_task_id);
+CREATE INDEX IF NOT EXISTS idx_stock_items_branch ON stock_items(linked_branch_id);
+CREATE INDEX IF NOT EXISTS idx_stock_items_old_asset ON stock_items(linked_old_asset_id);
+CREATE INDEX IF NOT EXISTS idx_stock_items_lot ON stock_items(lot_no);
+CREATE INDEX IF NOT EXISTS idx_stock_items_area ON stock_items(dispatch_area);
+
+-- 13. บัญชีคุมประวัติการเคลื่อนไหวสต็อกแบบ Append-Only (Stock Movements Audit Ledger)
+CREATE TABLE IF NOT EXISTS stock_movements (
+    id TEXT PRIMARY KEY,
+    stock_item_id TEXT NOT NULL REFERENCES stock_items(id) ON DELETE RESTRICT,
+    doc_id TEXT REFERENCES stock_documents(id) ON DELETE RESTRICT,
+    task_id TEXT REFERENCES replacement_tasks(id) ON DELETE RESTRICT,
+    branch_id TEXT REFERENCES branches(id) ON DELETE RESTRICT,
+    action TEXT NOT NULL CHECK (action IN (
+        'received',
+        'reconciled_hybrid',
+        'dispatched',
+        'allocated_to_task',
+        'installed',
+        'review_rejected',
+        'released_from_task',
+        'marked_doa',
+        'voided_hybrid',
+        'removed_onsite',
+        'returned_to_warehouse',
+        'handed_over_to_customer',
+        'cancelled_restored',
+        'adjusted'
+    )),
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    actor_email TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_doc ON stock_movements(doc_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_task ON stock_movements(task_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_created ON stock_movements(created_at DESC);
+
+
