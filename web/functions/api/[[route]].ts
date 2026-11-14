@@ -70,6 +70,16 @@ function makeUniqueId(prefix: string): string {
   return `${prefix}-${Date.now()}-${rand}`
 }
 
+async function readJsonBody<T extends Record<string, unknown>>(c: any): Promise<T | null> {
+  try {
+    const parsed = await c.req.json()
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed as T
+  } catch {
+    return null
+  }
+}
+
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>().basePath('/api')
 
 const PUBLIC_AUTH_PATHS = new Set([
@@ -1002,7 +1012,10 @@ app.post('/register/import', async (c) => {
     return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถนำเข้าทะเบียนได้' }, 403)
   }
 
-  const body = await c.req.json<{ rows: any[]; source_name?: string }>()
+  const body = await readJsonBody<{ rows?: any[]; source_name?: string }>(c)
+  if (!body) {
+    return c.json({ error: 'รูปแบบข้อมูลสำหรับนำเข้าทะเบียนไม่ถูกต้อง' }, 400)
+  }
   const rows = body.rows
 
   if (!Array.isArray(rows) || rows.length === 0) {
@@ -1310,13 +1323,11 @@ app.post('/tasks/start', async (c) => {
     return c.json({ error: 'บัญชีนี้ไม่มีสิทธิ์เริ่มงานเปลี่ยนอุปกรณ์' }, 403)
   }
 
-  let scanner_id = ''
-  try {
-    const payload = await c.req.json<{ scanner_id?: string }>()
-    scanner_id = String(payload?.scanner_id || '').trim()
-  } catch {
+  const payload = await readJsonBody<{ scanner_id?: unknown }>(c)
+  if (!payload) {
     return c.json({ error: 'รูปแบบข้อมูลคำขอไม่ถูกต้อง' }, 400)
   }
+  const scanner_id = typeof payload.scanner_id === 'string' ? payload.scanner_id.trim() : ''
   if (!scanner_id) {
     return c.json({ error: 'กรุณาระบุรหัสเครื่องสแกนเนอร์ (scanner_id)' }, 400)
   }
@@ -1408,21 +1419,21 @@ app.post('/tasks/:id/evidence', async (c) => {
     return c.json({ error: 'ใบงานนี้ถูกส่งตรวจรับ ตรวจรับแล้ว หรือยกเลิกแล้ว ระบบล็อกข้อมูลป้องกันการแก้ไข' }, 400)
   }
 
-  let body: { evidence_type?: string; file_base64?: string; mime_type?: string }
-  try {
-    body = await c.req.json()
-  } catch {
+  const body = await readJsonBody<{ evidence_type?: unknown; file_base64?: unknown; mime_type?: unknown }>(c)
+  if (!body) {
     return c.json({ error: 'รูปแบบข้อมูลหลักฐานไม่ถูกต้อง' }, 400)
   }
 
-  const evidenceType = String(body.evidence_type || '').trim()
-  if (!evidenceType || !/^[a-zA-Z0-9_-]{1,64}$/.test(evidenceType) || !body.file_base64) {
+  const evidenceType = typeof body.evidence_type === 'string' ? body.evidence_type.trim() : ''
+  const fileBase64 = typeof body.file_base64 === 'string' ? body.file_base64 : ''
+  const mimeType = typeof body.mime_type === 'string' ? body.mime_type : 'image/jpeg'
+  if (!evidenceType || !/^[a-zA-Z0-9_-]{1,64}$/.test(evidenceType) || !fileBase64) {
     return c.json({ error: 'ข้อมูลภาพถ่ายหรือประเภทหลักฐานไม่ครบถ้วนหรือรูปแบบไม่ถูกต้อง' }, 400)
   }
 
   let bytes: Uint8Array
   try {
-    const cleanBase64 = String(body.file_base64).replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
+    const cleanBase64 = fileBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
     const binaryString = atob(cleanBase64)
     bytes = new Uint8Array(binaryString.length)
     for (let i = 0; i < binaryString.length; i++) {
@@ -1440,7 +1451,7 @@ app.post('/tasks/:id/evidence', async (c) => {
   // บันทึกลง Cloudflare R2
   if (c.env.EVIDENCE_BUCKET) {
     await c.env.EVIDENCE_BUCKET.put(storageKey, bytes.buffer, {
-      httpMetadata: { contentType: body.mime_type || 'image/jpeg' }
+      httpMetadata: { contentType: mimeType }
     })
   }
 
@@ -1724,7 +1735,7 @@ app.post('/tasks/:id/closeout', async (c) => {
   }
   const taskId = c.req.param('id')
 
-  let payload: {
+  const payload = await readJsonBody<{
     new_serial_number?: string
     new_model_name?: string
     observed_serial?: string
@@ -1732,10 +1743,8 @@ app.post('/tasks/:id/closeout', async (c) => {
     outcome?: string
     previous_sn_disposition?: 'release' | 'doa'
     version?: number
-  }
-  try {
-    payload = await c.req.json()
-  } catch {
+  }>(c)
+  if (!payload) {
     return c.json({ error: 'รูปแบบข้อมูลปิดงานไม่ถูกต้อง' }, 400)
   }
 
@@ -1910,18 +1919,21 @@ app.post('/tasks/:id/action', async (c) => {
   const user = c.get('user')
   const taskId = c.req.param('id')
 
-  let payload: {
-    action?: 'start' | 'block' | 'resume' | 'cancel'
-    reason?: string
-    version?: number
-  }
-  try {
-    payload = await c.req.json()
-  } catch {
+  const payload = await readJsonBody<{
+    action?: unknown
+    reason?: unknown
+    version?: unknown
+  }>(c)
+  if (!payload) {
     return c.json({ error: 'รูปแบบข้อมูลคำสั่งไม่ถูกต้อง' }, 400)
   }
 
-  const { action, reason, version } = payload
+  const action = typeof payload.action === 'string' ? payload.action.trim() : ''
+  const reason = typeof payload.reason === 'string' ? payload.reason : undefined
+  const version = payload.version
+  if (version !== undefined && version !== null && (typeof version !== 'number' || !Number.isInteger(version) || version < 1)) {
+    return c.json({ error: 'ค่า version ของใบงานไม่ถูกต้อง' }, 400)
+  }
 
   if (action === 'cancel') {
     if (!['admin', 'data_manager'].includes(user.role)) {
@@ -2032,16 +2044,33 @@ app.post('/review/sym-verify', async (c) => {
     return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถตรวจสอบงานขั้นนี้ได้' }, 403)
   }
 
-  const { task_id, decision, reason, version, register_observed_serial } = await c.req.json<{
-    task_id: string
-    decision: 'pass' | 'reject'
-    reason?: string
-    version: number
-    register_observed_serial?: boolean
-  }>()
+  const body = await readJsonBody<{
+    task_id?: unknown
+    decision?: unknown
+    reason?: unknown
+    version?: unknown
+    register_observed_serial?: unknown
+  }>(c)
+  if (!body) {
+    return c.json({ error: 'รูปแบบข้อมูลตรวจรับไม่ถูกต้อง' }, 400)
+  }
+
+  const task_id = typeof body.task_id === 'string' ? body.task_id.trim() : ''
+  const decision = (typeof body.decision === 'string' ? body.decision.trim() : '') as 'pass' | 'reject'
+  const reason = typeof body.reason === 'string' ? body.reason : undefined
+  const version = body.version
+  const register_observed_serial = body.register_observed_serial === true
+
+  if (!task_id) {
+    return c.json({ error: 'กรุณาระบุรหัสใบงาน (task_id)' }, 400)
+  }
 
   if (!['pass', 'reject'].includes(decision)) {
     return c.json({ error: 'ผลการตรวจสอบไม่ถูกต้อง (ต้องเป็น pass หรือ reject)' }, 400)
+  }
+
+  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
+    return c.json({ error: 'กรุณาระบุ version ของใบงานเป็นตัวเลขจำนวนเต็มที่ถูกต้อง' }, 400)
   }
 
   if (decision === 'reject' && !reason?.trim()) {
@@ -2181,16 +2210,14 @@ app.post('/review/customer-batch-accept', async (c) => {
     return c.json({ error: 'ต้องมีสิทธิ์ G-Able Customer Reviewer จึงจะสามารถเซ็นตรวจรับได้' }, 403)
   }
 
-  let payload: { branch_id?: string; task_ids?: string[]; signature_base64?: string }
-  try {
-    payload = await c.req.json()
-  } catch {
+  const payload = await readJsonBody<{ branch_id?: unknown; task_ids?: unknown; signature_base64?: unknown }>(c)
+  if (!payload) {
     return c.json({ error: 'รูปแบบข้อมูลตรวจรับไม่ถูกต้อง' }, 400)
   }
 
-  const branch_id = String(payload.branch_id || '').trim()
-  const uniqueTaskIds = Array.from(new Set((Array.isArray(payload.task_ids) ? payload.task_ids : []).map(id => String(id || '').trim()).filter(Boolean)))
-  const signature_base64 = String(payload.signature_base64 || '').trim()
+  const branch_id = typeof payload.branch_id === 'string' ? payload.branch_id.trim() : ''
+  const uniqueTaskIds = Array.from(new Set((Array.isArray(payload.task_ids) ? payload.task_ids : []).map(id => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)))
+  const signature_base64 = typeof payload.signature_base64 === 'string' ? payload.signature_base64.trim() : ''
 
   if (!branch_id || uniqueTaskIds.length === 0 || !signature_base64) {
     return c.json({ error: 'ข้อมูลไม่ครบถ้วน ต้องระบุสาขา รายการอุปกรณ์ และมีลายเซ็นรับมอบ' }, 400)
@@ -2325,8 +2352,16 @@ app.post('/review/customer-reject', async (c) => {
     return c.json({ error: 'ต้องมีสิทธิ์ G-Able Customer Reviewer จึงจะสามารถปฏิเสธงานได้' }, 403)
   }
 
-  const { task_id, reason } = await c.req.json<{ task_id: string; reason: string }>()
-  if (!reason?.trim()) {
+  const body = await readJsonBody<{ task_id?: unknown; reason?: unknown }>(c)
+  if (!body) {
+    return c.json({ error: 'รูปแบบข้อมูลปฏิเสธงานไม่ถูกต้อง' }, 400)
+  }
+  const task_id = typeof body.task_id === 'string' ? body.task_id.trim() : ''
+  const cleanReason = typeof body.reason === 'string' ? body.reason.trim() : ''
+  if (!task_id) {
+    return c.json({ error: 'กรุณาระบุรหัสใบงาน (task_id)' }, 400)
+  }
+  if (!cleanReason) {
     return c.json({ error: 'การปฏิเสธงานต้องระบุเหตุผลข้อบกพร่อง' }, 400)
   }
 
@@ -2340,7 +2375,7 @@ app.post('/review/customer-reject', async (c) => {
       version = version + 1,
       updated_at = datetime('now')
     WHERE id = ? AND status = 'awaiting_customer_acceptance'
-  `).bind(reason.trim(), task_id).run()
+  `).bind(cleanReason, task_id).run()
 
   if (res.meta.changes === 0) {
     return c.json({ error: 'ใบงานนี้ไม่ได้อยู่ในสถานะรอ G-Able ตรวจรับ หรือข้อมูลถูกแก้ไขไปแล้ว' }, 409)
@@ -2350,12 +2385,12 @@ app.post('/review/customer-reject', async (c) => {
   const rejectReviewStmt = c.env.DB.prepare(`
     INSERT INTO task_reviews (id, task_id, stage, decision, reason, reviewer_email)
     VALUES (?, ?, 'customer', 'reject', ?, ?)
-  `).bind(revId, task_id, reason.trim(), user.email)
+  `).bind(revId, task_id, cleanReason, user.email)
 
   const stockRejectStmts = await buildReviewRejectStockStatements(c.env.DB, {
     taskId: task_id,
     stageLabel: 'G-Able',
-    reason: reason.trim(),
+    reason: cleanReason,
     actorEmail: user.email,
   })
 
@@ -2389,6 +2424,7 @@ app.get('/export/raw-data', async (c) => {
       s.model_name as old_model,
       t.status as task_status,
       t.new_serial_number,
+      t.new_model_name,
       CASE 
         WHEN t.outcome = 'aborted' THEN 'no_damage_found'
         WHEN t.outcome = 'scanner_missing' THEN 'target_device_not_found'
@@ -2398,7 +2434,12 @@ app.get('/export/raw-data', async (c) => {
       t.closeout_submitted_at,
       t.admin_accepted_at,
       t.customer_accepted_at,
-      t.customer_reject_reason
+      t.customer_reject_reason,
+      nsi.source_mode as stock_source_mode,
+      nsi.status as stock_status,
+      nsi.lot_no as stock_lot_no,
+      nsi.dispatch_area as stock_dispatch_area,
+      osi.status as old_return_status
     FROM scanner_assets s
     JOIN branches b ON b.id = s.branch_id
     LEFT JOIN replacement_tasks t ON t.id = (
@@ -2407,13 +2448,28 @@ app.get('/export/raw-data', async (c) => {
       ORDER BY created_at DESC, rowid DESC 
       LIMIT 1
     )
+    LEFT JOIN stock_items nsi ON nsi.linked_task_id = t.id AND nsi.unit_type = 'new_unit'
+    LEFT JOIN stock_items osi ON osi.linked_task_id = t.id AND osi.unit_type = 'old_removed'
     ORDER BY b.province ASC, b.location_code ASC, s.com_sn ASC
-  `).all()
+  `).all<Record<string, unknown>>()
+
+  const data = (rows.results || []).map((row) => {
+    if (user.role !== 'customer_reviewer') return row
+    const {
+      stock_source_mode: _ssm,
+      stock_status: _ss,
+      stock_lot_no: _sl,
+      stock_dispatch_area: _sda,
+      old_return_status: _ors,
+      ...customerSafe
+    } = row
+    return customerSafe
+  })
 
   return c.json({
     export_timestamp: new Date().toISOString(),
-    total_records: rows.results.length,
-    data: rows.results
+    total_records: data.length,
+    data
   })
 })
 
@@ -2424,22 +2480,20 @@ app.post('/discovery', async (c) => {
     return c.json({ error: 'บัญชีนี้ไม่มีสิทธิ์แจ้งพบหรือเพิ่มเครื่องนอกทะเบียน' }, 403)
   }
 
-  let body: {
-    branch_id?: string
-    serial_number?: string
-    observed_model?: string
-    notes?: string
-  }
-  try {
-    body = await c.req.json()
-  } catch {
+  const body = await readJsonBody<{
+    branch_id?: unknown
+    serial_number?: unknown
+    observed_model?: unknown
+    notes?: unknown
+  }>(c)
+  if (!body) {
     return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
   }
 
-  const branch_id = String(body.branch_id || '').trim()
-  const cleanSn = String(body.serial_number || '').trim()
-  const observed_model = body.observed_model
-  const notes = body.notes
+  const branch_id = typeof body.branch_id === 'string' ? body.branch_id.trim() : ''
+  const cleanSn = typeof body.serial_number === 'string' ? body.serial_number.trim() : ''
+  const observed_model = typeof body.observed_model === 'string' ? body.observed_model : undefined
+  const notes = typeof body.notes === 'string' ? body.notes : undefined
   if (!branch_id || !cleanSn || cleanSn.length > 100) {
     return c.json({ error: 'ต้องระบุสาขาและ Serial Number ที่ถูกต้อง (ไม่เกิน 100 ตัวอักษร)' }, 400)
   }
@@ -2555,10 +2609,15 @@ app.post('/discovery/:id/review', async (c) => {
   }
 
   const id = c.req.param('id')
-  const { decision, review_note } = await c.req.json<{
-    decision: 'approve' | 'reject'
-    review_note?: string
-  }>()
+  const body = await readJsonBody<{ decision?: unknown; review_note?: unknown }>(c)
+  if (!body) {
+    return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
+  }
+  const decision = typeof body.decision === 'string' ? body.decision.trim() : ''
+  const cleanReviewNote = typeof body.review_note === 'string' ? body.review_note.trim() || null : null
+  if (!['approve', 'reject'].includes(decision)) {
+    return c.json({ error: 'ผลการพิจารณาไม่ถูกต้อง (ต้องเป็น approve หรือ reject)' }, 400)
+  }
 
   const report = await c.env.DB.prepare('SELECT * FROM scanner_discovery_reports WHERE id = ?').bind(id).first<any>()
   if (!report) return c.json({ error: 'ไม่พบรายการรายงานนี้' }, 404)
@@ -2580,14 +2639,14 @@ app.post('/discovery/:id/review', async (c) => {
         UPDATE scanner_discovery_reports
         SET status = 'approved', reviewed_by = ?, review_note = ?, reviewed_at = datetime('now')
         WHERE id = ?
-      `).bind(user.email, review_note?.trim() || null, id)
+      `).bind(user.email, cleanReviewNote, id)
     ])
   } else {
     await c.env.DB.prepare(`
       UPDATE scanner_discovery_reports
       SET status = 'rejected', reviewed_by = ?, review_note = ?, reviewed_at = datetime('now')
       WHERE id = ?
-    `).bind(user.email, review_note?.trim() || null, id).run()
+    `).bind(user.email, cleanReviewNote, id).run()
   }
 
   return c.json({ success: true, status: decision === 'approve' ? 'approved' : 'rejected' })
@@ -2629,15 +2688,14 @@ app.post('/allowlist', async (c) => {
     return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถจัดการรายชื่อผู้ใช้งานได้' }, 403)
   }
 
-  const body = await c.req.json<{
-    email: string
-    role: string
-    full_name?: string
-  }>()
+  const body = await readJsonBody<{ email?: unknown; role?: unknown; full_name?: unknown }>(c)
+  if (!body) {
+    return c.json({ error: 'รูปแบบข้อมูลผู้ใช้งานไม่ถูกต้อง' }, 400)
+  }
 
-  const email = body.email?.toLowerCase().trim()
-  const role = body.role?.trim()
-  const fullName = body.full_name?.trim() || null
+  const email = typeof body.email === 'string' ? body.email.toLowerCase().trim() : ''
+  const role = typeof body.role === 'string' ? body.role.trim() : ''
+  const fullName = typeof body.full_name === 'string' ? body.full_name.trim() || null : null
 
   if (!email || !email.includes('@')) {
     return c.json({ error: 'กรุณากรอกอีเมลที่ถูกต้อง' }, 400)

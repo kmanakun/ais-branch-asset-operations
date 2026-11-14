@@ -502,6 +502,13 @@ export const d1Api = {
       body: JSON.stringify(payload),
     }),
 
+  // 30.1 Stock Scanner — รับคืนเครื่องจากสถานะ DOA กลับเข้าคลังกลาง (ADJ)
+  resolveStockDoa: (payload: { serial_numbers: string[]; note?: string }) =>
+    request<StockBatchActionResponse>('/api/stock/doa/resolve', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   // 31. Stock Scanner — Reverse Logistics ขาที่ 1: รับซากเครื่องเดิมเข้าคลัง (RET)
   receiveOldReturns: (payload: { serial_numbers: string[]; note?: string }) =>
     request<StockBatchActionResponse>('/api/stock/old-returns/receive', {

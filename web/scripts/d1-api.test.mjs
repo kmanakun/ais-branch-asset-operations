@@ -913,3 +913,136 @@ test('HTTP runtime: /api/tasks/pending includes stock metadata for SYM Admin, re
     assert.equal(redactedKey in revRow, false, `customer_reviewer must not receive ${redactedKey}`)
   }
 })
+
+test('HTTP runtime: malformed or non-object JSON and missing required fields return clean 400 errors (never 500)', async () => {
+  const env = createTestEnv()
+
+  // Seed one task so routes checking body validation first or task presence behave predictably
+  const imp = await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'JsonGuard.xlsx',
+      rows: [{ location_code: 'BKK-JGD1', loc_bld: 'AIS Json Guard', com_sn: 'SN-JGD-001', province: 'กรุงเทพมหานคร' }],
+    },
+  })
+  assert.equal(imp.status, 200)
+  const list = await apiReq(env, '/api/scanners?search=SN-JGD-001', { email: 'admin@sym.co.th' })
+  const scannerId = list.json.rows[0].id
+  const start = await apiReq(env, '/api/tasks/start', { method: 'POST', email: 'tech1@sym.co.th', body: { scanner_id: scannerId } })
+  const taskId = start.json.task_id
+
+  const rawJsonReq = async (path, rawBody, email = 'admin@sym.co.th') => {
+    const res = await app.fetch(new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-dev-user-email': email,
+      },
+      body: rawBody,
+    }), env)
+    return { status: res.status, text: await res.text() }
+  }
+
+  for (const [path, actor] of [
+    ['/api/register/import', 'admin@sym.co.th'],
+    ['/api/tasks/start', 'tech1@sym.co.th'],
+    [`/api/tasks/${taskId}/evidence`, 'tech1@sym.co.th'],
+    [`/api/tasks/${taskId}/closeout`, 'tech1@sym.co.th'],
+    [`/api/tasks/${taskId}/action`, 'admin@sym.co.th'],
+    ['/api/review/sym-verify', 'admin@sym.co.th'],
+    ['/api/review/customer-batch-accept', 'reviewer@gable.co.th'],
+    ['/api/review/customer-reject', 'reviewer@gable.co.th'],
+    ['/api/discovery', 'tech1@sym.co.th'],
+    ['/api/discovery/dsc-fake/review', 'admin@sym.co.th'],
+    ['/api/allowlist', 'admin@sym.co.th'],
+    ['/api/stock/doa/resolve', 'admin@sym.co.th'],
+  ]) {
+    for (const badBody of ['{broken-json', 'null', '[]']) {
+      const res = await rawJsonReq(path, badBody, actor)
+      assert.equal(res.status, 400, `Expected 400 on ${path} for body=${badBody}, got ${res.status}: ${res.text}`)
+    }
+  }
+
+  // Missing version or missing task_id on /review/sym-verify previously crashed D1 with 500 D1_TYPE_ERROR
+  const missingVersion = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: taskId, decision: 'pass' },
+  })
+  assert.equal(missingVersion.status, 400)
+
+  const missingTaskId = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { decision: 'pass', version: 1 },
+  })
+  assert.equal(missingTaskId.status, 400)
+
+  // Missing task_id on /review/customer-reject and invalid decision on /discovery/:id/review
+  const rejectNoTask = await apiReq(env, '/api/review/customer-reject', {
+    method: 'POST',
+    email: 'reviewer@gable.co.th',
+    body: { reason: 'รูปไม่ชัด' },
+  })
+  assert.equal(rejectNoTask.status, 400)
+
+  const badDiscoveryDecision = await apiReq(env, '/api/discovery/dsc-fake/review', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { decision: 'maybe' },
+  })
+  assert.equal(badDiscoveryDecision.status, 400)
+})
+
+test('HTTP runtime: /export/raw-data includes stock & reverse logistics metadata for Admin and redacts it for customer_reviewer', async () => {
+  const env = createTestEnv()
+  await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'ExportStock.xlsx',
+      rows: [{ location_code: 'BKK-EXP1', loc_bld: 'AIS Export Shop', com_sn: 'SN-EXP-OLD-1', province: 'กรุงเทพมหานคร' }],
+    },
+  })
+  await apiReq(env, '/api/stock/import/commit', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      defaults: { brand: 'Zebra', model_name: 'DS9308', lot_no: 'LOT-EXP-99', dispatch_area: 'ทีม กทม.', dispatch_mode: 'dispatched' },
+      rows: [{ serial_number: 'SN-EXP-NEW-1' }],
+    },
+  })
+
+  const list = await apiReq(env, '/api/scanners?search=SN-EXP-OLD-1', { email: 'admin@sym.co.th' })
+  const scannerId = list.json.rows[0].id
+  const start = await apiReq(env, '/api/tasks/start', { method: 'POST', email: 'tech1@sym.co.th', body: { scanner_id: scannerId } })
+  const close = await apiReq(env, `/api/tasks/${start.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'replaced', new_serial_number: 'SN-EXP-NEW-1', new_model_name: 'DS9308', version: start.json.version },
+  })
+  assert.equal(close.status, 200)
+
+  const adminExp = await apiReq(env, '/api/export/raw-data', { email: 'admin@sym.co.th' })
+  assert.equal(adminExp.status, 200)
+  const adminRow = adminExp.json.data.find(r => r.old_serial === 'SN-EXP-OLD-1')
+  assert.ok(adminRow)
+  assert.equal(adminRow.new_serial_number, 'SN-EXP-NEW-1')
+  assert.equal(adminRow.new_model_name, 'DS9308')
+  assert.equal(adminRow.stock_source_mode, 'registered_stock')
+  assert.equal(adminRow.stock_status, 'allocated_to_task')
+  assert.equal(adminRow.stock_lot_no, 'LOT-EXP-99')
+  assert.equal(adminRow.stock_dispatch_area, 'ทีม กทม.')
+  assert.equal(adminRow.old_return_status, 'removed_onsite')
+
+  const revExp = await apiReq(env, '/api/export/raw-data', { email: 'reviewer@gable.co.th' })
+  assert.equal(revExp.status, 200)
+  const revRow = revExp.json.data.find(r => r.old_serial === 'SN-EXP-OLD-1')
+  assert.ok(revRow)
+  assert.equal(revRow.new_serial_number, 'SN-EXP-NEW-1')
+  assert.equal(revRow.new_model_name, 'DS9308')
+  for (const key of ['stock_source_mode', 'stock_status', 'stock_lot_no', 'stock_dispatch_area', 'old_return_status']) {
+    assert.equal(key in revRow, false, `customer_reviewer /export/raw-data must not receive ${key}`)
+  }
+})

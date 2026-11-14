@@ -630,7 +630,7 @@ test('Stock RBAC enforces least privilege and masks sensitive serial numbers for
   assert.equal(techLookup.json.availability.available_for_closeout, true)
   assert.equal((await apiReq(env, '/api/stock/documents', { email: 'tech1@sym.co.th' })).status, 403)
 
-  for (const endpoint of ['/import/preview', '/import/commit', '/dispatch', '/recall', '/doa', '/old-returns/receive', '/old-returns/handover']) {
+  for (const endpoint of ['/import/preview', '/import/commit', '/dispatch', '/recall', '/doa', '/doa/resolve', '/old-returns/receive', '/old-returns/handover']) {
     for (const actor of ['tech1@sym.co.th', 'reviewer@gable.co.th', 'viewer@ais.co.th']) {
       const res = await apiReq(env, `/api/stock${endpoint}`, { method: 'POST', email: actor, body: {} })
       assert.equal(res.status, 403, `Expected 403 for ${actor} on POST /api/stock${endpoint}`)
@@ -642,4 +642,66 @@ test('Stock RBAC enforces least privilege and masks sensitive serial numbers for
   assert.equal(gableItems.status, 200)
   assert.equal(gableItems.json.rows[0].serial_number, 'SECRET-SN-998877')
   assert.equal(gableItems.json.rows[0].created_by, undefined)
+})
+
+test('Stock DOA -> ADJ resolve restores defective unit into warehouse inventory and allows re-dispatch', async () => {
+  const env = createTestEnv()
+  await apiReq(env, '/api/stock/import/commit', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      defaults: { brand: 'Zebra', model_name: 'DS9308', lot_no: 'PO-DOA-1', dispatch_area: 'ทีมกทม.', dispatch_mode: 'dispatched' },
+      rows: [{ source_row: 2, serial_number: 'SN-DOA-RES-001' }],
+    },
+  })
+
+  // Mark unit DOA -> doa_defective + DOA-... document
+  const doaRes = await apiReq(env, '/api/stock/doa', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { serial_numbers: ['SN-DOA-RES-001'], note: 'เปิดเครื่องไม่ติดตั้งแต่แกะกล่อง' },
+  })
+  assert.equal(doaRes.status, 200)
+  assert.match(doaRes.json.doc_code, /^DOA-\d{8}-/)
+  assert.equal(env.DB.raw.prepare('SELECT status FROM stock_items WHERE serial_number = ?').get('SN-DOA-RES-001').status, 'doa_defective')
+
+  // Guardrail: DOA unit cannot be dispatched directly without resolving first
+  const blockedDispatch = await apiReq(env, '/api/stock/dispatch', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { serial_numbers: ['SN-DOA-RES-001'], dispatch_area: 'ทีมภาคเหนือ' },
+  })
+  assert.equal(blockedDispatch.status, 409)
+
+  // Resolve DOA -> ADJ-... adjustment document + restored to in_warehouse (cleared stale dispatch metadata)
+  const resolveRes = await apiReq(env, '/api/stock/doa/resolve', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { serial_numbers: ['SN-DOA-RES-001'], note: 'รับเครื่องซ่อมเคลมกลับเข้าคลังกลาง' },
+  })
+  assert.equal(resolveRes.status, 200)
+  assert.match(resolveRes.json.doc_code, /^ADJ-\d{8}-/)
+  assert.equal(resolveRes.json.count, 1)
+
+  const itemAfter = env.DB.raw.prepare('SELECT status, dispatch_area, dispatch_doc_id FROM stock_items WHERE serial_number = ?').get('SN-DOA-RES-001')
+  assert.equal(itemAfter.status, 'in_warehouse')
+  assert.equal(itemAfter.dispatch_area, null)
+  assert.equal(itemAfter.dispatch_doc_id, null)
+
+  const adjDoc = env.DB.raw.prepare('SELECT doc_type, destination_area FROM stock_documents WHERE doc_code = ?').get(resolveRes.json.doc_code)
+  assert.equal(adjDoc.doc_type, 'adjustment')
+  assert.equal(adjDoc.destination_area, 'คลังกลาง SYM')
+
+  const latestMove = env.DB.raw.prepare('SELECT action, from_status, to_status FROM stock_movements ORDER BY rowid DESC LIMIT 1').get()
+  assert.equal(latestMove.action, 'adjusted')
+  assert.equal(latestMove.from_status, 'doa_defective')
+  assert.equal(latestMove.to_status, 'in_warehouse')
+
+  // Re-dispatch now succeeds cleanly
+  const reDispatch = await apiReq(env, '/api/stock/dispatch', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { serial_numbers: ['SN-DOA-RES-001'], dispatch_area: 'ทีมภาคเหนือ' },
+  })
+  assert.equal(reDispatch.status, 200)
 })

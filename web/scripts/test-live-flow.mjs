@@ -54,6 +54,7 @@ async function main() {
   const timestamp = Date.now()
   const testSn = `SN-E2E-${timestamp}`
   const newSn = `SN-STOCK-E2E-${timestamp}`
+  const doaSn = `SN-STOCK-E2E-DOA-${timestamp}`
   const stockLot = `LOT-E2E-${timestamp}`
   const branchCode = `BKK-${timestamp.toString().slice(-4)}`
 
@@ -95,6 +96,13 @@ async function main() {
         lot_no: stockLot,
         note: `E2E_Test_Stock_${timestamp}`,
       },
+      {
+        serial_number: doaSn,
+        brand: 'Honeywell',
+        model_name: '1950GHD',
+        lot_no: stockLot,
+        note: `E2E_Test_Stock_${timestamp}`,
+      },
     ],
   }, 'admin@sym.co.th')
   console.log('  ✔ Stock receive document created:', stockCommit.doc_code)
@@ -104,6 +112,31 @@ async function main() {
     throw new Error(`Expected new stock unit in_warehouse & available, got ${JSON.stringify(preLookup.availability)}`)
   }
   console.log('  ✔ Stock real-time lookup available_for_closeout=true, status=in_warehouse')
+
+  // ทดสอบ DOA -> DOA Resolve (ADJ) Lifecycle บน Miniflare D1 จริง
+  const doaMark = await req('/api/stock/doa', 'POST', {
+    serial_numbers: [doaSn],
+    note: `E2E_Test_DOA_${timestamp}`,
+  }, 'admin@sym.co.th')
+  if (!String(doaMark.doc_code || '').startsWith('DOA-')) {
+    throw new Error(`Expected DOA document code, got ${doaMark.doc_code}`)
+  }
+  const doaLookup = await req(`/api/stock/lookup?serial=${encodeURIComponent(doaSn)}`, 'GET', null, 'tech1@sym.co.th')
+  if (doaLookup.item?.status !== 'doa_defective' || doaLookup.availability?.available_for_closeout !== false) {
+    throw new Error(`Expected DOA unit blocked from closeout, got ${JSON.stringify(doaLookup)}`)
+  }
+  const doaResolve = await req('/api/stock/doa/resolve', 'POST', {
+    serial_numbers: [doaSn],
+    note: `E2E_Test_DOA_Resolve_${timestamp}`,
+  }, 'admin@sym.co.th')
+  if (!String(doaResolve.doc_code || '').startsWith('ADJ-')) {
+    throw new Error(`Expected ADJ document code after DOA resolve, got ${doaResolve.doc_code}`)
+  }
+  const resolvedLookup = await req(`/api/stock/lookup?serial=${encodeURIComponent(doaSn)}`, 'GET', null, 'tech1@sym.co.th')
+  if (resolvedLookup.item?.status !== 'in_warehouse' || resolvedLookup.availability?.available_for_closeout !== true) {
+    throw new Error(`Expected resolved DOA unit back to in_warehouse & available, got ${JSON.stringify(resolvedLookup)}`)
+  }
+  console.log('  ✔ DOA -> ADJ resolve verified cleanly:', doaMark.doc_code, '->', doaResolve.doc_code)
 
   // 3. ช่างกดเริ่มงาน Onsite
   console.log('\n[3/13] Testing /api/tasks/start (Technician begins replacement)...')

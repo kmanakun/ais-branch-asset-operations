@@ -56,7 +56,7 @@ import {
 } from './lib/stock-ui-labels'
 
 type StockSubTab = 'inventory' | 'import' | 'operations' | 'reverse' | 'documents'
-type OpsMode = 'dispatch' | 'recall' | 'doa'
+type OpsMode = 'dispatch' | 'recall' | 'doa' | 'doa_resolve'
 type ReverseMode = 'receive' | 'handover'
 type StockSourceModeFilter = '' | 'registered_stock' | 'hybrid_unregistered' | 'onsite_removal'
 
@@ -600,6 +600,9 @@ function StockInventorySection({
   const recallableSns = selectedItems
     .filter(i => i.unit_type === 'new_unit' && i.status === 'dispatched')
     .map(i => i.serial_number)
+  const doaResolvableSns = selectedItems
+    .filter(i => i.unit_type === 'new_unit' && i.status === 'doa_defective')
+    .map(i => i.serial_number)
   const receivableOldSns = selectedItems
     .filter(i => i.unit_type === 'old_removed' && i.status === 'removed_onsite')
     .map(i => i.serial_number)
@@ -813,6 +816,11 @@ function StockInventorySection({
                   ดึงกลับคลัง ({recallableSns.length})
                 </Button>
               )}
+              {doaResolvableSns.length > 0 && (
+                <Button type="button" size="sm" variant="outline" onClick={() => onBatchToOps('doa_resolve', doaResolvableSns)}>
+                  <CheckCircle2 size={13} /> คืนคลังหลังเคลม DOA ({doaResolvableSns.length})
+                </Button>
+              )}
               {receivableOldSns.length > 0 && (
                 <Button type="button" size="sm" variant="outline" onClick={() => onBatchToReverse('receive', receivableOldSns)}>
                   รับซากเข้าคลัง ({receivableOldSns.length})
@@ -845,8 +853,8 @@ function StockInventorySection({
           </div>
         ) : (
           <>
-            {/* Mobile cards (< md) */}
-            <div className="space-y-2 md:hidden">
+            {/* Mobile / Tablet cards (< lg) */}
+            <div className="space-y-2 lg:hidden">
               {items.map(row => {
                 const st = getStockStatusMeta(row.status)
                 return (
@@ -880,7 +888,12 @@ function StockInventorySection({
                       <div className="col-span-2 text-slate-400">อัปเดต: {formatStockDate(row.updated_at)}</div>
                     </div>
                     {!isViewer && (
-                      <div className="mt-2 flex justify-end">
+                      <div className="mt-2 flex flex-wrap justify-end gap-1.5">
+                        {canManageStock && row.source_mode === 'hybrid_unregistered' && (
+                          <Button type="button" size="sm" variant="default" onClick={() => onInspectSerial(row.serial_number)}>
+                            <ClipboardCheck size={13} /> จับคู่ RCV
+                          </Button>
+                        )}
                         <Button type="button" size="sm" variant="outline" onClick={() => onInspectSerial(row.serial_number)}>
                           <History size={13} /> ประวัติสายงาน
                         </Button>
@@ -891,13 +904,13 @@ function StockInventorySection({
               })}
             </div>
 
-            {/* Desktop table (>= md) */}
-            <div className="hidden rounded-xl border border-slate-200 md:block">
-              <Table>
+            {/* Desktop table (>= lg) */}
+            <div className="hidden rounded-xl border border-slate-200 lg:block">
+              <Table className="[&_th]:px-2.5 [&_td]:px-2.5">
                 <TableHeader>
                   <TableRow>
                     {canManageStock && (
-                      <TableHead className="w-9">
+                      <TableHead className="w-8">
                         <input
                           type="checkbox"
                           aria-label="เลือกทั้งหมดในหน้านี้"
@@ -909,8 +922,7 @@ function StockInventorySection({
                     <TableHead>Serial Number</TableHead>
                     <TableHead>ประเภท / แหล่งที่มา</TableHead>
                     <TableHead>สถานะ</TableHead>
-                    <TableHead>ยี่ห้อ / รุ่น</TableHead>
-                    <TableHead>Lot / พื้นที่เบิก</TableHead>
+                    <TableHead>รุ่น / Lot / พื้นที่เบิก</TableHead>
                     <TableHead>สาขา / เลขเอกสาร</TableHead>
                     <TableHead>อัปเดตล่าสุด</TableHead>
                     {!isViewer && <TableHead className="text-right">ตรวจสอบ</TableHead>}
@@ -920,6 +932,7 @@ function StockInventorySection({
                   {items.map(row => {
                     const st = getStockStatusMeta(row.status)
                     const docBadges = [row.receive_doc_code, row.dispatch_doc_code, row.return_doc_code, row.handover_doc_code].filter(Boolean)
+                    const modelLabel = [row.brand, row.model_name].filter(Boolean).join(' ')
                     return (
                       <TableRow key={row.id}>
                         {canManageStock && (
@@ -932,7 +945,7 @@ function StockInventorySection({
                             />
                           </TableCell>
                         )}
-                        <TableCell className="font-mono font-bold text-slate-900">
+                        <TableCell className="max-w-[160px] break-all font-mono font-bold text-slate-900">
                           {row.serial_number}
                         </TableCell>
                         <TableCell>
@@ -943,17 +956,14 @@ function StockInventorySection({
                             {STOCK_SOURCE_MODE_LABELS[row.source_mode] || row.source_mode}
                           </div>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-nowrap">
                           <Badge variant={st.tone}>{st.label}</Badge>
                         </TableCell>
                         <TableCell>
-                          <div>{row.brand || '—'}</div>
-                          <div className="text-[11.5px] text-slate-500">{row.model_name || '—'}</div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-mono text-xs">{row.lot_no || '—'}</div>
+                          <div className="text-xs text-slate-800">{modelLabel || '—'}</div>
+                          {row.lot_no && <div className="font-mono text-[11px] text-slate-500">{row.lot_no}</div>}
                           {row.dispatch_area && (
-                            <div className="text-[11.5px] font-medium text-sky-800">{row.dispatch_area}</div>
+                            <div className="text-[11px] font-medium text-sky-800">{row.dispatch_area}</div>
                           )}
                         </TableCell>
                         <TableCell>
@@ -970,20 +980,35 @@ function StockInventorySection({
                             </div>
                           )}
                         </TableCell>
-                        <TableCell className="text-xs text-slate-500 whitespace-nowrap">
+                        <TableCell className="whitespace-nowrap text-[11.5px] text-slate-500">
                           {formatStockDate(row.updated_at)}
                         </TableCell>
                         {!isViewer && (
                           <TableCell className="text-right">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => onInspectSerial(row.serial_number)}
-                            >
-                              <History size={13} />
-                              <span>ประวัติ</span>
-                            </Button>
+                            <div className="inline-flex flex-col items-end gap-1 xl:flex-row">
+                              {canManageStock && row.source_mode === 'hybrid_unregistered' && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="default"
+                                  className="whitespace-nowrap"
+                                  onClick={() => onInspectSerial(row.serial_number)}
+                                >
+                                  <ClipboardCheck size={13} />
+                                  <span>จับคู่ RCV</span>
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="whitespace-nowrap"
+                                onClick={() => onInspectSerial(row.serial_number)}
+                              >
+                                <History size={13} />
+                                <span>ประวัติ</span>
+                              </Button>
+                            </div>
                           </TableCell>
                         )}
                       </TableRow>
@@ -1519,7 +1544,9 @@ function StockOperationsSection({
         ? await d1Api.dispatchStock({ serial_numbers: parsedSerials, dispatch_area: dispatchArea.trim(), note: note.trim() || undefined })
         : mode === 'recall'
           ? await d1Api.recallStock({ serial_numbers: parsedSerials, note: note.trim() || undefined })
-          : await d1Api.markStockDoa({ serial_numbers: parsedSerials, note: note.trim() })
+          : mode === 'doa'
+            ? await d1Api.markStockDoa({ serial_numbers: parsedSerials, note: note.trim() })
+            : await d1Api.resolveStockDoa({ serial_numbers: parsedSerials, note: note.trim() || undefined })
       setResultMsg(`${res.message}`)
       setSerialText('')
       setNote('')
@@ -1537,7 +1564,7 @@ function StockOperationsSection({
       <CardHeader>
         <CardTitle>จัดการสต็อกคลังกลาง & พื้นที่ (Model B)</CardTitle>
         <CardDescription>
-          เบิกกระจายเครื่องใหม่ออกพื้นที่/ทีม, ดึงเครื่องที่ยังไม่ใช้กลับคลังกลาง หรือแจ้งเครื่องใหม่เสีย (DOA) เพื่อกันช่างหยิบไปติดตั้ง
+          เบิกกระจายเครื่องใหม่ออกพื้นที่/ทีม, ดึงเครื่องที่ยังไม่ใช้กลับคลังกลาง, แจ้งเครื่องใหม่เสีย (DOA) หรือรับคืนเครื่องเคลมกลับคลังกลาง
         </CardDescription>
       </CardHeader>
 
@@ -1548,6 +1575,7 @@ function StockOperationsSection({
               { key: 'dispatch', label: 'เบิกกระจายพื้นที่ (DSP)', icon: Truck },
               { key: 'recall', label: 'ดึงกลับคลังกลาง (ADJ)', icon: ArrowLeftRight },
               { key: 'doa', label: 'แจ้งเครื่องใหม่เสีย (DOA)', icon: AlertTriangle },
+              { key: 'doa_resolve', label: 'รับคืนจาก DOA เข้าคลัง (ADJ)', icon: CheckCircle2 },
             ] as const).map(item => {
               const Icon = item.icon
               const active = mode === item.key
@@ -1621,11 +1649,19 @@ function StockOperationsSection({
           </div>
 
           <label className="block text-xs font-semibold text-slate-700">
-            {mode === 'doa' ? 'อาการเสีย / เหตุผลแจ้ง DOA *' : 'หมายเหตุเอกสาร'}
+            {mode === 'doa'
+              ? 'อาการเสีย / เหตุผลแจ้ง DOA *'
+              : mode === 'doa_resolve'
+                ? 'หมายเหตุการรับคืนจาก DOA'
+                : 'หมายเหตุเอกสาร'}
             <Input
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder={mode === 'doa' ? 'เช่น เปิดไม่ติด / เลนส์สแกนไม่ทำงาน ตั้งแต่แกะกล่อง' : 'หมายเหตุเพิ่มเติม (ถ้ามี)'}
+              placeholder={mode === 'doa'
+                ? 'เช่น เปิดไม่ติด / เลนส์สแกนไม่ทำงาน ตั้งแต่แกะกล่อง'
+                : mode === 'doa_resolve'
+                  ? 'เช่น รับเครื่องเคลมซ่อม/ทดแทนจาก Supplier หรือยกเลิกแจ้ง DOA ผิดพลาด'
+                  : 'หมายเหตุเพิ่มเติม (ถ้ามี)'}
               maxLength={500}
               required={mode === 'doa'}
               className="mt-1 text-xs"
@@ -1661,7 +1697,9 @@ function StockOperationsSection({
                   ? `ยืนยันเบิกกระจาย (${parsedSerials.length})`
                   : mode === 'recall'
                     ? `ยืนยันดึงกลับคลัง (${parsedSerials.length})`
-                    : `ยืนยันแจ้งเสีย DOA (${parsedSerials.length})`}
+                    : mode === 'doa'
+                      ? `ยืนยันแจ้งเสีย DOA (${parsedSerials.length})`
+                      : `รับคืนเข้าคลังจาก DOA (${parsedSerials.length})`}
               </span>
             </Button>
           </div>

@@ -181,6 +181,16 @@ function normalizeReceivedDate(value: unknown): string | null {
   return text
 }
 
+async function readStockJsonBody<T extends Record<string, unknown>>(c: any): Promise<T | null> {
+  try {
+    const parsed = await c.req.json()
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    return parsed as T
+  } catch {
+    return null
+  }
+}
+
 export async function lookupStockBySerials(
   db: StockD1Database,
   serials: string[]
@@ -1622,10 +1632,8 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถนำเข้าสต็อกเครื่องใหม่ได้' }, 403)
     }
 
-    let body: { rows?: StockImportInputRow[]; defaults?: StockImportDefaults }
-    try {
-      body = await c.req.json()
-    } catch {
+    const body = await readStockJsonBody<{ rows?: StockImportInputRow[]; defaults?: StockImportDefaults }>(c)
+    if (!body) {
       return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
     }
 
@@ -1648,15 +1656,13 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถนำเข้าสต็อกเครื่องใหม่ได้' }, 403)
     }
 
-    let body: {
+    const body = await readStockJsonBody<{
       source_name?: string
       rows?: StockImportInputRow[]
       defaults?: StockImportDefaults
       skip_invalid?: boolean
-    }
-    try {
-      body = await c.req.json()
-    } catch {
+    }>(c)
+    if (!body) {
       return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
     }
 
@@ -1957,10 +1963,8 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถเบิกกระจายสต็อกได้' }, 403)
     }
 
-    let body: { serial_numbers?: unknown[]; dispatch_area?: string; note?: string }
-    try {
-      body = await c.req.json()
-    } catch {
+    const body = await readStockJsonBody<{ serial_numbers?: unknown[]; dispatch_area?: string; note?: string }>(c)
+    if (!body) {
       return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
     }
 
@@ -2036,10 +2040,8 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถรับคืนสต็อกกลับคลังกลางได้' }, 403)
     }
 
-    let body: { serial_numbers?: unknown[]; note?: string }
-    try {
-      body = await c.req.json()
-    } catch {
+    const body = await readStockJsonBody<{ serial_numbers?: unknown[]; note?: string }>(c)
+    if (!body) {
       return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
     }
 
@@ -2108,10 +2110,8 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถแจ้งเครื่องใหม่เสีย (DOA) ได้' }, 403)
     }
 
-    let body: { serial_numbers?: unknown[]; note?: string }
-    try {
-      body = await c.req.json()
-    } catch {
+    const body = await readStockJsonBody<{ serial_numbers?: unknown[]; note?: string }>(c)
+    if (!body) {
       return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
     }
 
@@ -2175,6 +2175,77 @@ export function createStockRouter(): Hono<StockRouterEnv> {
     })
   })
 
+  // 8.1 รับคืนเครื่องใหม่จากสถานะ DOA กลับเข้าคลังกลางหลังเคลม/ซ่อมหรือแก้ไขการแจ้งผิด (doa_defective -> in_warehouse)
+  stock.post('/doa/resolve', async (c) => {
+    const user = c.get('user')
+    if (!ADMIN_STOCK_ROLES.has(user.role)) {
+      return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถรับคืนเครื่องจากสถานะ DOA กลับคลังได้' }, 403)
+    }
+
+    const body = await readStockJsonBody<{ serial_numbers?: unknown[]; note?: string }>(c)
+    if (!body) {
+      return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
+    }
+
+    const note = cleanOptionalText(body.note, 500) || 'รับเครื่องเคลมซ่อม/เปลี่ยนทดแทนจาก DOA กลับคลังกลาง'
+    const resolved = await resolveSerialBatchItems(
+      c.env.DB,
+      body.serial_numbers,
+      item => item.unit_type === 'new_unit' && item.status === 'doa_defective',
+      (sn, item) => `${sn}${item ? ` (${item.unit_type}/${item.status})` : ' (ไม่พบในระบบ)'}`,
+      'มีรายการที่ไม่อยู่ในสถานะแจ้งเสีย (DOA)'
+    )
+    if (!resolved.ok) {
+      return c.json({ error: resolved.error, invalid_serials: resolved.invalid_serials }, resolved.status)
+    }
+    const eligible = resolved.eligible
+
+    const docId = makeStockUniqueId('sdoc')
+    const docCode = makeStockDocCode('ADJ')
+    const statements: StockD1PreparedStatement[] = [
+      c.env.DB.prepare(`
+        INSERT INTO stock_documents (id, doc_code, doc_type, destination_area, note, item_count, created_by)
+        VALUES (?, ?, 'adjustment', 'คลังกลาง SYM', ?, ?, ?)
+      `).bind(docId, docCode, note, eligible.length, user.email),
+    ]
+
+    for (const item of eligible) {
+      statements.push(
+        c.env.DB.prepare(`
+          UPDATE stock_items SET
+            status = 'in_warehouse',
+            dispatch_doc_id = NULL,
+            dispatch_area = NULL,
+            dispatched_at = NULL,
+            note = ?,
+            updated_by = ?,
+            version = version + 1,
+            updated_at = datetime('now')
+          WHERE id = ? AND status = 'doa_defective' AND version = ?
+        `).bind(note, user.email, item.id, item.version),
+        buildMovementInsert(c.env.DB, {
+          stockItemId: item.id,
+          docId,
+          action: 'adjusted',
+          fromStatus: 'doa_defective',
+          toStatus: 'in_warehouse',
+          actorEmail: user.email,
+          note: `${note} (${docCode})`,
+        })
+      )
+    }
+
+    await runBatchChunks(c.env.DB, statements, 150)
+
+    return c.json({
+      success: true,
+      doc_id: docId,
+      doc_code: docCode,
+      count: eligible.length,
+      message: `รับเครื่องจากสถานะ DOA กลับเข้าคลังกลาง ${eligible.length} เครื่องสำเร็จ (${docCode})`,
+    })
+  })
+
   // 9. Reverse Logistics ขาที่ 1: คลังกลาง SYM รับซากเครื่องเดิมคืนจากหน้างาน (removed_onsite -> returned_to_warehouse)
   stock.post('/old-returns/receive', async (c) => {
     const user = c.get('user')
@@ -2182,10 +2253,8 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถยืนยันรับซากเครื่องเดิมเข้าคลังได้' }, 403)
     }
 
-    let body: { serial_numbers?: unknown[]; note?: string }
-    try {
-      body = await c.req.json()
-    } catch {
+    const body = await readStockJsonBody<{ serial_numbers?: unknown[]; note?: string }>(c)
+    if (!body) {
       return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
     }
 
@@ -2256,10 +2325,8 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       return c.json({ error: 'เฉพาะ Admin เท่านั้นที่สามารถส่งมอบซากเครื่องคืนลูกค้าได้' }, 403)
     }
 
-    let body: { serial_numbers?: unknown[]; recipient_name?: string; note?: string }
-    try {
-      body = await c.req.json()
-    } catch {
+    const body = await readStockJsonBody<{ serial_numbers?: unknown[]; recipient_name?: string; note?: string }>(c)
+    if (!body) {
       return c.json({ error: 'รูปแบบข้อมูลไม่ถูกต้อง' }, 400)
     }
 
