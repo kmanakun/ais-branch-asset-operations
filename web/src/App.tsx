@@ -1152,21 +1152,15 @@ function LoginPage({ onGoogleSignIn, onDemo, error, configured, submitting }: {
 }) {
   const [helpOpen, setHelpOpen] = useState(false)
   return <div className="login-page">
-    <section className="login-panel">
-      <div className="login-brand"><div className="brand-mark"><span>AIS</span></div><span>BRANCH & ASSET OPERATIONS</span></div>
-      <div className="login-content">
-        <div className="eyebrow">SCANNER REPLACEMENT PROGRAM</div>
-        <h1>จัดการงานเปลี่ยนเครื่อง <br /><em>ได้ในที่เดียว</em></h1>
-        <p className="login-intro">เปิดใบงานแยกตามสาขา ให้ช่างทุกคนเห็นและบันทึกผล Onsite ได้ในที่เดียว</p>
-        <div className="login-feature"><div><ClipboardList size={18} /></div><span>ติดตามใบงานตั้งแต่เปิดงานจนส่งมอบ</span></div>
-        <div className="login-feature"><div><MapPin size={18} /></div><span>ค้นหาสาขาและอุปกรณ์จากทะเบียนกลาง</span></div>
-        <div className="login-feature"><div><ShieldCheck size={18} /></div><span>แสดงใบงานให้ Admin และช่าง Onsite ตามสิทธิ์ปฏิบัติงาน</span></div>
-      </div>
-      <div className="login-copyright">© 2026 AIS Branch & Asset Operations <span>·</span> ระบบภายใน</div>
-    </section>
     <section className="login-form-panel">
       <div className="login-card">
-        <div className="login-icon"><LockKeyhole size={21} /></div>
+        <div className="login-card-brand">
+          <div className="brand-mark"><span>AIS</span></div>
+          <div className="brand-copy">
+            <strong>AIS Branch &amp; Asset Operations</strong>
+            <span>Scanner Replacement System</span>
+          </div>
+        </div>
         <h2>เข้าสู่ระบบ</h2>
         <p>ใช้บัญชี Google ที่ได้รับอนุมัติจากเจ้าของระบบ</p>
         {error && <div className="form-error" role="alert">{error}</div>}
@@ -1181,11 +1175,11 @@ function LoginPage({ onGoogleSignIn, onDemo, error, configured, submitting }: {
       </div>
       <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={() => setHelpOpen(open => !open)} aria-expanded={helpOpen} aria-controls="login-help-note">ติดต่อเจ้าของระบบ</button></div>
       {helpOpen && (
-        <div id="login-help-note" className="login-help-note w-full max-w-[390px]" role="status">
+        <div id="login-help-note" className="login-help-note w-full max-w-[400px]" role="status">
           <span>ใช้บัญชี Google ที่ได้รับอนุมัติในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) หากยังเข้าไม่ได้ให้แจ้งอีเมล Google ของคุณกับเจ้าของระบบทาง LINE เพื่อเพิ่มสิทธิ์</span>
         </div>
       )}
-      <div className="login-mobile-copyright">© 2026 AIS Branch &amp; Asset Operations · ระบบภายใน</div>
+      <div className="login-footer-copyright">© 2026 AIS Branch &amp; Asset Operations · ระบบภายใน</div>
     </section>
   </div>
 }
