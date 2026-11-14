@@ -596,7 +596,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
                       className={`evidence-photo-box ${imageUrl ? 'has-image' : 'is-empty'}`}
                       onClick={() => {
                         if (imageUrl) {
-                          window.open(imageUrl, '_blank')
+                          window.open(imageUrl, '_blank', 'noopener,noreferrer')
                         } else if (canEditSlot(slot.key)) {
                           photoInputRefs.current[slot.key]?.click()
                         }
@@ -607,7 +607,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
-                          if (imageUrl) window.open(imageUrl, '_blank')
+                          if (imageUrl) window.open(imageUrl, '_blank', 'noopener,noreferrer')
                           else if (canEditSlot(slot.key)) photoInputRefs.current[slot.key]?.click()
                         }
                       }}

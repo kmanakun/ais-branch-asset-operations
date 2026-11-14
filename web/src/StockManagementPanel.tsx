@@ -40,7 +40,7 @@ import {
   type StockMovementRecord,
   type StockSummaryResponse,
 } from './d1-client'
-import { lockBodyScroll, registerActiveDialog } from './dialog'
+import { useDialogControls } from './dialog'
 import {
   appendSerialToBatchText,
   downloadStockCsv,
@@ -55,6 +55,7 @@ import {
 type StockSubTab = 'inventory' | 'import' | 'operations' | 'reverse' | 'documents'
 type OpsMode = 'dispatch' | 'recall' | 'doa'
 type ReverseMode = 'receive' | 'handover'
+type StockSourceModeFilter = '' | 'registered_stock' | 'hybrid_unregistered' | 'onsite_removal'
 
 interface StockManagementPanelProps {
   role?: string
@@ -102,6 +103,7 @@ export function StockManagementPanel({ role, onToast }: StockManagementPanelProp
   const [inventoryStatus, setInventoryStatus] = useState('')
   const [inventoryArea, setInventoryArea] = useState('')
   const [inventoryUnitType, setInventoryUnitType] = useState<'' | 'new_unit' | 'old_removed'>('')
+  const [inventorySourceMode, setInventorySourceMode] = useState<StockSourceModeFilter>('')
 
   // Timeline modal state
   const [timelineLookup, setTimelineLookup] = useState<StockLookupResponse | null>(null)
@@ -167,11 +169,13 @@ export function StockManagementPanel({ role, onToast }: StockManagementPanelProp
   const applySummaryQuickFilter = useCallback((opts: {
     unitType?: '' | 'new_unit' | 'old_removed'
     status?: string
+    sourceMode?: StockSourceModeFilter
     area?: string
     search?: string
   }) => {
     setInventoryUnitType(opts.unitType ?? '')
     setInventoryStatus(opts.status ?? '')
+    setInventorySourceMode(opts.sourceMode ?? '')
     setInventoryArea(opts.area ?? '')
     setInventorySearch(opts.search ?? '')
     setSubTab('inventory')
@@ -256,6 +260,8 @@ export function StockManagementPanel({ role, onToast }: StockManagementPanelProp
           setArea={setInventoryArea}
           unitType={inventoryUnitType}
           setUnitType={setInventoryUnitType}
+          sourceMode={inventorySourceMode}
+          setSourceMode={setInventorySourceMode}
           onInspectSerial={sn => void openSerialTimeline(sn)}
           onBatchToOps={sendToOperations}
           onBatchToReverse={sendToReverse}
@@ -327,7 +333,7 @@ function StockSummarySection({
   loading: boolean
   error: string
   onRefresh: () => void
-  onFilterSelect: (opts: { unitType?: '' | 'new_unit' | 'old_removed'; status?: string; area?: string; search?: string }) => void
+  onFilterSelect: (opts: { unitType?: '' | 'new_unit' | 'old_removed'; status?: string; sourceMode?: StockSourceModeFilter; area?: string; search?: string }) => void
 }) {
   if (error && !summary) {
     return (
@@ -378,7 +384,7 @@ function StockSummarySection({
       sub: 'ปิดงานแล้ว รอจับคู่ไฟล์ Supplier',
       tone: 'text-amber-700',
       border: 'border-amber-200 bg-amber-50/50',
-      onClick: () => onFilterSelect({ unitType: 'new_unit', status: '' }),
+      onClick: () => onFilterSelect({ unitType: 'new_unit', status: '', sourceMode: 'hybrid_unregistered' }),
     },
     {
       label: 'แจ้งเสียรอเคลม (DOA)',
@@ -400,7 +406,7 @@ function StockSummarySection({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-1 gap-2.5 min-[360px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         {kpis.map(kpi => (
           <button
             key={kpi.label}
@@ -495,6 +501,8 @@ function StockInventorySection({
   setArea,
   unitType,
   setUnitType,
+  sourceMode,
+  setSourceMode,
   onInspectSerial,
   onBatchToOps,
   onBatchToReverse,
@@ -512,12 +520,13 @@ function StockInventorySection({
   setArea: (v: string) => void
   unitType: '' | 'new_unit' | 'old_removed'
   setUnitType: (v: '' | 'new_unit' | 'old_removed') => void
+  sourceMode: StockSourceModeFilter
+  setSourceMode: (v: StockSourceModeFilter) => void
   onInspectSerial: (sn: string) => void
   onBatchToOps: (mode: OpsMode, serials: string[]) => void
   onBatchToReverse: (mode: ReverseMode, serials: string[]) => void
   onToast: (msg: string) => void
 }) {
-  const [sourceMode, setSourceMode] = useState<'' | 'registered_stock' | 'hybrid_unregistered' | 'onsite_removal'>('')
   const [includeVoid, setIncludeVoid] = useState(false)
   const [page, setPage] = useState(0)
   const [items, setItems] = useState<StockItemRecord[]>([])
@@ -674,7 +683,7 @@ function StockInventorySection({
         {/* Filter controls */}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <Input
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -688,7 +697,7 @@ function StockInventorySection({
             aria-label="กรองประเภทเครื่อง"
             value={unitType}
             onChange={e => setUnitType(e.target.value as '' | 'new_unit' | 'old_removed')}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
+            className="h-10 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
           >
             <option value="">ทุกประเภท (ใหม่ + ซากเดิม)</option>
             <option value="new_unit">เครื่องใหม่ (new_unit)</option>
@@ -699,7 +708,7 @@ function StockInventorySection({
             aria-label="กรองสถานะสต็อก"
             value={status}
             onChange={e => setStatus(e.target.value)}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
+            className="h-10 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
           >
             <option value="">ทุกสถานะที่ใช้งานอยู่</option>
             <option value="in_warehouse,dispatched">พร้อมเบิก/ใช้งาน (คลัง+พื้นที่)</option>
@@ -718,8 +727,8 @@ function StockInventorySection({
           <select
             aria-label="กรองแหล่งที่มา"
             value={sourceMode}
-            onChange={e => setSourceMode(e.target.value as typeof sourceMode)}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
+            onChange={e => setSourceMode(e.target.value as StockSourceModeFilter)}
+            className="h-10 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
           >
             <option value="">ทุกแหล่งที่มา</option>
             <option value="registered_stock">รับเข้าจาก Supplier ปกติ</option>
@@ -731,7 +740,7 @@ function StockInventorySection({
             aria-label="กรองพื้นที่เบิก"
             value={area}
             onChange={e => setArea(e.target.value)}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
+            className="h-10 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
           >
             <option value="">ทุกพื้นที่/ทีมเบิก</option>
             {knownAreas.map(a => (
@@ -1224,7 +1233,7 @@ function StockImportSection({
                   setPreview(null)
                   setDefaults(d => ({ ...d, dispatch_mode: e.target.value as StockImportDefaultsPayload['dispatch_mode'] }))
                 }}
-                className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
+                className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
               >
                 <option value="in_warehouse">รับเข้าคลังกลาง SYM (in_warehouse)</option>
                 <option value="dispatched">รับเข้าพร้อมเบิกกระจายทันที (dispatched)</option>
@@ -1304,7 +1313,50 @@ function StockImportSection({
               )}
             </div>
 
-            <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200">
+            <div className="max-h-72 space-y-2 overflow-y-auto md:hidden">
+              {displayedPreviewRows.map(row => {
+                const badgeVariant = !row.valid
+                  ? 'destructive'
+                  : row.action === 'reconcile_hybrid'
+                    ? 'progress'
+                    : row.action === 'reactivate'
+                      ? 'warning'
+                      : 'done'
+                const actionLabel = row.action === 'create_new'
+                  ? 'รับเข้าใหม่'
+                  : row.action === 'reconcile_hybrid'
+                    ? 'จับคู่ Hybrid'
+                    : row.action === 'reactivate'
+                      ? 'เปิดใช้ซ้ำ'
+                      : 'ผิดพลาด'
+                const modelMeta = [row.brand, row.model_name].filter(Boolean).join(' ') || '—'
+                return (
+                  <div key={`${row.source_row}-${row.serial_number}-m`} className="rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 text-xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="mr-1.5 font-mono text-[11px] text-slate-400">#{row.source_row}</span>
+                        <strong className="break-all font-mono text-slate-900">{row.serial_number || '—'}</strong>
+                      </div>
+                      <Badge variant={badgeVariant} className="shrink-0">{actionLabel}</Badge>
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-600">
+                      {modelMeta}
+                      {row.lot_no ? ` · ${row.lot_no}` : ''}
+                      {row.dispatch_area ? ` · ${row.dispatch_area}` : ''}
+                    </div>
+                    <div className="mt-1 text-[11px]">
+                      {row.reason
+                        ? <span className="text-red-700">{row.reason}</span>
+                        : row.action === 'reconcile_hybrid'
+                          ? <span className="text-sky-700">จับคู่กับ SN ที่ช่างปิดงานไปแล้ว ({row.existing_status})</span>
+                          : <span className="text-emerald-700">พร้อมนำเข้าเป็น {row.target_status}</span>}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="hidden max-h-72 overflow-y-auto rounded-lg border border-slate-200 md:block">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -2007,7 +2059,7 @@ function StockDocumentsSection({ reloadTick }: { reloadTick: number }) {
       <CardContent className="space-y-3">
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <div className="relative">
-            <Search size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
+            <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <Input
               value={search}
               onChange={e => setSearch(e.target.value)}
@@ -2019,7 +2071,7 @@ function StockDocumentsSection({ reloadTick }: { reloadTick: number }) {
             aria-label="กรองประเภทเอกสาร"
             value={docType}
             onChange={e => setDocType(e.target.value)}
-            className="h-9 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
+            className="h-10 rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
           >
             <option value="">ทุกประเภทเอกสาร</option>
             {Object.entries(STOCK_DOC_TYPE_META).map(([key, meta]) => (
@@ -2046,47 +2098,76 @@ function StockDocumentsSection({ reloadTick }: { reloadTick: number }) {
             ยังไม่มีเอกสารสต็อก
           </div>
         ) : (
-          <div className="rounded-xl border border-slate-200">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>เลขที่เอกสาร</TableHead>
-                  <TableHead>ประเภท</TableHead>
-                  <TableHead>จำนวน</TableHead>
-                  <TableHead>Lot / พื้นที่ / ผู้รับมอบ</TableHead>
-                  <TableHead>ผู้จัดทำ / วันเวลา</TableHead>
-                  <TableHead className="text-right">รายละเอียด</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {docs.map(doc => {
-                  const meta = STOCK_DOC_TYPE_META[doc.doc_type] || { label: doc.doc_type, tone: 'neutral' as const }
-                  return (
-                    <TableRow key={doc.id}>
-                      <TableCell className="font-mono font-bold text-slate-900">{doc.doc_code}</TableCell>
-                      <TableCell><Badge variant={meta.tone}>{meta.label}</Badge></TableCell>
-                      <TableCell className="font-mono font-semibold">{doc.item_count.toLocaleString('th-TH')}</TableCell>
-                      <TableCell className="text-xs">
-                        {doc.lot_no && <div>Lot: {doc.lot_no}</div>}
-                        {doc.destination_area && <div className="text-sky-800">พื้นที่: {doc.destination_area}</div>}
-                        {doc.recipient_name && <div className="text-emerald-800">ผู้รับ: {doc.recipient_name}</div>}
-                        {doc.note && <div className="text-slate-500">{doc.note}</div>}
-                      </TableCell>
-                      <TableCell className="text-xs text-slate-500">
-                        <div>{doc.created_by}</div>
-                        <div>{formatStockDate(doc.created_at)}</div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button type="button" size="sm" variant="outline" disabled={detailLoading} onClick={() => void openDocument(doc.id)}>
-                          ดู SN ({doc.item_count})
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-              </TableBody>
-            </Table>
-          </div>
+          <>
+            <div className="space-y-2.5 md:hidden">
+              {docs.map(doc => {
+                const meta = STOCK_DOC_TYPE_META[doc.doc_type] || { label: doc.doc_type, tone: 'neutral' as const }
+                return (
+                  <div key={`${doc.id}-m`} className="rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-2xs">
+                    <div className="flex items-start justify-between gap-2">
+                      <strong className="break-all font-mono text-sm text-slate-900">{doc.doc_code}</strong>
+                      <Badge variant={meta.tone} className="shrink-0">{meta.label}</Badge>
+                    </div>
+                    <div className="mt-1.5 space-y-0.5 text-[11px] text-slate-600">
+                      <div>จำนวน <strong className="font-mono text-slate-900">{doc.item_count.toLocaleString('th-TH')}</strong> เครื่อง</div>
+                      {doc.lot_no && <div>Lot: {doc.lot_no}</div>}
+                      {doc.destination_area && <div className="text-sky-800">พื้นที่: {doc.destination_area}</div>}
+                      {doc.recipient_name && <div className="text-emerald-800">ผู้รับ: {doc.recipient_name}</div>}
+                      {doc.note && <div className="text-slate-500">{doc.note}</div>}
+                      <div className="text-slate-400">{doc.created_by} · {formatStockDate(doc.created_at)}</div>
+                    </div>
+                    <div className="mt-2.5 flex justify-end border-t border-slate-100 pt-2">
+                      <Button type="button" size="sm" variant="outline" className="w-full" disabled={detailLoading} onClick={() => void openDocument(doc.id)}>
+                        ดู SN ({doc.item_count})
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="hidden rounded-xl border border-slate-200 md:block">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>เลขที่เอกสาร</TableHead>
+                    <TableHead>ประเภท</TableHead>
+                    <TableHead>จำนวน</TableHead>
+                    <TableHead>Lot / พื้นที่ / ผู้รับมอบ</TableHead>
+                    <TableHead>ผู้จัดทำ / วันเวลา</TableHead>
+                    <TableHead className="text-right">รายละเอียด</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {docs.map(doc => {
+                    const meta = STOCK_DOC_TYPE_META[doc.doc_type] || { label: doc.doc_type, tone: 'neutral' as const }
+                    return (
+                      <TableRow key={doc.id}>
+                        <TableCell className="font-mono font-bold text-slate-900">{doc.doc_code}</TableCell>
+                        <TableCell><Badge variant={meta.tone}>{meta.label}</Badge></TableCell>
+                        <TableCell className="font-mono font-semibold">{doc.item_count.toLocaleString('th-TH')}</TableCell>
+                        <TableCell className="text-xs">
+                          {doc.lot_no && <div>Lot: {doc.lot_no}</div>}
+                          {doc.destination_area && <div className="text-sky-800">พื้นที่: {doc.destination_area}</div>}
+                          {doc.recipient_name && <div className="text-emerald-800">ผู้รับ: {doc.recipient_name}</div>}
+                          {doc.note && <div className="text-slate-500">{doc.note}</div>}
+                        </TableCell>
+                        <TableCell className="text-xs text-slate-500">
+                          <div>{doc.created_by}</div>
+                          <div>{formatStockDate(doc.created_at)}</div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button type="button" size="sm" variant="outline" disabled={detailLoading} onClick={() => void openDocument(doc.id)}>
+                            ดู SN ({doc.item_count})
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
       </CardContent>
 
@@ -2109,27 +2190,7 @@ function StockSerialTimelineModal({
   lookup: StockLookupResponse
   onClose: () => void
 }) {
-  const dialogRef = useRef<HTMLElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-
-  useEffect(() => {
-    const release = lockBodyScroll()
-    const unregister = registerActiveDialog(dialogRef.current)
-    dialogRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onCloseRef.current()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      unregister()
-      release()
-    }
-  }, [])
+  const dialogRef = useDialogControls<HTMLElement>(onClose)
 
   const item = lookup.item
   const statusMeta = getStockStatusMeta(item?.status)
@@ -2229,27 +2290,7 @@ function StockDocumentDetailModal({
   }>
   onClose: () => void
 }) {
-  const dialogRef = useRef<HTMLElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-
-  useEffect(() => {
-    const release = lockBodyScroll()
-    const unregister = registerActiveDialog(dialogRef.current)
-    dialogRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        onCloseRef.current()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('keydown', onKey)
-      unregister()
-      release()
-    }
-  }, [])
+  const dialogRef = useDialogControls<HTMLElement>(onClose)
 
   const meta = STOCK_DOC_TYPE_META[doc.doc_type] || { label: doc.doc_type, tone: 'neutral' as const }
 

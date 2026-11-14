@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Activity,
@@ -37,7 +37,7 @@ import type { RegisterImportRow } from './xlsx-register.mjs'
 import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot, SignaturePad, type SignaturePadHandle } from './TaskEvidencePanel'
 import { groupRowsByBranch } from './province'
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
-import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
+import { lockBodyScroll, useDialogControls } from './dialog'
 import { ApiError, type AuthConfigResponse, d1Api, getDevEmail, setDevAuthHeadersEnabled, setDevEmail } from './d1-client'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
 import { StockLookupBadge } from './StockLookupBadge'
@@ -83,16 +83,16 @@ const navigationGroups: Array<{ key: 'ops' | 'inventory' | 'admin'; label: strin
   { key: 'admin', label: 'จัดการระบบ' },
 ]
 
-const pageCopy: Record<MenuKey, { title: string; subtitle: string }> = {
-  overview: { title: 'ภาพรวมการปฏิบัติงาน', subtitle: 'สถานะสาขา อุปกรณ์ และใบงานเปลี่ยน Scanner' },
-  work_orders: { title: 'ใบงานเปลี่ยน Scanner', subtitle: 'เปิดดูงานทุกใบและรายละเอียด Scanner ที่ต้องดำเนินการ' },
-  assets: { title: 'ทะเบียนอุปกรณ์', subtitle: 'ดูข้อมูลสาขาและเครื่องสแกนที่ผูกกับแต่ละ LocationCode' },
-  stock: { title: 'คลังสต็อกเครื่องสแกนเนอร์', subtitle: 'รับเข้า Supplier · เบิกกระจายพื้นที่ · Hybrid Mode · รับซากส่งคืน' },
-  pending: { title: 'รายการ Pending รอตรวจ', subtitle: 'ตรวจผลหน้างาน รูปภาพ และลายเซ็นที่ช่างส่งมา' },
-  completed: { title: 'ใบงานที่เสร็จแล้ว', subtitle: 'ดูงานที่ส่งมอบหรือปิดผลแล้ว พร้อมเปิดหลักฐานและประวัติย้อนหลัง' },
-  discovery: { title: 'เครื่องนอกทะเบียน', subtitle: 'ตรวจรายการที่ช่างพบเพิ่ม โดยไม่ปะปนกับทะเบียนอุปกรณ์หลัก' },
-  imports: { title: 'นำเข้าข้อมูล', subtitle: 'ตรวจสอบไฟล์ทะเบียนก่อนบันทึกเป็นชุดข้อมูลเดียว' },
-  people: { title: 'สิทธิ์ผู้ใช้งาน', subtitle: 'จัดการบัญชี Google และบทบาทผู้มีสิทธิ์เข้าใช้งานระบบ (Allowlist)' },
+const pageCopy: Record<MenuKey, { title: string; shortTitle: string; subtitle: string }> = {
+  overview: { title: 'ภาพรวมการปฏิบัติงาน', shortTitle: 'ภาพรวม', subtitle: 'สถานะสาขา อุปกรณ์ และใบงานเปลี่ยน Scanner' },
+  work_orders: { title: 'ใบงานเปลี่ยน Scanner', shortTitle: 'ใบงาน', subtitle: 'เปิดดูงานทุกใบและรายละเอียด Scanner ที่ต้องดำเนินการ' },
+  assets: { title: 'ทะเบียนอุปกรณ์', shortTitle: 'ทะเบียนอุปกรณ์', subtitle: 'ดูข้อมูลสาขาและเครื่องสแกนที่ผูกกับแต่ละ LocationCode' },
+  stock: { title: 'คลังสต็อกเครื่องสแกนเนอร์', shortTitle: 'สต็อกเครื่อง', subtitle: 'รับเข้า Supplier · เบิกกระจายพื้นที่ · Hybrid Mode · รับซากส่งคืน' },
+  pending: { title: 'รายการ Pending รอตรวจ', shortTitle: 'รอตรวจรับ', subtitle: 'ตรวจผลหน้างาน รูปภาพ และลายเซ็นที่ช่างส่งมา' },
+  completed: { title: 'ใบงานที่เสร็จแล้ว', shortTitle: 'เสร็จแล้ว', subtitle: 'ดูงานที่ส่งมอบหรือปิดผลแล้ว พร้อมเปิดหลักฐานและประวัติย้อนหลัง' },
+  discovery: { title: 'เครื่องนอกทะเบียน', shortTitle: 'นอกทะเบียน', subtitle: 'ตรวจรายการที่ช่างพบเพิ่ม โดยไม่ปะปนกับทะเบียนอุปกรณ์หลัก' },
+  imports: { title: 'นำเข้าข้อมูล', shortTitle: 'นำเข้าข้อมูล', subtitle: 'ตรวจสอบไฟล์ทะเบียนก่อนบันทึกเป็นชุดข้อมูลเดียว' },
+  people: { title: 'สิทธิ์ผู้ใช้งาน', shortTitle: 'สิทธิ์ผู้ใช้งาน', subtitle: 'จัดการบัญชี Google และบทบาทผู้มีสิทธิ์เข้าใช้งานระบบ (Allowlist)' },
 }
 
 const ACTIVE_MENU_STORAGE_KEY = 'ais-branch-asset-operations:active-menu'
@@ -999,10 +999,10 @@ function App() {
           <div className="breadcrumb">
             <span className="hidden sm:inline">ระบบปฏิบัติการ</span>
             <ChevronRight size={14} className="hidden sm:inline shrink-0" />
-            <strong className="truncate">{currentPage.title}</strong>
+            <strong className="truncate"><span className="sm:hidden">{currentPage.shortTitle}</span><span className="hidden sm:inline">{currentPage.title}</span></strong>
           </div>
           <div className="top-actions">
-            {demoMode && <span className="demo-indicator"><span /> DEMO · ข้อมูลตัวอย่าง</span>}
+            {demoMode && <span className="demo-indicator"><span aria-hidden="true" /><span>DEMO<span className="hidden sm:inline"> · ข้อมูลตัวอย่าง</span></span></span>}
             <button className="icon-button notification-button" aria-label="การแจ้งเตือน" onClick={() => setNotice('ยังไม่มีการแจ้งเตือนใหม่')}><Bell size={18} /><i /></button>
             <div className="top-divider hidden sm:block" />
             <div ref={accountMenuRef} className="account-menu-wrap">
@@ -1029,7 +1029,7 @@ function App() {
             <div><h1>{currentPage.title}</h1><p>{currentPage.subtitle}</p></div>
             <div className="flex flex-wrap items-center gap-2">
               {canExportRawData && <Button type="button" variant="outline" size="sm" onClick={handleExportRawData}><FileDown size={15} /> ส่งออก Raw Data (.csv)</Button>}
-              {activeMenu === 'assets' && canUseAdminModules && <Button type="button" variant="outline" size="sm" onClick={() => setActiveMenu('imports')}><FileSpreadsheet size={15} /> นำเข้าทะเบียน</Button>}
+              {activeMenu === 'assets' && canUseAdminModules && <Button type="button" variant="outline" size="sm" onClick={() => navigateTo('imports')}><FileSpreadsheet size={15} /> นำเข้าทะเบียน</Button>}
             </div>
           </div>
 
@@ -1168,11 +1168,6 @@ function LoginPage({ onGoogleSignIn, onDemo, error, configured, submitting }: {
         <h2>เข้าสู่ระบบ</h2>
         <p>ใช้บัญชี Google ที่ได้รับอนุมัติจากเจ้าของระบบ</p>
         {error && <div className="form-error" role="alert">{error}</div>}
-        {helpOpen && (
-          <div className="login-help-note" role="status">
-            <span>ใช้บัญชี Google ที่ได้รับอนุมัติในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) หากยังเข้าไม่ได้ให้แจ้งอีเมล Google ของคุณกับเจ้าของระบบทาง LINE เพื่อเพิ่มสิทธิ์</span>
-          </div>
-        )}
         {!configured && <div className="config-note">ระบบยืนยันตัวตนยังไม่พร้อมใช้งาน กรุณาติดต่อเจ้าของระบบ</div>}
         <button className="google-sign-in-button" type="button" onClick={onGoogleSignIn} disabled={submitting || !configured}>
           <GoogleMark />
@@ -1182,7 +1177,12 @@ function LoginPage({ onGoogleSignIn, onDemo, error, configured, submitting }: {
         <button className="demo-button" type="button" onClick={onDemo}><Activity size={17} /> ดูตัวอย่างระบบด้วยข้อมูลจำลอง</button>
         <div className="privacy-note"><ShieldCheck size={15} className="shrink-0" /> <span>อนุญาตเฉพาะบัญชีใน Allowlist · โหมดตัวอย่างใช้ข้อมูลจำลอง</span></div>
       </div>
-      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={() => setHelpOpen(open => !open)} aria-expanded={helpOpen}>ติดต่อเจ้าของระบบ</button></div>
+      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={() => setHelpOpen(open => !open)} aria-expanded={helpOpen} aria-controls="login-help-note">ติดต่อเจ้าของระบบ</button></div>
+      {helpOpen && (
+        <div id="login-help-note" className="login-help-note w-full max-w-[390px]" role="status">
+          <span>ใช้บัญชี Google ที่ได้รับอนุมัติในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) หากยังเข้าไม่ได้ให้แจ้งอีเมล Google ของคุณกับเจ้าของระบบทาง LINE เพื่อเพิ่มสิทธิ์</span>
+        </div>
+      )}
       <div className="login-mobile-copyright">© 2026 AIS Branch &amp; Asset Operations · ระบบภายใน</div>
     </section>
   </div>
@@ -2375,18 +2375,21 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
 
       {/* Modal: Batch / Single Acceptance by G-Able */}
       {batchBranch && (
-        <div className="handover-modal-backdrop" onClick={() => { setBatchBranch(null); setActionError('') }}>
-          <div className="handover-modal-content max-w-[600px]" onClick={e => e.stopPropagation()}>
-            <div className="handover-modal-bar">
-              <strong>
-                {selectedTaskIds.length === 1
-                  ? 'ตรวจรับมอบงาน (เฉพาะเครื่องที่เลือก)'
-                  : `ตรวจรับมอบงานแบบรวม (${selectedTaskIds.length} เครื่อง)`}
-              </strong>
-              <button type="button" className="icon-button" onClick={() => { setBatchBranch(null); setActionError('') }}>
-                <X size={16} />
-              </button>
-            </div>
+        <AccessibleDialog
+          labelledBy="pending-batch-modal-title"
+          className="handover-modal-content max-w-[600px]"
+          onClose={() => { setBatchBranch(null); setActionError('') }}
+        >
+          <div className="handover-modal-bar">
+            <strong id="pending-batch-modal-title">
+              {selectedTaskIds.length === 1
+                ? 'ตรวจรับมอบงาน (เฉพาะเครื่องที่เลือก)'
+                : `ตรวจรับมอบงานแบบรวม (${selectedTaskIds.length} เครื่อง)`}
+            </strong>
+            <button type="button" className="icon-button" aria-label="ปิดหน้าต่างตรวจรับมอบงาน" onClick={() => { setBatchBranch(null); setActionError('') }}>
+              <X size={16} />
+            </button>
+          </div>
             <div className="p-5">
               {actionError && (
                 <div className="form-error mb-3.5" role="alert">
@@ -2450,20 +2453,22 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                 </Button>
               </div>
             </div>
-          </div>
-        </div>
+        </AccessibleDialog>
       )}
 
       {/* Modal: Rejection Reason */}
       {rejectingTask && (
-        <div className="handover-modal-backdrop" onClick={() => { setRejectingTask(null); setActionError('') }}>
-          <div className="handover-modal-content max-w-[500px]" onClick={e => e.stopPropagation()}>
-            <div className="handover-modal-bar">
-              <strong>ระบุเหตุผลการปฏิเสธงาน (Reject)</strong>
-              <button type="button" className="icon-button" onClick={() => { setRejectingTask(null); setActionError('') }}>
-                <X size={16} />
-              </button>
-            </div>
+        <AccessibleDialog
+          labelledBy="pending-reject-modal-title"
+          className="handover-modal-content max-w-[500px]"
+          onClose={() => { setRejectingTask(null); setActionError('') }}
+        >
+          <div className="handover-modal-bar">
+            <strong id="pending-reject-modal-title">ระบุเหตุผลการปฏิเสธงาน (Reject)</strong>
+            <button type="button" className="icon-button" aria-label="ปิดหน้าต่างปฏิเสธงาน" onClick={() => { setRejectingTask(null); setActionError('') }}>
+              <X size={16} />
+            </button>
+          </div>
             <div className="p-5">
               {actionError && (
                 <div className="form-error mb-3.5" role="alert">
@@ -2493,22 +2498,21 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                 </Button>
               </div>
             </div>
-          </div>
-        </div>
+        </AccessibleDialog>
       )}
 
       {/* Modal: Evidence Preview & SYM Admin Verify */}
       {(viewingEvidenceTask || selectedAdminTask) && (
-        <div
-          className="handover-modal-backdrop"
-          onClick={() => {
+        <AccessibleDialog
+          labelledBy="pending-evidence-modal-title"
+          className="evidence-modal-box"
+          onClose={() => {
             setViewingEvidenceTask(null)
             setSelectedAdminTask(null)
             setActionError('')
             setZoomedEvidenceIndex(null)
           }}
         >
-          <div className="evidence-modal-box" onClick={e => e.stopPropagation()}>
             {(() => {
               const currentTask = selectedAdminTask || viewingEvidenceTask!
 
@@ -2558,7 +2562,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                 <>
                   <div className="evidence-modal-topbar">
                     <div>
-                      <h3>
+                      <h3 id="pending-evidence-modal-title">
                         <ShieldCheck size={20} color="#15803d" />
                         รายละเอียดหลักฐานหน้างาน
                       </h3>
@@ -2569,6 +2573,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                     <button
                       type="button"
                       className="icon-button"
+                      aria-label="ปิดหน้าต่างรายละเอียดหลักฐาน"
                       onClick={() => {
                         setViewingEvidenceTask(null)
                         setSelectedAdminTask(null)
@@ -2762,14 +2767,12 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
 
                   {/* Lightbox Zoom Modal */}
                   {zoomedEvidenceIndex !== null && lightboxList[zoomedEvidenceIndex] && (
-                    <div
-                      className="handover-modal-backdrop z-[10000] bg-slate-900/90 backdrop-blur-xs"
-                      onClick={() => setZoomedEvidenceIndex(null)}
+                    <AccessibleDialog
+                      backdropClassName="handover-modal-backdrop z-[10000] bg-slate-900/90 backdrop-blur-xs"
+                      className="relative flex max-h-[94vh] max-w-[94vw] flex-col items-center justify-center"
+                      ariaLabel={lightboxList[zoomedEvidenceIndex].title}
+                      onClose={() => setZoomedEvidenceIndex(null)}
                     >
-                      <div
-                        className="relative flex max-h-[94vh] max-w-[94vw] flex-col items-center justify-center"
-                        onClick={e => e.stopPropagation()}
-                      >
                         <div className="mb-3 flex w-full flex-wrap items-center justify-between gap-2 text-white">
                           <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <strong className="text-base">
@@ -2815,8 +2818,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                             ภาพถัดไป <ChevronRight size={16} />
                           </Button>
                         </div>
-                      </div>
-                    </div>
+                    </AccessibleDialog>
                   )}
 
                   {/* Modal Footer Actions */}
@@ -2921,8 +2923,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                 </>
               )
             })()}
-          </div>
-        </div>
+        </AccessibleDialog>
       )}
     </>
   )
@@ -2996,7 +2997,16 @@ function WorkOrders({ role, currentEmail, demo, onUpdated, view = 'all', onOpenH
   return <>
     <section className="panel pending-review-panel">
       <div className="panel-heading"><div><h2>{completedView ? 'ใบงานที่เสร็จแล้ว' : 'ใบงานทุกสถานะ'}</h2><p>{completedView ? 'รายการที่ส่งมอบแล้วหรือ Admin ปิดผลแล้ว เลือกเพื่อดูหลักฐานและประวัติย้อนหลัง' : 'เลือกใบงานเพื่อดู SN รูปภาพ ลายเซ็น และประวัติการดำเนินงาน'}</p></div><span className="pending-review-count">{demo ? displayRows.length.toLocaleString('th-TH') : totalOrders.toLocaleString('th-TH')} ใบงาน</span></div>
-      <form className="pending-review-search" onSubmit={submitSearch}><label className="search-box"><Search size={17} /><input value={draft} onChange={event => setDraft(event.target.value)} placeholder="ค้นหาใบงาน สาขา จังหวัด หรือ Serial" aria-label="ค้นหาใบงาน" /></label><button type="submit" className="secondary-button">ค้นหา</button><button type="button" className="text-button" disabled={loading || demo} onClick={() => setReload(value => value + 1)}>รีเฟรช</button></form>
+      <form className="pending-review-search" onSubmit={submitSearch}>
+        <label className="search-box">
+          <Search size={17} />
+          <input value={draft} onChange={event => setDraft(event.target.value)} placeholder="ค้นหาใบงาน สาขา จังหวัด หรือ Serial" aria-label="ค้นหาใบงาน" />
+        </label>
+        <div className="pending-review-search-actions">
+          <button type="submit" className="secondary-button">ค้นหา</button>
+          <button type="button" className="text-button" disabled={loading || demo} onClick={() => setReload(value => value + 1)}>รีเฟรช</button>
+        </div>
+      </form>
       {loading ? <EmptyState compact loading /> : error ? <EmptyState compact title="โหลดใบงานไม่สำเร็จ" detail={error} onRetry={() => setReload(value => value + 1)} /> : displayRows.length ? <div className="pending-review-list">{displayRows.map((row, index) => {
         const id = String(row.id || row.task_id || `${row.work_order_code || 'order'}-${index}`)
         const stage = getTaskWorkflowStage(row)
@@ -3027,52 +3037,44 @@ function WorkOrders({ role, currentEmail, demo, onUpdated, view = 'all', onOpenH
   </>
 }
 
-function useDialogControls(onClose: () => void) {
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-  useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const releaseBodyScroll = lockBodyScroll()
-    const unregisterDialog = registerActiveDialog(dialogRef.current)
-    const focusableSelector = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
-    const focusables = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) || [])
-    const handleKeys = (event: KeyboardEvent) => {
-      if (!isTopmostActiveDialog(dialogRef.current)) return
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onCloseRef.current()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const items = focusables()
-      if (!items.length) return
-      const first = items[0]
-      const last = items[items.length - 1]
-      if (event.shiftKey && (document.activeElement === first || !dialogRef.current?.contains(document.activeElement))) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && (document.activeElement === last || !dialogRef.current?.contains(document.activeElement))) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    window.addEventListener('keydown', handleKeys)
-    const focusFrame = window.requestAnimationFrame(() => focusables()[0]?.focus())
-    return () => {
-      window.cancelAnimationFrame(focusFrame)
-      window.removeEventListener('keydown', handleKeys)
-      unregisterDialog()
-      releaseBodyScroll()
-      if (previousFocus && previousFocus !== document.body && previousFocus.isConnected && !previousFocus.closest('[inert]')) {
-        previousFocus.focus()
-      } else {
-        const parentDialog = getTopmostActiveDialog()
-        ;(parentDialog?.querySelector<HTMLElement>(focusableSelector) || parentDialog)?.focus()
-      }
-    }
-  }, [])
-  return dialogRef
+function AccessibleDialog({
+  labelledBy,
+  ariaLabel,
+  className,
+  backdropClassName = 'handover-modal-backdrop',
+  onClose,
+  children,
+}: {
+  labelledBy?: string
+  ariaLabel?: string
+  className: string
+  backdropClassName?: string
+  onClose: () => void
+  children: ReactNode
+}) {
+  const dialogRef = useDialogControls(onClose)
+  return (
+    <div
+      className={backdropClassName}
+      role="presentation"
+      onMouseDown={e => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <div
+        ref={dialogRef}
+        className={className}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        aria-label={ariaLabel}
+        tabIndex={-1}
+        onClick={e => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  )
 }
 
 function DetailField({ label, value }: { label: string; value: unknown }) {

@@ -1,4 +1,4 @@
-import { readdir, readFile, unlink } from 'node:fs/promises'
+import { access, readdir, readFile, unlink } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -8,7 +8,7 @@ const assetsDir = resolve(distDir, 'assets')
 const html = await readFile(resolve(distDir, 'index.html'), 'utf8')
 const currentAssets = new Set()
 const pendingAssets = []
-const assetReferencePattern = /(?:\/?assets\/|\.\/)([\w-]+\.(?:js|css))/g
+const assetReferencePattern = /(?:\/?assets\/|\.\/)([\w-]+\.(?:js|css|woff2?))/g
 
 function addReferencedAssets(content) {
   for (const match of content.matchAll(assetReferencePattern)) {
@@ -29,7 +29,11 @@ while (pendingAssets.length) {
   const assetName = pendingAssets.pop()
   const assetPath = resolve(assetsDir, assetName)
   try {
-    addReferencedAssets(await readFile(assetPath, 'utf8'))
+    if (/\.(?:js|css)$/.test(assetName)) {
+      addReferencedAssets(await readFile(assetPath, 'utf8'))
+    } else {
+      await access(assetPath)
+    }
   } catch (error) {
     if (error.code === 'ENOENT') throw new Error(`Referenced build asset is missing: ${assetName}`)
     throw error
@@ -40,11 +44,11 @@ const entries = await readdir(assetsDir, { withFileTypes: true })
 let removed = 0
 
 for (const entry of entries) {
-  if (!entry.isFile() || !/^[\w-]+-[\w-]+\.(?:js|css)$/.test(entry.name)) continue
+  if (!entry.isFile() || !/^[\w-]+-[\w-]+\.(?:js|css|woff2?)$/.test(entry.name)) continue
   if (currentAssets.has(entry.name)) continue
 
   await unlink(resolve(assetsDir, entry.name))
   removed += 1
 }
 
-console.log(`Removed ${removed} stale hashed JS/CSS asset(s); retained ${currentAssets.size} referenced asset(s).`)
+console.log(`Removed ${removed} stale hashed JS/CSS/font asset(s); retained ${currentAssets.size} referenced asset(s).`)
