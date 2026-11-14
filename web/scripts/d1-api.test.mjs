@@ -1271,25 +1271,39 @@ test('HTTP runtime: Allowlist RBAC blocks data_manager privilege escalation, sup
   })
   assert.equal(symPass.status, 200)
 
-  // /api/scanners redacts SYM staff emails & names for customer_reviewer and viewer
+  // /api/scanners & /api/branches/:id redact SYM staff emails & names for customer_reviewer and viewer
   for (const restrictedEmail of ['reviewer@gable.co.th', 'viewer@ais.co.th']) {
     const sc = await apiReq(env, '/api/scanners?search=SN-PRIV-01', { email: restrictedEmail })
     assert.equal(sc.status, 200)
     const row = sc.json.rows[0]
     assert.equal('started_by' in row, false)
+    assert.equal('started_by_name' in row, false)
     assert.equal('closeout_submitted_by' in row, false)
+    assert.equal('closeout_submitted_by_name' in row, false)
     assert.equal('performed_by_name' in row, false)
     assert.equal('admin_accepted_by' in row, false)
+    assert.equal('admin_accepted_by_name' in row, false)
+
+    const br = await apiReq(env, `/api/branches/${row.branch_id}`, { email: restrictedEmail })
+    assert.equal(br.status, 200)
+    const brScanner = br.json.scanners[0]
+    assert.equal('started_by' in brScanner, false)
+    assert.equal('started_by_name' in brScanner, false)
+    assert.equal('performed_by_name' in brScanner, false)
+    assert.equal('admin_accepted_by_name' in brScanner, false)
 
     const revRes = await apiReq(env, `/api/tasks/${start.json.task_id}/reviews`, { email: restrictedEmail })
     assert.equal(revRes.status, 200)
     assert.equal(revRes.json.reviews[0].stage, 'sym')
     assert.equal(revRes.json.reviews[0].reviewer_email, null)
+    assert.equal(revRes.json.reviews[0].reviewer_name, null)
   }
 
   const pendingRev = await apiReq(env, '/api/tasks/pending?stage=customer', { email: 'reviewer@gable.co.th' })
   assert.equal(pendingRev.status, 200)
   assert.equal('admin_accepted_by' in pendingRev.json.tasks[0], false)
+  assert.equal('admin_accepted_by_name' in pendingRev.json.tasks[0], false)
+  assert.equal('performed_by_name' in pendingRev.json.tasks[0], false)
 
   // Invalid customer-batch-accept SVG signature must be rejected 400
   const svgB64 = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')
@@ -1369,4 +1383,116 @@ test('HTTP runtime: Concurrent /tasks/start is idempotent and concurrent /review
   )
   // Only the winning call writes R2 signatures (1 branch sign + 1 task inspector_signature = 2 objects)
   assert.equal(env.EVIDENCE_BUCKET.store.size, 2)
+})
+
+test('HTTP runtime: Actor display fields resolve full_name instead of emails while keeping canonical emails for 4-Eyes', async () => {
+  const env = createTestEnv()
+  await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'ActorNames.xlsx',
+      rows: [
+        { location_code: 'BKK-NAME1', loc_bld: 'AIS Name Shop 1', com_sn: 'SN-NAME-01', province: 'กรุงเทพมหานคร' },
+        { location_code: 'BKK-NAME2', loc_bld: 'AIS Name Shop 2', com_sn: 'SN-NAME-02', province: 'กรุงเทพมหานคร' },
+      ],
+    },
+  })
+
+  // Task 1: Admin owner starts and closes (tests full_name resolution + 4-Eyes self-approval guard)
+  const sc1 = (await apiReq(env, '/api/scanners?search=SN-NAME-01', { email: 'admin@sym.co.th' })).json.rows[0]
+  const start1 = await apiReq(env, '/api/tasks/start', { method: 'POST', email: 'karunyaphasmanakun@gmail.com', body: { scanner_id: sc1.id } })
+  assert.equal(start1.status, 200)
+
+  const pendingWhileStarted = await apiReq(env, '/api/scanners?search=SN-NAME-01', { email: 'admin@sym.co.th' })
+  assert.equal(pendingWhileStarted.json.rows[0].performed_by_name, 'ทาม (Project Owner)')
+  assert.equal(pendingWhileStarted.json.rows[0].started_by_name, 'ทาม (Project Owner)')
+  assert.equal(pendingWhileStarted.json.rows[0].started_by, 'karunyaphasmanakun@gmail.com')
+
+  const close1 = await apiReq(env, `/api/tasks/${start1.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'karunyaphasmanakun@gmail.com',
+    body: { outcome: 'no_damage_found', notes: 'ใช้งานปกติ', version: 1 },
+  })
+  assert.equal(close1.status, 200)
+
+  // 4-Eyes must still block same user from approving their own work even though UI displays real name
+  const selfVerify = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'karunyaphasmanakun@gmail.com',
+    body: { task_id: start1.json.task_id, decision: 'pass', version: 2 },
+  })
+  assert.equal(selfVerify.status, 403)
+
+  // Different admin approves
+  const symVerify = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: start1.json.task_id, decision: 'pass', version: 2 },
+  })
+  assert.equal(symVerify.status, 200)
+
+  const samplePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const custAccept = await apiReq(env, '/api/review/customer-batch-accept', {
+    method: 'POST',
+    email: 'reviewer@gable.co.th',
+    body: { branch_id: sc1.branch_id, task_ids: [start1.json.task_id], signature_base64: samplePng },
+  })
+  assert.equal(custAccept.status, 200)
+
+  // Check /api/scanners, /api/branches/:id, /api/tasks/:id/reviews, /api/tasks/:id/evidence, and SVG signature
+  const afterScanners = await apiReq(env, '/api/scanners?search=SN-NAME-01', { email: 'admin@sym.co.th' })
+  const row1 = afterScanners.json.rows[0]
+  assert.equal(row1.performed_by_name, 'ทาม (Project Owner)')
+  assert.equal(row1.started_by_name, 'ทาม (Project Owner)')
+  assert.equal(row1.closeout_submitted_by_name, 'ทาม (Project Owner)')
+  assert.equal(row1.admin_accepted_by_name, 'SYM Administrator')
+  assert.equal(row1.customer_accepted_by_name, 'ผู้ตรวจรับงาน (G-Able)')
+
+  const br = await apiReq(env, `/api/branches/${sc1.branch_id}`, { email: 'admin@sym.co.th' })
+  assert.equal(br.json.scanners[0].performed_by_name, 'ทาม (Project Owner)')
+  assert.equal(br.json.scanners[0].admin_accepted_by_name, 'SYM Administrator')
+  assert.equal(br.json.scanners[0].customer_accepted_by_name, 'ผู้ตรวจรับงาน (G-Able)')
+
+  const revs = await apiReq(env, `/api/tasks/${start1.json.task_id}/reviews`, { email: 'admin@sym.co.th' })
+  assert.equal(revs.json.reviews[0].reviewer_name, 'SYM Administrator')
+  assert.equal(revs.json.reviews[1].reviewer_name, 'ผู้ตรวจรับงาน (G-Able)')
+
+  const evdList = await apiReq(env, `/api/tasks/${start1.json.task_id}/evidence`, { email: 'admin@sym.co.th' })
+  const custSig = evdList.json.evidence.find(item => item.evidence_type === 'inspector_signature')
+  assert.equal(custSig?.signer_name, 'ผู้ตรวจรับงาน (G-Able)')
+
+  const sigSvgRes = await app.request(
+    `/api/evidence/tasks/${start1.json.task_id}/technician_signature.jpg`,
+    { headers: { 'x-dev-user-email': 'admin@sym.co.th' } },
+    env
+  )
+  assert.equal(sigSvgRes.status, 200)
+  const sigSvgText = await sigSvgRes.text()
+  assert.match(sigSvgText, /ทาม \(Project Owner\)/)
+  assert.doesNotMatch(sigSvgText, /karunyaphasmanakun@gmail\.com/)
+
+  const sigSvgCustRes = await app.request(
+    `/api/evidence/tasks/${start1.json.task_id}/technician_signature.jpg`,
+    { headers: { 'x-dev-user-email': 'reviewer@gable.co.th' } },
+    env
+  )
+  assert.equal(sigSvgCustRes.status, 200)
+  const sigSvgCustText = await sigSvgCustRes.text()
+  assert.doesNotMatch(sigSvgCustText, /ทาม \(Project Owner\)/)
+  assert.doesNotMatch(sigSvgCustText, /karunyaphasmanakun@gmail\.com/)
+
+  // Task 2: User without full_name in allowlist never exposes raw @domain in display name fields
+  const addNoName = await apiReq(env, '/api/allowlist', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { email: 'noname.tech@sym.co.th', role: 'field_technician' },
+  })
+  assert.equal(addNoName.status, 200)
+  const sc2 = (await apiReq(env, '/api/scanners?search=SN-NAME-02', { email: 'admin@sym.co.th' })).json.rows[0]
+  const start2 = await apiReq(env, '/api/tasks/start', { method: 'POST', email: 'noname.tech@sym.co.th', body: { scanner_id: sc2.id } })
+  assert.equal(start2.status, 200)
+  const noNameScanner = (await apiReq(env, '/api/scanners?search=SN-NAME-02', { email: 'admin@sym.co.th' })).json.rows[0]
+  assert.equal(noNameScanner.performed_by_name, 'noname.tech')
+  assert.equal(noNameScanner.performed_by_name.includes('@'), false)
 })

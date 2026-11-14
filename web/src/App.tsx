@@ -196,6 +196,18 @@ function formatDate(value: unknown) {
   return new Intl.DateTimeFormat('th-TH', options).format(date)
 }
 
+function formatDisplayActorName(name: unknown, email?: unknown): string {
+  const cleanName = typeof name === 'string' ? name.trim() : ''
+  if (cleanName) {
+    const at = cleanName.indexOf('@')
+    return at > 0 ? cleanName.slice(0, at) : cleanName
+  }
+  const cleanEmail = typeof email === 'string' ? email.trim() : ''
+  if (!cleanEmail) return ''
+  const at = cleanEmail.indexOf('@')
+  return at > 0 ? cleanEmail.slice(0, at) : cleanEmail
+}
+
 function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: string }) {
   const variantMap: Record<string, 'done' | 'ready' | 'progress' | 'blocked' | 'green' | 'orange' | 'red' | 'neutral'> = {
     done: 'done',
@@ -1825,8 +1837,8 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
                 </div>
                 <strong className="handover-sig-role">ผู้ปฏิบัติงานหน้างาน (Onsite Technician)</strong>
                 <div className="handover-sig-org">บริษัท สยามมัลติมีเดีย จำกัด (SYM)</div>
-                {firstCompletedTask?.closeout_submitted_by && (
-                  <div className="handover-sig-meta">ผู้ลงนาม: {firstCompletedTask.closeout_submitted_by}</div>
+                {Boolean(firstCompletedTask?.closeout_submitted_by_name || firstCompletedTask?.performed_by_name || firstCompletedTask?.closeout_submitted_by) && (
+                  <div className="handover-sig-meta">ผู้ลงนาม: {formatDisplayActorName(firstCompletedTask?.closeout_submitted_by_name || firstCompletedTask?.performed_by_name, firstCompletedTask?.closeout_submitted_by)}</div>
                 )}
                 {firstCompletedTask?.closeout_submitted_at && (
                   <div className="handover-sig-meta">
@@ -1883,8 +1895,8 @@ function BranchHandoverSheetModal({ branch, onClose }: { branch: any; onClose: (
                 </div>
                 <strong className="handover-sig-role">ผู้ตรวจรับมอบงาน (Customer Reviewer)</strong>
                 <div className="handover-sig-org">บมจ. จีเอเบิล (G-Able)</div>
-                {firstCompletedTask?.customer_accepted_by && (
-                  <div className="handover-sig-meta">ผู้ลงนาม: {firstCompletedTask.customer_accepted_by}</div>
+                {Boolean(firstCompletedTask?.customer_accepted_by_name || firstCompletedTask?.customer_accepted_by) && (
+                  <div className="handover-sig-meta">ผู้ลงนาม: {formatDisplayActorName(firstCompletedTask?.customer_accepted_by_name, firstCompletedTask?.customer_accepted_by)}</div>
                 )}
                 {firstCompletedTask?.customer_accepted_at && (
                   <div className="handover-sig-meta">
@@ -2358,7 +2370,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                       </div>
                       <span>จังหวัด{String(task.province || '—')} · LocationCode {String(task.location_code || '—')}</span>
                       <small>
-                        ช่าง: {String(task.started_by || '—')} · ส่งเมื่อ {task.closeout_submitted_at ? formatDate(task.closeout_submitted_at) : '—'}
+                        ช่าง: {formatDisplayActorName(task.performed_by_name || task.closeout_submitted_by_name || task.started_by_name, task.closeout_submitted_by || task.started_by) || '—'} · ส่งเมื่อ {task.closeout_submitted_at ? formatDate(task.closeout_submitted_at) : '—'}
                       </small>
                     </div>
                     <button
@@ -2646,7 +2658,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                         </div>
                         <div className="review-metric-item">
                           <span className="metric-label">ผู้ปฏิบัติงานที่เข้าสาขา</span>
-                          <strong className="metric-val">{String(currentTask.started_by || 'ช่าง Onsite')}</strong>
+                          <strong className="metric-val">{formatDisplayActorName(currentTask.performed_by_name || currentTask.started_by_name, currentTask.started_by) || 'ช่าง Onsite'}</strong>
                           <span className="metric-sub">{currentTask.closeout_submitted_at ? `ส่งเมื่อ: ${formatDate(currentTask.closeout_submitted_at)}` : '—'}</span>
                         </div>
                         <div className="review-metric-item">
@@ -2654,7 +2666,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                           <strong className={cn('metric-val', currentTask.admin_accepted_at ? 'text-emerald-700' : 'text-amber-600')}>
                             {currentTask.admin_accepted_at ? '✓ ผ่านการตรวจแล้ว' : 'รอ SYM พิจารณา'}
                           </strong>
-                          <span className="metric-sub">{currentTask.admin_accepted_at ? `${String(currentTask.admin_accepted_by || 'Admin')} · ${formatDate(currentTask.admin_accepted_at)}` : 'รอคิว'}</span>
+                          <span className="metric-sub">{currentTask.admin_accepted_at ? `${formatDisplayActorName(currentTask.admin_accepted_by_name, currentTask.admin_accepted_by) || 'Admin SYM'} · ${formatDate(currentTask.admin_accepted_at)}` : 'รอคิว'}</span>
                         </div>
                       </div>
 
@@ -3127,9 +3139,9 @@ function AccessibleDialog({
   )
 }
 
-function DetailField({ label, value }: { label: string; value: unknown }) {
+function DetailField({ label, value, className }: { label: string; value: unknown; className?: string }) {
   const text = String(value ?? '').trim()
-  return <div className="detail-field"><span>{label}</span><strong>{text || '—'}</strong></div>
+  return <div className={cn('detail-field', className)}><span>{label}</span><strong>{text || '—'}</strong></div>
 }
 
 const ignoreEvidenceState = () => undefined
@@ -3171,7 +3183,10 @@ function AssetDetailDialog({ asset, role, currentEmail, demo, onClose, onUpdated
         if (found && found.task_id) {
           const outcomeVal = String(found.outcome || '')
           const noteVal = found.notes ?? (asset.notes as string | undefined) ?? ''
-          const performedBy = found.closeout_submitted_by || found.started_by || (asset.closeout_submitted_by as string | undefined) || (asset.started_by as string | undefined) || ''
+          const performedBy = formatDisplayActorName(
+            found.performed_by_name || found.closeout_submitted_by_name || found.started_by_name || asset.performed_by_name || asset.closeout_submitted_by_name || asset.started_by_name,
+            found.closeout_submitted_by || found.started_by || asset.closeout_submitted_by || asset.started_by
+          )
           const performedAt = found.closeout_submitted_at || found.started_at || (asset.closeout_submitted_at as string | undefined) || (asset.started_at as string | undefined) || ''
           const createdAt = found.created_at || found.started_at || (asset.created_at as string | undefined) || (asset.started_at as string | undefined) || performedAt
           const oldSn = found.com_sn || String(serial || '')
@@ -3203,8 +3218,10 @@ function AssetDetailDialog({ asset, role, currentEmail, demo, onClose, onUpdated
             performed_at: performedAt,
             admin_accepted_at: found.admin_accepted_at,
             admin_accepted_by: found.admin_accepted_by,
+            admin_accepted_by_name: found.admin_accepted_by_name,
             customer_accepted_at: found.customer_accepted_at,
             customer_accepted_by: found.customer_accepted_by,
+            customer_accepted_by_name: found.customer_accepted_by_name,
             customer_rejected_at: found.customer_rejected_at,
             customer_reject_reason: found.customer_reject_reason,
             work_order_code: found.work_order_code || (asset.work_order_code as string | undefined) || '',
@@ -3316,8 +3333,8 @@ function AssetDetailDialog({ asset, role, currentEmail, demo, onClose, onUpdated
                       )}
                       <DetailField label="ผู้ปฏิบัติงาน" value={selectedHistoryTask.performed_by_name || 'ยังไม่มีผู้ปฏิบัติงานที่บันทึกผล'} />
                       <DetailField label="วันและเวลาที่ปฏิบัติงาน" value={formatDate(selectedHistoryTask.performed_at) || 'ยังไม่มีเวลาบันทึก'} />
-                      <DetailField label="ตรวจรับโดย SYM Admin" value={selectedHistoryTask.admin_accepted_at ? `${String(selectedHistoryTask.admin_accepted_by || 'SYM Admin')} · ${formatDate(selectedHistoryTask.admin_accepted_at)}` : 'รอการตรวจรับ'} />
-                      <DetailField label="ตรวจรับมอบโดย G-Able" value={selectedHistoryTask.customer_accepted_at ? `${String(selectedHistoryTask.customer_accepted_by || 'G-Able Reviewer')} · ${formatDate(selectedHistoryTask.customer_accepted_at)}` : 'รอการตรวจรับมอบ'} />
+                      <DetailField label="ตรวจรับโดย SYM Admin" value={selectedHistoryTask.admin_accepted_at ? `${formatDisplayActorName(selectedHistoryTask.admin_accepted_by_name, selectedHistoryTask.admin_accepted_by) || 'SYM Admin'} · ${formatDate(selectedHistoryTask.admin_accepted_at)}` : 'รอการตรวจรับ'} />
+                      <DetailField label="ตรวจรับมอบโดย G-Able" value={selectedHistoryTask.customer_accepted_at ? `${formatDisplayActorName(selectedHistoryTask.customer_accepted_by_name, selectedHistoryTask.customer_accepted_by) || 'G-Able Reviewer'} · ${formatDate(selectedHistoryTask.customer_accepted_at)}` : 'รอการตรวจรับมอบ'} />
                       <DetailField label="เหตุผล/หมายเหตุ" value={[selectedHistoryTask.exception_reason, selectedHistoryTask.old_scanner_note, selectedHistoryTask.customer_reject_reason].map(value => String(value || '').trim()).filter(Boolean).join(' · ')} />
                     </div>
                   </section>
@@ -3826,7 +3843,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
         ? {
             source: latestReview.stage === 'customer' ? 'G-Able Customer' : 'SYM Admin',
             reason: String(latestReview.reason || task.customer_reject_reason || ''),
-            by: latestReview.reviewer_email ? String(latestReview.reviewer_email) : '',
+            by: latestReview.reviewer_name ? String(latestReview.reviewer_name) : formatDisplayActorName(null, latestReview.reviewer_email),
           }
         : !latestReview && task.customer_reject_reason
           ? {
@@ -3859,10 +3876,10 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
       )}
       <div className="work-order-layout">
         <div className="work-order-main">
-          <section className="detail-section"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
-          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong>{!demo && role !== 'viewer' && outcome === 'replaced' && !['open', 'in_progress'].includes(stage) && Boolean(serial) && <StockLookupBadge serial={String(serial)} taskId={taskId} enabled={true} mode="review" />}</div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex flex-wrap items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><div className="flex flex-wrap items-center gap-1.5">{!demo && role !== 'viewer' && <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowStockPicker(true)}><Package size={13} /> เลือกจากสต็อก</Button>}<Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div></div><Input ref={newSerialInputRef} aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /><StockLookupBadge serial={newSerialInput} taskId={taskId} enabled={!demo && role !== 'viewer'} mode="closeout" onAvailabilityChange={(allowed, reason) => { setStockLookupAllowed(allowed); setStockLookupBlockedReason(allowed ? '' : reason) }} /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong>{!demo && role !== 'viewer' && Boolean(newSerial) && <StockLookupBadge serial={String(newSerial)} taskId={taskId} enabled={true} mode="review" />}</div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
-          {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
-          <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} />{(Boolean(observedSerial) || outcome === 'different_device_found') && <DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} />}<DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || '—'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
+          <section className="detail-section work-order-section--original"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
+          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div className="work-order-serial-old"><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong>{!demo && role !== 'viewer' && outcome === 'replaced' && !['open', 'in_progress'].includes(stage) && Boolean(serial) && <StockLookupBadge serial={String(serial)} taskId={taskId} enabled={true} mode="review" />}</div><span className="work-order-serial-arrow" aria-hidden="true"><ArrowRight size={15} /></span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex flex-wrap items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><div className="flex flex-wrap items-center gap-1.5">{!demo && role !== 'viewer' && <Button type="button" variant="outline" size="sm" className="h-7 border-emerald-200 bg-emerald-50/70 px-2.5 text-xs text-emerald-700 hover:bg-emerald-100" onClick={() => setShowStockPicker(true)}><Package size={13} /> เลือกจากสต็อก</Button>}<Button type="button" variant="outline" size="sm" className="h-7 border-slate-300 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div></div><Input ref={newSerialInputRef} aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ใหม่ หรือกดปุ่มสแกน" /><StockLookupBadge serial={newSerialInput} taskId={taskId} enabled={!demo && role !== 'viewer'} mode="closeout" onAvailabilityChange={(allowed, reason) => { setStockLookupAllowed(allowed); setStockLookupBlockedReason(allowed ? '' : reason) }} /></div> : <div className="work-order-serial-new"><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong>{!demo && role !== 'viewer' && Boolean(newSerial) && <StockLookupBadge serial={String(newSerial)} taskId={taskId} enabled={true} mode="review" />}</div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
+          {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section work-order-exception-panel"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
+          <section className="detail-section work-order-section--result"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField className="detail-field--actor" label="ผู้ปฏิบัติงานที่ส่งผล" value={formatDisplayActorName(task.closeout_submitted_by_name || task.performed_by_name, task.closeout_submitted_by || task.started_by) || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} />{(Boolean(observedSerial) || outcome === 'different_device_found') && <DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} />}<DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || '—'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
           {reviews.length > 0 && (
             <section className="detail-section">
               <h3>ประวัติการตรวจรับ (Governance Audit Trail)</h3>
@@ -3885,7 +3902,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
                         </Badge>
                       </div>
                       <div className="text-xs text-slate-500">
-                        ผู้ตรวจ: {rev.reviewer_email || (isSym ? 'SYM Admin' : 'G-Able Customer')} · เมื่อ {formatDate(rev.created_at)}
+                        ผู้ตรวจ: {rev.reviewer_name || formatDisplayActorName(null, rev.reviewer_email) || (isSym ? 'SYM Admin' : 'G-Able Customer')} · เมื่อ {formatDate(rev.created_at)}
                       </div>
                       {rev.reason && (
                         <div className="mt-1.5 text-xs text-red-700">
@@ -3945,15 +3962,15 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
           {demo && <div className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>ใบงานตัวอย่างเป็นแบบอ่านอย่างเดียว ไม่บันทึกข้อมูลจริง</span></div>}
         </div>
         <aside className="work-order-side" aria-label="ขั้นตอน สาขา และการจัดการใบงาน">
-          <section className="detail-section"><h3>ข้อมูลการเปิดใบงาน</h3><div className="detail-grid"><DetailField label="เปิดใบงานเมื่อ" value={formatDate(task.created_at)} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="สถานะใบงาน" value={presentation.label} /><DetailField label="ผู้ปฏิบัติงาน" value={task.performed_by_name} /></div></section>
+          <section className="detail-section work-order-section--meta"><h3>ข้อมูลการเปิดใบงาน</h3><div className="detail-grid"><DetailField label="เปิดใบงานเมื่อ" value={formatDate(task.created_at)} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="สถานะใบงาน" value={presentation.label} /><DetailField className="detail-field--actor" label="ผู้ปฏิบัติงาน" value={formatDisplayActorName(task.performed_by_name || task.started_by_name || task.closeout_submitted_by_name, task.closeout_submitted_by || task.started_by)} /></div></section>
           {canAct && stage === 'in_progress' && (
-            <section className="detail-section task-action-panel">
+            <section className="detail-section task-action-panel work-order-exception-panel">
               <h3>แจ้งปัญหา / ไม่ได้เปลี่ยนเครื่อง</h3>
               <p>ใช้เฉพาะกรณีไม่สามารถเปลี่ยนเครื่องได้ตามปกติ เช่น รอสาขาพร้อม หรือไม่พบเครื่องตามใบงาน</p>
               <div className="flex flex-col gap-2">
                 <button
                   type="button"
-                  className="secondary-button w-full justify-center"
+                  className="warning-outline-button w-full justify-center"
                   disabled={busy}
                   onClick={() => {
                     setShowBlockForm(value => !value)
@@ -3966,7 +3983,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
                 </button>
                 <button
                   type="button"
-                  className="secondary-button w-full justify-center"
+                  className="warning-outline-button w-full justify-center"
                   disabled={busy}
                   onClick={() => {
                     const next = !showExceptionForm
@@ -4010,7 +4027,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
           )}
           {canAct && stage === 'blocked' && <section className="detail-section task-action-panel"><h3>ดำเนินงานต่อ</h3><p>แก้สาเหตุที่พักงานแล้วจึงกลับมาทำรายการนี้ต่อ</p><button type="button" className="primary-button" disabled={busy} onClick={() => void submitAction('resume')}>{busy ? 'กำลังบันทึก…' : 'ดำเนินงานต่อ'}</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</section>}
           {canResolvePending && <section className="detail-section task-action-panel"><h3>{outcome === 'replaced' ? 'ตรวจรับและส่งมอบงาน' : 'พิจารณารายการ Pending'}</h3><p>ตรวจรูปและข้อมูลที่ช่างบันทึก แล้วลงลายเซ็นตรวจรับด้วยบัญชี Admin อีกบัญชีหนึ่ง สำหรับเครื่องอื่น ระบบจะเพิ่ม SN ได้เมื่อยืนยันแล้วว่าไม่ซ้ำกับทะเบียนทุกสาขา หากต้องกลับไปทำงานหน้างาน ให้ยกเลิกรายการนี้พร้อมเหตุผลแล้วเปิดใบงานใหม่</p>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<button type="button" className="primary-button task-action-submit" disabled={busy || evidenceBusy || !requiredEvidenceReady} onClick={() => void resolvePending()}>{busy ? 'กำลังบันทึก…' : evidenceBusy ? 'กำลังบันทึกหลักฐาน…' : outcome === 'replaced' ? 'ลงนามรับผ่านและส่งมอบงาน' : 'บันทึกผลตรวจ Pending'}</button></section>}
-          {canManage && !['completed', 'cancelled'].includes(status) && <section className="detail-section task-action-panel"><h3>การจัดการรายการ Scanner</h3>{showCancelForm ? <form className="task-action-form" onSubmit={event => void submitCancel(event)}><label>เหตุผลที่ยกเลิก<textarea value={cancelReason} onChange={event => setCancelReason(event.target.value)} maxLength={500} rows={3} required /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(false); setCancelReason(''); setActionError('') }}>กลับ</button><button type="submit" className="primary-button" disabled={busy || !cancelReason.trim()}>{busy ? 'กำลังบันทึก…' : 'ยืนยันยกเลิกรายการนี้'}</button></div></form> : <><p>Admin ยกเลิกรายการเครื่องนี้แยกจากเครื่องอื่นในใบงานได้ โดยระบุเหตุผลและระบบจะเก็บประวัติไว้</p><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(true); setActionError('') }}>ยกเลิกรายการเครื่องนี้</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</>}</section>}
+          {canManage && !['completed', 'cancelled'].includes(status) && <section className="detail-section task-action-panel work-order-danger-panel"><h3>การจัดการรายการ Scanner</h3>{showCancelForm ? <form className="task-action-form" onSubmit={event => void submitCancel(event)}><label>เหตุผลที่ยกเลิก<textarea value={cancelReason} onChange={event => setCancelReason(event.target.value)} maxLength={500} rows={3} required /></label>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}<div className="task-action-buttons"><button type="button" className="secondary-button" disabled={busy} onClick={() => { setShowCancelForm(false); setCancelReason(''); setActionError('') }}>กลับ</button><button type="submit" className="danger-button" disabled={busy || !cancelReason.trim()}>{busy ? 'กำลังบันทึก…' : 'ยืนยันยกเลิกรายการนี้'}</button></div></form> : <><p>Admin ยกเลิกรายการเครื่องนี้แยกจากเครื่องอื่นในใบงานได้ โดยระบุเหตุผลและระบบจะเก็บประวัติไว้</p><button type="button" className="danger-outline-button w-full justify-center" disabled={busy} onClick={() => { setShowCancelForm(true); setActionError('') }}>ยกเลิกรายการเครื่องนี้</button>{actionError && <p className="task-action-error" role="alert">{actionError}</p>}</>}</section>}
           {['delivered', 'exception_resolved', 'legacy_completed', 'cancelled'].includes(stage) && (
             <div className="flex flex-col gap-2">
               <div className="detail-readonly-note"><ShieldCheck size={16} className="shrink-0" /><span>{stage === 'delivered' ? 'รายการนี้ Completed แล้ว และทะเบียนอัปเดตตามผลเปลี่ยนเครื่อง' : stage === 'exception_resolved' ? 'Admin พิจารณา Pending แล้ว รายการนี้ปิดโดยคง SN เดิมไว้' : 'รายการนี้ปิดแล้วและแก้ไขไม่ได้'}</span></div>

@@ -203,6 +203,72 @@ function parseUtcMs(value?: string | null): number {
   return new Date(normalized).getTime()
 }
 
+async function resolveActorNameMap(db: D1Database, emails: Array<unknown>): Promise<Map<string, string>> {
+  const unique = Array.from(
+    new Set(
+      emails
+        .map(v => (typeof v === 'string' ? v.trim().toLowerCase() : ''))
+        .filter(Boolean)
+    )
+  )
+  const map = new Map<string, string>()
+  if (unique.length === 0) return map
+
+  const CHUNK_SIZE = 50
+  for (let i = 0; i < unique.length; i += CHUNK_SIZE) {
+    const chunk = unique.slice(i, i + CHUNK_SIZE)
+    const placeholders = chunk.map(() => '?').join(', ')
+    const rows = await db
+      .prepare(
+        `SELECT LOWER(TRIM(email)) AS email_key, full_name FROM google_signin_allowlist WHERE LOWER(TRIM(email)) IN (${placeholders})`
+      )
+      .bind(...chunk)
+      .all<{ email_key: string; full_name: string | null }>()
+    for (const row of rows.results || []) {
+      const name = typeof row.full_name === 'string' ? row.full_name.trim() : ''
+      if (row.email_key && name) {
+        map.set(row.email_key, name)
+      }
+    }
+  }
+  return map
+}
+
+function formatActorDisplayName(email: unknown, nameMap: Map<string, string>): string | null {
+  if (typeof email !== 'string') return null
+  const trimmed = email.trim()
+  if (!trimmed) return null
+  const resolved = nameMap.get(trimmed.toLowerCase())
+  if (resolved) return resolved
+  const atIndex = trimmed.indexOf('@')
+  return atIndex > 0 ? trimmed.slice(0, atIndex) : trimmed
+}
+
+function withResolvedTaskActorNames<T extends Record<string, any>>(row: T, nameMap: Map<string, string>) {
+  return {
+    ...row,
+    started_by_name: formatActorDisplayName(row.started_by, nameMap),
+    closeout_submitted_by_name: formatActorDisplayName(row.closeout_submitted_by, nameMap),
+    performed_by_name: formatActorDisplayName(row.closeout_submitted_by || row.started_by, nameMap),
+    admin_accepted_by_name: formatActorDisplayName(row.admin_accepted_by, nameMap),
+    customer_accepted_by_name: formatActorDisplayName(row.customer_accepted_by, nameMap),
+  }
+}
+
+function redactSymInternalActors<T extends Record<string, any>>(row: T) {
+  const {
+    started_by: _sb,
+    started_by_name: _sbn,
+    closeout_submitted_by: _csb,
+    closeout_submitted_by_name: _csbn,
+    performed_by_name: _pbn,
+    admin_accepted_by: _aab,
+    admin_accepted_by_name: _aabn,
+    ...rest
+  } = row
+  return rest
+}
+
 function makeUniqueId(prefix: string): string {
   const rand = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID().slice(0, 8)
@@ -314,13 +380,13 @@ app.use('*', async (c, next) => {
     email = sessionPayload.email
   } else {
     // Dev / transitional pre-OAuth mode: keep Dev Switcher + unauthenticated evidence preview
-    if (path.startsWith('/api/evidence/')) {
-      return next()
-    }
     email = c.req.header('x-dev-user-email') || c.req.query('dev_email')
     const authHeader = c.req.header('Authorization')
     if (!email && authHeader?.startsWith('Bearer ')) {
       email = authHeader.slice(7)
+    }
+    if (path.startsWith('/api/evidence/') && !email) {
+      return next()
     }
   }
 
@@ -833,14 +899,23 @@ app.get('/branches/:id', async (c) => {
     ORDER BY s.com_sn ASC
   `
   const scanners = await c.env.DB.prepare(scannerSql).bind(branchId).all()
+  const actorNameMap = await resolveActorNameMap(
+    c.env.DB,
+    (scanners.results || []).flatMap((r: any) => [
+      r.started_by,
+      r.closeout_submitted_by,
+      r.admin_accepted_by,
+      r.customer_accepted_by,
+    ])
+  )
 
-  // ซ่อนข้อมูลภายใน SYM หากเป็น Gable Customer Reviewer
-  const sanitizedScanners = scanners.results.map((row: any) => {
-    if (user.role === 'customer_reviewer') {
-      const { started_by, closeout_submitted_by, admin_accepted_by, ...rest } = row
-      return rest
+  // ซ่อนข้อมูลภายใน SYM หากเป็น Gable Customer Reviewer หรือ Viewer และแนบชื่อจริงผู้ปฏิบัติงาน
+  const sanitizedScanners = (scanners.results || []).map((row: any) => {
+    const enriched = withResolvedTaskActorNames(row, actorNameMap)
+    if (user.role === 'customer_reviewer' || user.role === 'viewer') {
+      return redactSymInternalActors(enriched)
     }
-    return row
+    return enriched
   })
 
   return c.json({
@@ -904,7 +979,6 @@ app.get('/scanners', async (c) => {
       t.started_by,
       t.closeout_submitted_at,
       t.closeout_submitted_by,
-      COALESCE(t.closeout_submitted_by, t.started_by) as performed_by_name,
       COALESCE(t.closeout_submitted_at, t.started_at) as performed_at,
       t.admin_accepted_at,
       t.admin_accepted_by,
@@ -1006,18 +1080,22 @@ app.get('/scanners', async (c) => {
 
   const totalCount = await c.env.DB.prepare(countSql).bind(...countParams).first<{ count: number; province_count: number }>()
 
-  const sanitizedRows = rows.results.map((r: any) => {
+  const actorNameMap = await resolveActorNameMap(
+    c.env.DB,
+    (rows.results || []).flatMap((r: any) => [
+      r.started_by,
+      r.closeout_submitted_by,
+      r.admin_accepted_by,
+      r.customer_accepted_by,
+    ])
+  )
+
+  const sanitizedRows = (rows.results || []).map((r: any) => {
+    const enriched = withResolvedTaskActorNames(r, actorNameMap)
     if (user.role === 'customer_reviewer' || user.role === 'viewer') {
-      const {
-        started_by: _sb,
-        closeout_submitted_by: _csb,
-        performed_by_name: _pbn,
-        admin_accepted_by: _aab,
-        ...rest
-      } = r
-      return rest
+      return redactSymInternalActors(enriched)
     }
-    return r
+    return enriched
   })
 
   return c.json({
@@ -1118,7 +1196,17 @@ app.get('/tasks/pending', async (c) => {
   const rows = await c.env.DB.prepare(sql).bind(...params).all()
   const now = Date.now()
 
-  const tasksWithDetails = rows.results.map((r: any) => {
+  const actorNameMap = await resolveActorNameMap(
+    c.env.DB,
+    (rows.results || []).flatMap((r: any) => [
+      r.started_by,
+      r.closeout_submitted_by,
+      r.admin_accepted_by,
+      r.customer_accepted_by,
+    ])
+  )
+
+  const tasksWithDetails = (rows.results || []).map((r: any) => {
     let is_overdue = false
     if (r.task_status === 'awaiting_customer_acceptance' && r.admin_accepted_at) {
       const acceptedTime = parseUtcMs(r.admin_accepted_at)
@@ -1128,11 +1216,9 @@ app.get('/tasks/pending', async (c) => {
       }
     }
 
+    const enriched = withResolvedTaskActorNames(r, actorNameMap)
     if (user.role === 'customer_reviewer') {
       const {
-        started_by: _sb,
-        closeout_submitted_by: _csb,
-        admin_accepted_by: _aab,
         stock_source_mode: _ssm,
         stock_status: _ss,
         stock_brand: _sbr,
@@ -1140,10 +1226,10 @@ app.get('/tasks/pending', async (c) => {
         stock_lot_no: _sln,
         stock_dispatch_area: _sda,
         ...rest
-      } = r
+      } = redactSymInternalActors(enriched)
       return { ...rest, is_overdue }
     }
-    return { ...r, is_overdue }
+    return { ...enriched, is_overdue }
   })
 
   return c.json({
@@ -1720,14 +1806,21 @@ app.get('/tasks/:id/evidence', async (c) => {
   ])
 
   const evidenceList = [...(rows.results || [])] as Array<Record<string, any>>
+  const customerNameMap = taskRow?.customer_accepted_by
+    ? await resolveActorNameMap(c.env.DB, [taskRow.customer_accepted_by])
+    : new Map<string, string>()
+  const resolvedCustomerSigner = taskRow?.customer_accepted_by
+    ? formatActorDisplayName(taskRow.customer_accepted_by, customerNameMap)
+    : null
+
   const hasCustomerSig = evidenceList.some(item =>
     ['inspector_signature', 'customer_signature', 'sig_inspector', 'sig_customer'].includes(String(item.evidence_type || ''))
   )
 
   if (hasCustomerSig) {
     for (const item of evidenceList) {
-      if (['inspector_signature', 'customer_signature'].includes(String(item.evidence_type || '')) && taskRow?.customer_accepted_by) {
-        item.signer_name = taskRow.customer_accepted_by
+      if (['inspector_signature', 'customer_signature'].includes(String(item.evidence_type || '')) && resolvedCustomerSigner) {
+        item.signer_name = resolvedCustomerSigner
       }
     }
   } else if (taskRow && (taskRow.customer_accepted_at || ['delivered', 'completed'].includes(String(taskRow.status || '')))) {
@@ -1739,7 +1832,7 @@ app.get('/tasks/:id/evidence', async (c) => {
       byte_size: 2048,
       mime_type: 'image/svg+xml',
       role_assigned: 'customer_reviewer',
-      signer_name: taskRow.customer_accepted_by || 'G-Able Customer Reviewer',
+      signer_name: resolvedCustomerSigner || 'G-Able Customer Reviewer',
       created_at: taskRow.customer_accepted_at || new Date().toISOString()
     })
   }
@@ -1913,9 +2006,15 @@ app.get('/evidence/:key{.*}', async (c) => {
       : Boolean(row || taskInfo?.closeout_submitted_at || ['awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'delivered', 'completed'].includes(String(taskInfo?.status || '')))
 
     if (hasApprovedStage) {
-      const signer = isCustomerSig
-        ? (taskInfo?.customer_accepted_by || sigConfig.sublabel)
-        : (taskInfo?.closeout_submitted_by || sigConfig.sublabel)
+      const viewerRole = c.get('user')?.role
+      const canSeeSymSigner = Boolean(viewerRole && !['customer_reviewer', 'viewer'].includes(viewerRole))
+      const rawSignerEmail = isCustomerSig
+        ? taskInfo?.customer_accepted_by
+        : (canSeeSymSigner ? taskInfo?.closeout_submitted_by : null)
+      const sigNameMap = rawSignerEmail
+        ? await resolveActorNameMap(c.env.DB, [rawSignerEmail])
+        : new Map<string, string>()
+      const signer = formatActorDisplayName(rawSignerEmail, sigNameMap) || sigConfig.sublabel
       const sigSvg = buildSignatureSvg(sigConfig.label, signer)
       return new Response(sigSvg, {
         status: 200,
@@ -1923,7 +2022,7 @@ app.get('/evidence/:key{.*}', async (c) => {
           'Content-Type': 'image/svg+xml; charset=utf-8',
           'X-Content-Type-Options': 'nosniff',
           'Content-Security-Policy': "default-src 'none'; sandbox",
-          'Cache-Control': 'public, max-age=3600'
+          'Cache-Control': 'private, max-age=300'
         }
       })
     }
@@ -2891,8 +2990,17 @@ app.get('/discovery/queue', async (c) => {
     LIMIT ? OFFSET ?
   `).bind(limit, offset).all()
 
+  const actorNameMap = await resolveActorNameMap(
+    c.env.DB,
+    (rows.results || []).flatMap((r: any) => [r.reported_by, r.reviewed_by])
+  )
+
   return c.json({
-    rows: rows.results,
+    rows: (rows.results || []).map((r: any) => ({
+      ...r,
+      reported_by_name: formatActorDisplayName(r.reported_by, actorNameMap),
+      reviewed_by_name: formatActorDisplayName(r.reviewed_by, actorNameMap),
+    })),
     total: countRow?.count ?? 0,
     offset,
     limit
@@ -2989,11 +3097,16 @@ app.get('/tasks/:id/reviews', async (c) => {
     created_at: string
   }>()
 
+  const actorNameMap = await resolveActorNameMap(
+    c.env.DB,
+    (rows.results || []).map(r => r.reviewer_email)
+  )
+
   const shouldRedactSymReviewer = user.role === 'customer_reviewer' || user.role === 'viewer'
   const reviews = (rows.results || []).map(r => (
     shouldRedactSymReviewer && r.stage === 'sym'
-      ? { ...r, reviewer_email: null }
-      : r
+      ? { ...r, reviewer_email: null, reviewer_name: null }
+      : { ...r, reviewer_name: formatActorDisplayName(r.reviewer_email, actorNameMap) }
   ))
 
   return c.json({ reviews })

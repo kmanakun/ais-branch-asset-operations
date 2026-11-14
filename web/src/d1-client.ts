@@ -172,12 +172,17 @@ export const d1Api = {
       created_at?: string | null
       started_at: string | null
       started_by?: string | null
+      started_by_name?: string | null
       closeout_submitted_at: string | null
       closeout_submitted_by?: string | null
+      closeout_submitted_by_name?: string | null
+      performed_by_name?: string | null
       admin_accepted_at: string | null
       admin_accepted_by?: string | null
+      admin_accepted_by_name?: string | null
       customer_accepted_at: string | null
       customer_accepted_by?: string | null
+      customer_accepted_by_name?: string | null
       customer_rejected_at: string | null
       customer_reject_reason: string | null
       work_order_code?: string | null
@@ -383,7 +388,8 @@ export const d1Api = {
       stage: 'sym' | 'customer'
       decision: 'pass' | 'reject'
       reason: string | null
-      reviewer_email: string
+      reviewer_email: string | null
+      reviewer_name?: string | null
       created_at: string
     }>
   }>(`/api/tasks/${taskId}/reviews`),
