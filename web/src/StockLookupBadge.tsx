@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { CheckCircle2, Info, Loader2, ShieldAlert } from 'lucide-react'
+import { CheckCircle2, FileCheck2, Info, Loader2, ShieldAlert } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { d1Api, type StockLookupResponse } from './d1-client'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { d1Api, type StockImportCommitResponse, type StockLookupResponse } from './d1-client'
 import { validateSerialFormat } from './lib/stock-serial.mjs'
 import { getStockStatusMeta, STOCK_SOURCE_MODE_LABELS } from './lib/stock-ui-labels'
 
@@ -11,6 +13,7 @@ interface StockLookupBadgeProps {
   taskId?: string
   enabled: boolean
   mode: 'closeout' | 'review'
+  refreshKey?: number
   onAvailabilityChange?: (available: boolean, reason: string, lookup: StockLookupResponse | null) => void
 }
 
@@ -22,6 +25,7 @@ export function StockLookupBadge({
   taskId,
   enabled,
   mode,
+  refreshKey = 0,
   onAvailabilityChange,
 }: StockLookupBadgeProps) {
   const [loading, setLoading] = useState(false)
@@ -108,7 +112,7 @@ export function StockLookupBadge({
     return () => {
       window.clearTimeout(timerId)
     }
-  }, [serial, taskId, enabled, mode])
+  }, [serial, taskId, enabled, mode, refreshKey])
 
   if (!enabled || !serial.trim()) return null
 
@@ -197,5 +201,233 @@ export function StockLookupBadge({
         <AlertDescription>{availability.message}</AlertDescription>
       </div>
     </Alert>
+  )
+}
+
+export interface HybridReconcileCardProps {
+  serial: string
+  defaultBrand?: string | null
+  defaultModel?: string | null
+  defaultLotNo?: string | null
+  defaultNote?: string | null
+  defaultExpanded?: boolean
+  onReconciled?: (
+    res: StockImportCommitResponse,
+    details: { brand: string; modelName: string; lotNo: string },
+  ) => void
+}
+
+export function HybridReconcileCard({
+  serial,
+  defaultBrand,
+  defaultModel,
+  defaultLotNo,
+  defaultNote,
+  defaultExpanded = false,
+  onReconciled,
+}: HybridReconcileCardProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [brand, setBrand] = useState(() => String(defaultBrand || '').trim())
+  const [modelName, setModelName] = useState(() => String(defaultModel || '').trim())
+  const [lotNo, setLotNo] = useState(() => String(defaultLotNo || '').trim())
+  const [note, setNote] = useState(() => String(defaultNote || '').trim())
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const [doneDocCode, setDoneDocCode] = useState('')
+
+  useEffect(() => {
+    setExpanded(defaultExpanded)
+    setBrand(String(defaultBrand || '').trim())
+    setModelName(String(defaultModel || '').trim())
+    setLotNo(String(defaultLotNo || '').trim())
+    setNote(String(defaultNote || '').trim())
+    setSubmitting(false)
+    setError('')
+    setDoneDocCode('')
+  }, [serial, defaultBrand, defaultModel, defaultLotNo, defaultNote, defaultExpanded])
+
+  if (!serial.trim()) return null
+
+  if (doneDocCode) {
+    return (
+      <Alert variant="success" className="mt-2">
+        <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-700" />
+        <div className="min-w-0">
+          <AlertTitle className="text-xs font-bold">
+            จับคู่รับเข้า Supplier สำเร็จ ({doneDocCode})
+          </AlertTitle>
+          <AlertDescription>
+            อัปเกรด SN <span className="font-mono font-semibold">{serial.trim().toUpperCase()}</span> จาก Hybrid เป็นรับเข้าคลังแล้ว
+          </AlertDescription>
+        </div>
+      </Alert>
+    )
+  }
+
+  const handleSubmit = async () => {
+    const cleanSerial = serial.trim().toUpperCase()
+    const cleanLot = lotNo.trim()
+    const cleanBrand = brand.trim()
+    const cleanModel = modelName.trim()
+    const cleanNote = note.trim()
+
+    if (!cleanLot) {
+      setError('กรุณาระบุเลข Lot / PO Supplier สำหรับออกเอกสารรับเข้า (RCV)')
+      return
+    }
+
+    setSubmitting(true)
+    setError('')
+    try {
+      const res = await d1Api.commitStockImport({
+        source_name: 'hybrid-reconcile-ui',
+        rows: [
+          {
+            source_row: 1,
+            serial_number: cleanSerial,
+            brand: cleanBrand || undefined,
+            model_name: cleanModel || undefined,
+            lot_no: cleanLot,
+            note: cleanNote || 'จับคู่รับเข้า Supplier จากรายการ Hybrid',
+          },
+        ],
+        defaults: {
+          dispatch_mode: 'in_warehouse',
+          brand: cleanBrand || undefined,
+          model_name: cleanModel || undefined,
+          lot_no: cleanLot,
+        },
+      })
+      setDoneDocCode(res.doc_code || 'RCV')
+      setExpanded(false)
+      onReconciled?.(res, {
+        brand: cleanBrand,
+        modelName: cleanModel,
+        lotNo: cleanLot,
+      })
+    } catch (err: any) {
+      setError(err?.message || 'ไม่สามารถจับคู่รับเข้า Supplier ได้')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-950">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 flex items-center gap-2">
+          <FileCheck2 size={15} className="shrink-0 text-amber-700" />
+          <div className="min-w-0">
+            <strong className="block text-xs font-bold text-amber-950">
+              Hybrid Mode — รอจับคู่รับเข้า Supplier (RCV)
+            </strong>
+            <span className="text-[11.5px] text-amber-800">
+              บันทึกเลข Lot / PO ยี่ห้อและรุ่น เพื่ออัปเกรดเข้าเอกสารสต็อกทางการโดยไม่เปลี่ยนสถานะงาน
+            </span>
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-8 border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+          onClick={() => {
+            setExpanded(prev => !prev)
+            setError('')
+          }}
+        >
+          {expanded ? 'ซ่อนฟอร์มจับคู่' : 'จับคู่รับเข้า Supplier'}
+        </Button>
+      </div>
+
+      {expanded && (
+        <div className="mt-3 grid gap-2.5 border-t border-amber-200/80 pt-3">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <label className="grid gap-1 text-[11px] font-semibold text-slate-700">
+              <span>เลข Lot / PO Supplier *</span>
+              <Input
+                value={lotNo}
+                onChange={e => {
+                  setLotNo(e.target.value)
+                  setError('')
+                }}
+                maxLength={100}
+                placeholder="เช่น LOT-2026-04-A"
+                className="h-8 bg-white text-xs"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] font-semibold text-slate-700">
+              <span>ยี่ห้อ (Brand)</span>
+              <Input
+                value={brand}
+                onChange={e => setBrand(e.target.value)}
+                maxLength={100}
+                placeholder="เช่น Honeywell / Zebra"
+                className="h-8 bg-white text-xs"
+              />
+            </label>
+            <label className="grid gap-1 text-[11px] font-semibold text-slate-700">
+              <span>รุ่น (Model)</span>
+              <Input
+                value={modelName}
+                onChange={e => setModelName(e.target.value)}
+                maxLength={120}
+                placeholder="เช่น Xenon 1950g"
+                className="h-8 bg-white text-xs"
+              />
+            </label>
+          </div>
+
+          <label className="grid gap-1 text-[11px] font-semibold text-slate-700">
+            <span>หมายเหตุ RCV (ไม่บังคับ)</span>
+            <Input
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              maxLength={500}
+              placeholder="อ้างอิงใบส่งของ Supplier หรือหมายเหตุการตรวจรับ"
+              className="h-8 bg-white text-xs"
+            />
+          </label>
+
+          {error && (
+            <p className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11.5px] font-medium text-rose-700" role="alert">
+              {error}
+            </p>
+          )}
+
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2.5 text-xs"
+              disabled={submitting}
+              onClick={() => setExpanded(false)}
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8 px-3 text-xs"
+              disabled={submitting}
+              onClick={() => void handleSubmit()}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 size={13} className="animate-spin" />
+                  กำลังจับคู่เอกสาร RCV…
+                </>
+              ) : (
+                <>
+                  <FileCheck2 size={13} />
+                  ยืนยันจับคู่ RCV
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

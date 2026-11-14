@@ -53,11 +53,12 @@ async function main() {
   console.log('🚀 Starting Full Edge Verification on', BASE_URL)
   const timestamp = Date.now()
   const testSn = `SN-E2E-${timestamp}`
-  const newSn = `NEW-SN-${timestamp}`
+  const newSn = `SN-STOCK-E2E-${timestamp}`
+  const stockLot = `LOT-E2E-${timestamp}`
   const branchCode = `BKK-${timestamp.toString().slice(-4)}`
 
   // 1. นำเข้าข้อมูล Master Register
-  console.log('\n[1/12] Testing /api/register/import...')
+  console.log('\n[1/13] Testing /api/register/import...')
   const importResult = await req('/api/register/import', 'POST', {
     source_name: `E2E_Test_${timestamp}.xlsx`,
     rows: [
@@ -77,21 +78,41 @@ async function main() {
   }, 'admin@sym.co.th')
   console.log('  ✔ Import successful:', importResult.message)
 
-  // 2. ตรวจสอบทะเบียนอุปกรณ์
-  console.log('\n[2/12] Testing /api/scanners search...')
+  // 2. ตรวจสอบทะเบียนอุปกรณ์ & รับเข้าสต็อกเครื่องใหม่
+  console.log('\n[2/13] Testing /api/scanners search & /api/stock/import/commit...')
   const scanners = await req(`/api/scanners?search=${testSn}`, 'GET', null, 'admin@sym.co.th')
   if (!scanners.rows?.length) throw new Error('Scanner not found after import')
   const scanner = scanners.rows[0]
   console.log('  ✔ Scanner found:', scanner.com_sn, 'ID:', scanner.id, 'Branch ID:', scanner.branch_id)
 
+  const stockCommit = await req('/api/stock/import/commit', 'POST', {
+    source_name: `E2E_Test_Stock_${timestamp}.xlsx`,
+    rows: [
+      {
+        serial_number: newSn,
+        brand: 'Honeywell',
+        model_name: '1950GHD',
+        lot_no: stockLot,
+        note: `E2E_Test_Stock_${timestamp}`,
+      },
+    ],
+  }, 'admin@sym.co.th')
+  console.log('  ✔ Stock receive document created:', stockCommit.doc_code)
+
+  const preLookup = await req(`/api/stock/lookup?serial=${encodeURIComponent(newSn)}`, 'GET', null, 'tech1@sym.co.th')
+  if (!preLookup.availability?.available_for_closeout || preLookup.item?.status !== 'in_warehouse') {
+    throw new Error(`Expected new stock unit in_warehouse & available, got ${JSON.stringify(preLookup.availability)}`)
+  }
+  console.log('  ✔ Stock real-time lookup available_for_closeout=true, status=in_warehouse')
+
   // 3. ช่างกดเริ่มงาน Onsite
-  console.log('\n[3/12] Testing /api/tasks/start (Technician begins replacement)...')
+  console.log('\n[3/13] Testing /api/tasks/start (Technician begins replacement)...')
   const startTask = await req('/api/tasks/start', 'POST', { scanner_id: scanner.id }, 'tech1@sym.co.th')
   console.log('  ✔ Task started:', startTask.task_id, 'Status:', startTask.status)
   const taskId = startTask.task_id
 
   // 4. ทดสอบ Action: พักงานชั่วคราว (Block) และทำต่อ (Resume)
-  console.log('\n[4/12] Testing /api/tasks/:id/action (Block & Resume)...')
+  console.log('\n[4/13] Testing /api/tasks/:id/action (Block & Resume)...')
   const blockResult = await req(`/api/tasks/${taskId}/action`, 'POST', {
     action: 'block',
     reason: 'รอช่างอาคารเปิดตู้ Rack',
@@ -106,7 +127,7 @@ async function main() {
   console.log('  ✔ Task resumed successfully. Status:', resumeResult.status)
 
   // 5. อัปโหลดและลบภาพถ่ายหลักฐาน (Cloudflare R2 + D1)
-  console.log('\n[5/12] Testing /api/tasks/:id/evidence (Upload & Delete Evidence)...')
+  console.log('\n[5/13] Testing /api/tasks/:id/evidence (Upload & Delete Evidence)...')
   const sampleJpg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
   const uploadResult = await req(`/api/tasks/${taskId}/evidence`, 'POST', {
     evidence_type: 'photo_old_serial',
@@ -129,7 +150,7 @@ async function main() {
   console.log('  ✔ Evidence upload + delete verified. Remaining count:', evidenceList.evidence.length)
 
   // 6. ช่างส่งมอบผลงาน Closeout
-  console.log('\n[6/12] Testing /api/tasks/:id/closeout (Technician Closeout)...')
+  console.log('\n[6/13] Testing /api/tasks/:id/closeout (Technician Closeout)...')
   const closeout = await req(`/api/tasks/${taskId}/closeout`, 'POST', {
     new_serial_number: newSn,
     observed_serial: testSn,
@@ -140,11 +161,14 @@ async function main() {
   console.log('  ✔ Closeout submitted. Status:', closeout.status)
 
   // 7. SYM Admin ตรวจสอบงาน Onsite (Stage 1 SYM Verification)
-  console.log('\n[7/12] Testing /api/review/sym-verify (Stage 1 SYM Admin Approval)...')
+  console.log('\n[7/13] Testing /api/review/sym-verify & pending stock metadata...')
   const adminPending = await req('/api/tasks/pending', 'GET', null, 'admin@sym.co.th')
   const targetTask = adminPending.tasks?.find(t => t.id === taskId)
   if (!targetTask) throw new Error('Task not found in Admin pending queue')
-  console.log('  ✔ Task found in Admin queue. Version:', targetTask.version)
+  if (targetTask.stock_lot_no !== stockLot || targetTask.stock_source_mode !== 'registered_stock') {
+    throw new Error(`Expected pending stock_lot_no=${stockLot}, got ${JSON.stringify({ stock_lot_no: targetTask.stock_lot_no, stock_source_mode: targetTask.stock_source_mode })}`)
+  }
+  console.log('  ✔ Task found in Admin queue. Version:', targetTask.version, 'Stock Lot:', targetTask.stock_lot_no)
 
   const symVerify = await req('/api/review/sym-verify', 'POST', {
     task_id: taskId,
@@ -154,11 +178,14 @@ async function main() {
   console.log('  ✔ Stage 1 SYM Verify passed. Status:', symVerify.status)
 
   // 8. Gable Customer ตรวจรับงานแบบรวมสาขา (Stage 2 Batch Acceptance)
-  console.log('\n[8/12] Testing /api/review/customer-batch-accept (Stage 2 Customer Accept)...')
+  console.log('\n[8/13] Testing /api/review/customer-batch-accept (Stage 2 Customer Accept & Least Privilege)...')
   const gablePending = await req('/api/tasks/pending', 'GET', null, 'reviewer@gable.co.th')
   const gableTask = gablePending.tasks?.find(t => t.id === taskId)
   if (!gableTask) throw new Error('Task not found in Gable pending queue')
-  console.log('  ✔ Task found in Gable queue for branch:', gableTask.branch_name)
+  if ('stock_lot_no' in gableTask || 'stock_source_mode' in gableTask) {
+    throw new Error('Customer reviewer should not receive internal SYM stock fields in /api/tasks/pending')
+  }
+  console.log('  ✔ Task found in Gable queue (stock fields redacted) for branch:', gableTask.branch_name)
 
   const customerBatch = await req('/api/review/customer-batch-accept', 'POST', {
     branch_id: scanner.branch_id,
@@ -168,7 +195,7 @@ async function main() {
   console.log('  ✔ Stage 2 Customer Batch Accept complete:', customerBatch.message)
 
   // 9. รายงานเครื่องนอกทะเบียน และ Admin ตรวจอนุมัติ (Scanner Discovery)
-  console.log('\n[9/12] Testing /api/discovery (Scanner Discovery Report & Review)...')
+  console.log('\n[9/13] Testing /api/discovery (Scanner Discovery Report & Review)...')
   const unregSn = `UNREG-SN-${timestamp}`
   const discoveryReport = await req('/api/discovery', 'POST', {
     branch_id: scanner.branch_id,
@@ -190,7 +217,7 @@ async function main() {
   console.log('  ✔ Admin approved discovery report:', reviewReport.status)
 
   // 10. Dashboard Summary ภาพรวม
-  console.log('\n[10/12] Testing /api/dashboard/summary...')
+  console.log('\n[10/13] Testing /api/dashboard/summary...')
   const summary = await req('/api/dashboard/summary', 'GET', null, 'admin@sym.co.th')
   console.log('  ✔ Dashboard Summary Stats:', summary.summary)
   if (!Array.isArray(summary.weekly_activity) || summary.weekly_activity.length !== 7) {
@@ -202,7 +229,7 @@ async function main() {
   console.log('  ✔ Dashboard Weekly Activity verified (7 days):', summary.weekly_activity.map(d => `${d.date}: ${d.opened}/${d.completed}`).join(', '))
 
   // 11. Task Review Audit Trail
-  console.log('\n[11/12] Testing /api/tasks/:id/reviews (Governance Audit Trail)...')
+  console.log('\n[11/13] Testing /api/tasks/:id/reviews (Governance Audit Trail)...')
   const taskReviews = await req(`/api/tasks/${taskId}/reviews`, 'GET', null, 'admin@sym.co.th')
   if (!taskReviews.reviews || taskReviews.reviews.length < 2) {
     throw new Error('Task reviews audit trail incomplete')
@@ -210,7 +237,7 @@ async function main() {
   console.log('  ✔ Audit trail records found:', taskReviews.reviews.length, 'Stages:', taskReviews.reviews.map(r => r.stage).join(', '))
 
   // 12. Google Sign-In Allowlist Management
-  console.log('\n[12/12] Testing /api/allowlist (User Management)...')
+  console.log('\n[12/13] Testing /api/allowlist (User Management)...')
   const newTechEmail = `testtech_${timestamp}@sym.co.th`
   const addAllowlist = await req('/api/allowlist', 'POST', {
     email: newTechEmail,
@@ -227,7 +254,48 @@ async function main() {
   const toggleUser = await req(`/api/allowlist/${addedUser.id}/toggle`, 'POST', {}, 'admin@sym.co.th')
   console.log('  ✔ Toggled user active status. New is_active:', toggleUser.is_active)
 
-  console.log('\n🎉 ALL 12/12 EDGE INTEGRATION CHECKS PASSED!')
+  // 13. Stock Installed + Reverse Logistics (RET -> HOV) + Stock Document Detail
+  console.log('\n[13/13] Testing Stock Installed state, Reverse Logistics (RET -> HOV), & Document Detail...')
+  const installedLookup = await req(`/api/stock/lookup?serial=${encodeURIComponent(newSn)}`, 'GET', null, 'admin@sym.co.th')
+  if (installedLookup.item?.status !== 'installed') {
+    throw new Error(`Expected new stock SN status='installed', got ${installedLookup.item?.status}`)
+  }
+  const removedLookup = await req(`/api/stock/lookup?serial=${encodeURIComponent(testSn)}`, 'GET', null, 'admin@sym.co.th')
+  if (removedLookup.item?.unit_type !== 'old_removed' || removedLookup.item?.status !== 'removed_onsite') {
+    throw new Error(`Expected old SN unit_type='old_removed' & status='removed_onsite', got ${JSON.stringify(removedLookup.item)}`)
+  }
+  console.log('  ✔ Installed & removed_onsite states verified automatically after Stage 2')
+
+  const retRes = await req('/api/stock/old-returns/receive', 'POST', {
+    serial_numbers: [testSn],
+    note: `E2E_Test_RET_${timestamp}`,
+  }, 'admin@sym.co.th')
+  if (!String(retRes.doc_code || '').startsWith('RET-')) {
+    throw new Error(`Expected RET document code, got ${retRes.doc_code}`)
+  }
+  console.log('  ✔ Reverse leg 1 receive document created:', retRes.doc_code)
+
+  const hovRes = await req('/api/stock/old-returns/handover', 'POST', {
+    serial_numbers: [testSn],
+    recipient_name: 'E2E_Test_Customer',
+    note: `E2E_Test_HOV_${timestamp}`,
+  }, 'admin@sym.co.th')
+  if (!String(hovRes.doc_code || '').startsWith('HOV-')) {
+    throw new Error(`Expected HOV document code, got ${hovRes.doc_code}`)
+  }
+  console.log('  ✔ Reverse leg 2 handover document created:', hovRes.doc_code)
+
+  const docDetail = await req(`/api/stock/documents/${encodeURIComponent(hovRes.doc_id)}`, 'GET', null, 'admin@sym.co.th')
+  if (docDetail.document?.doc_code !== hovRes.doc_code || !docDetail.movements?.some(m => m.serial_number === testSn)) {
+    throw new Error('Stock document detail verification failed for HOV document')
+  }
+  const finalOldLookup = await req(`/api/stock/lookup?serial=${encodeURIComponent(testSn)}`, 'GET', null, 'admin@sym.co.th')
+  if (finalOldLookup.item?.status !== 'handed_over_to_customer') {
+    throw new Error(`Expected final old SN status='handed_over_to_customer', got ${finalOldLookup.item?.status}`)
+  }
+  console.log('  ✔ Reverse Logistics RET -> HOV -> Document Detail verified cleanly')
+
+  console.log('\n🎉 ALL 13/13 EDGE INTEGRATION CHECKS PASSED!')
 }
 
 main()

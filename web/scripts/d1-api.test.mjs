@@ -804,3 +804,112 @@ test('Production wipe SQL in switch-to-production.ps1 obeys FK constraints and p
   const allowlist = env.DB.raw.prepare('SELECT COUNT(*) as c FROM google_signin_allowlist').get()
   assert.ok(allowlist.c >= 6, 'Allowlist must be preserved across production wipe')
 })
+
+test('HTTP runtime: /api/tasks/pending includes stock metadata for SYM Admin, reflects hybrid reconcile, and strips it for customer_reviewer', async () => {
+  const env = createTestEnv()
+
+  await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'PendingStockMeta.xlsx',
+      rows: [
+        { location_code: 'BKK-PEND-1', loc_bld: 'AIS Pending Shop', com_sn: 'SN-PEND-OLD-REG', province: 'กรุงเทพมหานคร' },
+        { location_code: 'BKK-PEND-1', loc_bld: 'AIS Pending Shop', com_sn: 'SN-PEND-OLD-HYB', province: 'กรุงเทพมหานคร' },
+      ],
+    },
+  })
+
+  await apiReq(env, '/api/stock/import/commit', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'PendingStockSupply.xlsx',
+      rows: [
+        { serial_number: 'SN-PEND-NEW-REG', brand: 'Honeywell', model_name: 'Xenon 1950g', lot_no: 'LOT-PEND-1' },
+      ],
+    },
+  })
+
+  const list = await apiReq(env, '/api/scanners?search=SN-PEND-OLD', { email: 'admin@sym.co.th' })
+  assert.equal(list.status, 200)
+  const regScanner = list.json.rows.find(r => r.com_sn === 'SN-PEND-OLD-REG')
+  const hybScanner = list.json.rows.find(r => r.com_sn === 'SN-PEND-OLD-HYB')
+  assert.ok(regScanner && hybScanner)
+
+  const startReg = await apiReq(env, '/api/tasks/start', { method: 'POST', email: 'tech1@sym.co.th', body: { scanner_id: regScanner.id } })
+  const closeReg = await apiReq(env, `/api/tasks/${startReg.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'replaced', new_serial_number: 'SN-PEND-NEW-REG', version: startReg.json.version },
+  })
+  assert.equal(closeReg.status, 200)
+
+  const startHyb = await apiReq(env, '/api/tasks/start', { method: 'POST', email: 'tech1@sym.co.th', body: { scanner_id: hybScanner.id } })
+  const closeHyb = await apiReq(env, `/api/tasks/${startHyb.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'replaced', new_serial_number: 'SN-PEND-NEW-HYB', version: startHyb.json.version },
+  })
+  assert.equal(closeHyb.status, 200)
+
+  const adminPending = await apiReq(env, '/api/tasks/pending', { email: 'admin@sym.co.th' })
+  assert.equal(adminPending.status, 200)
+  const regRow = adminPending.json.tasks.find(t => t.id === startReg.json.task_id)
+  const hybRow = adminPending.json.tasks.find(t => t.id === startHyb.json.task_id)
+
+  assert.equal(regRow.stock_source_mode, 'registered_stock')
+  assert.equal(regRow.stock_status, 'allocated_to_task')
+  assert.equal(regRow.stock_brand, 'Honeywell')
+  assert.equal(regRow.stock_model, 'Xenon 1950g')
+  assert.equal(regRow.stock_lot_no, 'LOT-PEND-1')
+
+  assert.equal(hybRow.stock_source_mode, 'hybrid_unregistered')
+  assert.equal(hybRow.stock_status, 'allocated_to_task')
+  assert.equal(hybRow.stock_lot_no, null)
+
+  // Reconcile the hybrid unit and confirm /tasks/pending reflects the upgraded RCV lot
+  const reconcile = await apiReq(env, '/api/stock/import/commit', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'HybridReconcile.xlsx',
+      rows: [{ serial_number: 'SN-PEND-NEW-HYB', brand: 'Zebra', model_name: 'DS9308', lot_no: 'LOT-HYB-RCV' }],
+    },
+  })
+  assert.equal(reconcile.status, 200)
+  assert.equal(reconcile.json.summary.reconcile_hybrid, 1)
+
+  const adminPendingAfter = await apiReq(env, '/api/tasks/pending', { email: 'admin@sym.co.th' })
+  const hybAfter = adminPendingAfter.json.tasks.find(t => t.id === startHyb.json.task_id)
+  assert.equal(hybAfter.stock_source_mode, 'registered_stock')
+  assert.equal(hybAfter.stock_status, 'allocated_to_task')
+  assert.equal(hybAfter.stock_lot_no, 'LOT-HYB-RCV')
+  assert.equal(hybAfter.stock_brand, 'Zebra')
+  assert.equal(hybAfter.stock_model, 'DS9308')
+
+  // Pass SYM verify and check customer_reviewer least-privilege stripping
+  const verifyReg = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: startReg.json.task_id, decision: 'pass', version: regRow.version },
+  })
+  assert.equal(verifyReg.status, 200)
+
+  const revPending = await apiReq(env, '/api/tasks/pending', { email: 'reviewer@gable.co.th' })
+  assert.equal(revPending.status, 200)
+  const revRow = revPending.json.tasks.find(t => t.id === startReg.json.task_id)
+  assert.ok(revRow)
+  for (const redactedKey of [
+    'started_by',
+    'closeout_submitted_by',
+    'stock_source_mode',
+    'stock_status',
+    'stock_brand',
+    'stock_model',
+    'stock_lot_no',
+    'stock_dispatch_area',
+  ]) {
+    assert.equal(redactedKey in revRow, false, `customer_reviewer must not receive ${redactedKey}`)
+  }
+})

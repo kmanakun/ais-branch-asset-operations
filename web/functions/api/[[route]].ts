@@ -898,6 +898,12 @@ app.get('/tasks/pending', async (c) => {
       END as outcome,
       t.observed_serial,
       t.new_serial_number,
+      nsi.source_mode as stock_source_mode,
+      nsi.status as stock_status,
+      nsi.brand as stock_brand,
+      nsi.model_name as stock_model,
+      nsi.lot_no as stock_lot_no,
+      nsi.dispatch_area as stock_dispatch_area,
       t.notes,
       t.started_at,
       t.started_by,
@@ -930,6 +936,11 @@ app.get('/tasks/pending', async (c) => {
     FROM replacement_tasks t
     JOIN scanner_assets s ON s.id = t.scanner_asset_id
     JOIN branches b ON b.id = s.branch_id
+    LEFT JOIN stock_items nsi
+      ON t.new_serial_number IS NOT NULL
+     AND TRIM(t.new_serial_number) != ''
+     AND nsi.serial_number = UPPER(TRIM(t.new_serial_number))
+     AND nsi.unit_type = 'new_unit'
     WHERE ${statusFilter}
   `
   const params: any[] = []
@@ -962,7 +973,17 @@ app.get('/tasks/pending', async (c) => {
     }
 
     if (user.role === 'customer_reviewer') {
-      const { started_by, closeout_submitted_by, ...rest } = r
+      const {
+        started_by,
+        closeout_submitted_by,
+        stock_source_mode,
+        stock_status,
+        stock_brand,
+        stock_model,
+        stock_lot_no,
+        stock_dispatch_area,
+        ...rest
+      } = r
       return { ...rest, is_overdue }
     }
     return { ...r, is_overdue }

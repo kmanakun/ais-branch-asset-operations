@@ -17,6 +17,7 @@ import {
   HardDrive,
   Layers,
   LayoutDashboard,
+  Loader2,
   LockKeyhole,
   LogOut,
   MapPin,
@@ -38,10 +39,11 @@ import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot, 
 import { groupRowsByBranch } from './province'
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
 import { lockBodyScroll, useDialogControls } from './dialog'
-import { ApiError, type AuthConfigResponse, d1Api, getDevEmail, setDevAuthHeadersEnabled, setDevEmail } from './d1-client'
+import { ApiError, type AuthConfigResponse, d1Api, getDevEmail, setDevAuthHeadersEnabled, setDevEmail, type StockItemRecord } from './d1-client'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
-import { StockLookupBadge } from './StockLookupBadge'
+import { HybridReconcileCard, StockLookupBadge } from './StockLookupBadge'
 import { StockManagementPanel } from './StockManagementPanel'
+import { getStockStatusMeta } from './lib/stock-ui-labels'
 import { validateSerialFormat } from './lib/stock-serial.mjs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -1974,6 +1976,8 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [selectedAdminTask, setSelectedAdminTask] = useState<Record<string, unknown> | null>(null)
   const [registerObservedSerial, setRegisterObservedSerial] = useState(false)
+  const [stockRefreshKey, setStockRefreshKey] = useState(0)
+  const [reconciledTaskIds, setReconciledTaskIds] = useState<Record<string, boolean>>({})
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState('')
   const [zoomedEvidenceIndex, setZoomedEvidenceIndex] = useState<number | null>(null)
@@ -2340,12 +2344,23 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                 return (
                   <article className="pending-review-row" key={taskId}>
                     <div className="pending-review-main">
-                      <div className="pending-review-title">
+                      <div className="pending-review-title flex flex-wrap items-center gap-2">
                         <strong>{String(task.branch_name || task.loc_bld || 'สาขา')} · SN เดิม {serial} → ใหม่ {newSerial}</strong>
                         <StatusPill
                           label={getStatusPresentation(task.task_status || task.status || 'awaiting_admin_acceptance').label}
                           tone={getStatusPresentation(task.task_status || task.status || 'awaiting_admin_acceptance').tone}
                         />
+                        {task.outcome !== 'different_device_found' && Boolean(task.new_serial_number) && (
+                          task.stock_source_mode === 'hybrid_unregistered' ? (
+                            <Badge variant="warning">Hybrid · รอรับเข้า Supplier</Badge>
+                          ) : task.stock_source_mode === 'registered_stock' ? (
+                            <Badge variant="green">
+                              ตัดสต็อกคลัง{task.stock_lot_no ? ` · Lot ${String(task.stock_lot_no)}` : ''}
+                            </Badge>
+                          ) : (
+                            <Badge variant="neutral">SN ใหม่ยังไม่อยู่ในสต็อก</Badge>
+                          )
+                        )}
                       </div>
                       <span>จังหวัด{String(task.province || '—')} · LocationCode {String(task.location_code || '—')}</span>
                       <small>
@@ -2654,6 +2669,47 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                           <strong className="text-slate-800">หมายเหตุจากหน้างาน:</strong> {String(currentTask.notes)}
                         </div>
                       )}
+                      {!isCustomerReviewer && currentTask.outcome !== 'different_device_found' && Boolean(currentTask.new_serial_number) && (() => {
+                        const modalTaskId = String(currentTask.task_id || currentTask.id)
+                        const showHybridReconcile =
+                          currentTask.stock_source_mode === 'hybrid_unregistered' || Boolean(reconciledTaskIds[modalTaskId])
+                        return (
+                          <div className="mt-2">
+                            <StockLookupBadge
+                              serial={String(currentTask.new_serial_number)}
+                              taskId={modalTaskId}
+                              enabled={true}
+                              mode="review"
+                              refreshKey={stockRefreshKey}
+                            />
+                            {showHybridReconcile && (
+                              <HybridReconcileCard
+                                serial={String(currentTask.new_serial_number)}
+                                defaultBrand={currentTask.stock_brand ? String(currentTask.stock_brand) : null}
+                                defaultModel={currentTask.stock_model ? String(currentTask.stock_model) : null}
+                                defaultLotNo={currentTask.stock_lot_no ? String(currentTask.stock_lot_no) : null}
+                                onReconciled={(_res, details) => {
+                                  setReconciledTaskIds(prev => ({ ...prev, [modalTaskId]: true }))
+                                  setStockRefreshKey(k => k + 1)
+                                  setTasks(prev =>
+                                    prev.map(row =>
+                                      String(row.task_id || row.id) === modalTaskId
+                                        ? {
+                                            ...row,
+                                            stock_source_mode: 'registered_stock',
+                                            stock_brand: details.brand || row.stock_brand || null,
+                                            stock_model: details.modelName || row.stock_model || null,
+                                            stock_lot_no: details.lotNo || row.stock_lot_no || null,
+                                          }
+                                        : row,
+                                    ),
+                                  )
+                                }}
+                              />
+                            )}
+                          </div>
+                        )
+                      })()}
                       {selectedAdminTask && selectedAdminTask.outcome === 'different_device_found' && !isSelfActorForTask(selectedAdminTask) && (
                         <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3.5 py-2.5 text-xs text-slate-800">
                           <input
@@ -3306,6 +3362,252 @@ const onsiteEvidenceSlots: EvidenceSlot[] = [
 ]
 const adminReviewEvidenceSlots: EvidenceSlot[] = []
 
+function StockPickerModal({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (serialNumber: string) => void
+  onClose: () => void
+}) {
+  const dialogRef = useDialogControls<HTMLElement>(onClose)
+  const [searchDraft, setSearchDraft] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [dispatchArea, setDispatchArea] = useState('')
+  const [areaOptions, setAreaOptions] = useState<Array<{ dispatch_area: string; dispatched_available: number }>>([])
+  const [items, setItems] = useState<StockItemRecord[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchDraft.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [searchDraft])
+
+  useEffect(() => {
+    let active = true
+    void d1Api.getStockSummary()
+      .then(summary => {
+        if (!active) return
+        setAreaOptions(
+          (summary.by_dispatch_area || [])
+            .filter(a => a.dispatch_area && a.dispatched_available > 0)
+            .map(a => ({ dispatch_area: a.dispatch_area, dispatched_available: a.dispatched_available })),
+        )
+      })
+      .catch(() => {
+        if (active) setAreaOptions([])
+      })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    setLoading(true)
+    setError('')
+    void d1Api.getStockItems({
+      unit_type: 'new_unit',
+      status: 'in_warehouse,dispatched',
+      dispatch_area: dispatchArea || undefined,
+      search: debouncedSearch || undefined,
+      limit: 50,
+      offset: 0,
+    })
+      .then(res => {
+        if (!active) return
+        setItems(res.rows || [])
+        setTotal(res.total || 0)
+      })
+      .catch((err: any) => {
+        if (!active) return
+        setItems([])
+        setTotal(0)
+        setError(err?.message || 'ไม่สามารถโหลดรายการสต็อกพร้อมใช้งานได้')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => { active = false }
+  }, [dispatchArea, debouncedSearch])
+
+  if (typeof document === 'undefined') return null
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[10500] flex items-center justify-center overflow-y-auto overscroll-contain bg-slate-900/60 p-2.5 backdrop-blur-xs sm:p-5"
+      role="presentation"
+      onMouseDown={e => {
+        if (e.target === e.currentTarget) onClose()
+      }}
+    >
+      <section
+        ref={dialogRef}
+        tabIndex={-1}
+        className="my-auto flex w-full max-w-[760px] max-h-[90dvh] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stock-picker-modal-title"
+      >
+        <header className="flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
+              <Package size={19} />
+            </div>
+            <div className="min-w-0">
+              <h2 id="stock-picker-modal-title" className="m-0 text-base font-bold text-slate-900">
+                เลือกเครื่องใหม่จากสต็อกพร้อมใช้งาน
+              </h2>
+              <small className="block text-xs text-slate-500">
+                แสดงเฉพาะสถานะในคลังกลางและกระจายพื้นที่ที่ยังไม่ถูกจอง ({total.toLocaleString('th-TH')} เครื่อง)
+              </small>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="detail-close shrink-0"
+            aria-label="ปิดหน้าต่างเลือกสต็อก"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="flex flex-col gap-2.5 border-b border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:px-5">
+          <div className="relative min-w-0 flex-1">
+            <Search size={15} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400" />
+            <Input
+              aria-label="ค้นหาเครื่องจากสต็อก"
+              value={searchDraft}
+              onChange={e => setSearchDraft(e.target.value)}
+              placeholder="ค้นหา Serial Number, ยี่ห้อ/รุ่น หรือเลข Lot…"
+              className="h-9 pl-8 pr-8 text-xs sm:text-sm"
+            />
+            {searchDraft && (
+              <button
+                type="button"
+                aria-label="ล้างคำค้นหาสต็อก"
+                onClick={() => setSearchDraft('')}
+                className="absolute top-1/2 right-2.5 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <select
+            aria-label="กรองตามพื้นที่จัดสรรสต็อก"
+            value={dispatchArea}
+            onChange={e => setDispatchArea(e.target.value)}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-800 sm:w-56"
+          >
+            <option value="">ทุกพื้นที่และคลังกลาง</option>
+            {areaOptions.map(area => (
+              <option key={area.dispatch_area} value={area.dispatch_area}>
+                {area.dispatch_area} ({area.dispatched_available})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-12 text-xs text-slate-500">
+              <Loader2 size={16} className="animate-spin text-emerald-700" />
+              <span>กำลังค้นหาเครื่องพร้อมใช้งานจากสต็อก…</span>
+            </div>
+          ) : error ? (
+            <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-700" role="alert">
+              {error}
+            </div>
+          ) : items.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-xs text-slate-500">
+              <strong className="mb-1 block text-sm text-slate-700">ไม่พบเครื่องพร้อมใช้งานที่ตรงกับตัวกรอง</strong>
+              <span>สามารถล้างคำค้นหา หรือกรอก Serial Number หน้างานโดยตรงเพื่อใช้ Hybrid Mode ได้</span>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-2.5 md:hidden">
+                {items.map(item => {
+                  const statusMeta = getStockStatusMeta(item.status)
+                  return (
+                    <article
+                      key={item.id}
+                      className="rounded-xl border border-slate-200 bg-white p-3 shadow-xs"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <strong className="break-all font-mono text-sm text-slate-900">{item.serial_number}</strong>
+                        <Badge variant={statusMeta.tone}>{statusMeta.label}</Badge>
+                      </div>
+                      <div className="mt-1.5 grid gap-0.5 text-xs text-slate-600">
+                        <span>
+                          {[item.brand, item.model_name].filter(Boolean).join(' ') || 'ไม่ระบุยี่ห้อ/รุ่น'}
+                          {item.lot_no ? ` · Lot ${item.lot_no}` : ''}
+                        </span>
+                        <span>พื้นที่: {item.dispatch_area || 'คลังกลาง SYM'}</span>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="mt-2.5 h-10 w-full text-xs font-semibold"
+                        onClick={() => onSelect(item.serial_number)}
+                      >
+                        <CheckCircle2 size={14} /> เลือก SN นี้
+                      </Button>
+                    </article>
+                  )
+                })}
+              </div>
+
+              <div className="hidden overflow-hidden rounded-xl border border-slate-200 bg-white md:block">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3.5 py-2.5">Serial Number</th>
+                      <th className="px-3.5 py-2.5">ยี่ห้อ / รุ่น</th>
+                      <th className="px-3.5 py-2.5">Lot / PO</th>
+                      <th className="px-3.5 py-2.5">คลัง / พื้นที่</th>
+                      <th className="px-3.5 py-2.5">สถานะ</th>
+                      <th className="px-3.5 py-2.5 text-right">ดำเนินการ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {items.map(item => {
+                      const statusMeta = getStockStatusMeta(item.status)
+                      return (
+                        <tr key={item.id} className="hover:bg-emerald-50/40">
+                          <td className="px-3.5 py-2.5 font-mono font-bold text-slate-900">{item.serial_number}</td>
+                          <td className="px-3.5 py-2.5 text-slate-700">
+                            {[item.brand, item.model_name].filter(Boolean).join(' ') || '—'}
+                          </td>
+                          <td className="px-3.5 py-2.5 font-mono text-slate-600">{item.lot_no || '—'}</td>
+                          <td className="px-3.5 py-2.5 text-slate-700">{item.dispatch_area || 'คลังกลาง SYM'}</td>
+                          <td className="px-3.5 py-2.5">
+                            <Badge variant={statusMeta.tone}>{statusMeta.label}</Badge>
+                          </td>
+                          <td className="px-3.5 py-2.5 text-right">
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-8 px-2.5 text-xs"
+                              onClick={() => onSelect(item.serial_number)}
+                            >
+                              เลือก SN นี้
+                            </Button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      </section>
+    </div>,
+    document.body,
+  )
+}
+
 function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = false, onClose, onUpdated, onOpenHandover }: { task: Record<string, unknown>; role?: string; currentEmail?: string; demo: boolean; readOnly?: boolean; onClose: () => void; onUpdated: (action: string) => void; onOpenHandover?: (task: any) => void }) {
   const status = String(task.task_status || task.status || 'scheduled').toLowerCase()
   const rawServerStage = String(task.workflow_stage || (demo ? getTaskWorkflowStage(task) : status === 'scheduled' ? 'open' : status === 'completed' ? 'legacy_completed' : status)).toLowerCase()
@@ -3353,6 +3655,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
   const [stockLookupBlockedReason, setStockLookupBlockedReason] = useState('')
   const newSerialInputRef = useRef<HTMLInputElement>(null)
   const [showNewSnScanner, setShowNewSnScanner] = useState(false)
+  const [showStockPicker, setShowStockPicker] = useState(false)
   const [observedSerialInput, setObservedSerialInput] = useState('')
   const [exceptionReasonInput, setExceptionReasonInput] = useState('')
   const [registerObservedSerial, setRegisterObservedSerial] = useState(false)
@@ -3362,6 +3665,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
     setNewSerialInput(String(task.new_serial_number || task.new_serial || ''))
     setStockLookupAllowed(true)
     setStockLookupBlockedReason('')
+    setShowStockPicker(false)
     setObservedSerialInput(String(task.observed_serial || ''))
     setExceptionReasonInput(String(task.exception_reason || task.notes || ''))
     setRegisterObservedSerial(false)
@@ -3562,7 +3866,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
       <div className="work-order-layout">
         <div className="work-order-main">
           <section className="detail-section"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
-          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong></div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div><Input ref={newSerialInputRef} aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /><StockLookupBadge serial={newSerialInput} taskId={taskId} enabled={!demo && role !== 'viewer'} mode="closeout" onAvailabilityChange={(allowed, reason) => { setStockLookupAllowed(allowed); setStockLookupBlockedReason(allowed ? '' : reason) }} /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong>{!demo && role !== 'viewer' && Boolean(newSerial) && <StockLookupBadge serial={String(newSerial)} taskId={taskId} enabled={true} mode="review" />}</div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
+          <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong>{!demo && role !== 'viewer' && outcome === 'replaced' && !['open', 'in_progress'].includes(stage) && Boolean(serial) && <StockLookupBadge serial={String(serial)} taskId={taskId} enabled={true} mode="review" />}</div><span className="work-order-serial-arrow" aria-hidden="true">→</span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex flex-wrap items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><div className="flex flex-wrap items-center gap-1.5">{!demo && role !== 'viewer' && <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowStockPicker(true)}><Package size={13} /> เลือกจากสต็อก</Button>}<Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div></div><Input ref={newSerialInputRef} aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ของเครื่องใหม่ หรือกดปุ่มสแกน" /><StockLookupBadge serial={newSerialInput} taskId={taskId} enabled={!demo && role !== 'viewer'} mode="closeout" onAvailabilityChange={(allowed, reason) => { setStockLookupAllowed(allowed); setStockLookupBlockedReason(allowed ? '' : reason) }} /></div> : <div><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong>{!demo && role !== 'viewer' && Boolean(newSerial) && <StockLookupBadge serial={String(newSerial)} taskId={taskId} enabled={true} mode="review" />}</div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
           <section className="detail-section"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField label="ผู้ปฏิบัติงานที่ส่งผล" value={task.performed_by_name || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} />{(Boolean(observedSerial) || outcome === 'different_device_found') && <DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} />}<DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || '—'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
           {reviews.length > 0 && (
@@ -3744,6 +4048,19 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
         }}
         onClose={() => setShowNewSnScanner(false)}
       />
+      {showStockPicker && (
+        <StockPickerModal
+          onSelect={selectedSn => {
+            setNewSerialInput(selectedSn)
+            setStockLookupAllowed(true)
+            setStockLookupBlockedReason('')
+            setActionError('')
+            setShowStockPicker(false)
+            window.requestAnimationFrame(() => newSerialInputRef.current?.focus())
+          }}
+          onClose={() => setShowStockPicker(false)}
+        />
+      )}
     </section>
   </div>
 }

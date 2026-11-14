@@ -1422,10 +1422,11 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           si.brand LIKE ? OR
           si.dispatch_area LIKE ? OR
           b.location_code LIKE ? OR
-          b.loc_bld LIKE ?
+          b.loc_bld LIKE ? OR
+          b.province LIKE ?
         )`)
         const term = `%${search}%`
-        params.push(term, term, term, term, term)
+        params.push(term, term, term, term, term, term)
       } else {
         whereParts.push(`(
           si.serial_number LIKE ? OR
@@ -1434,10 +1435,11 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           si.lot_no LIKE ? OR
           si.dispatch_area LIKE ? OR
           b.location_code LIKE ? OR
-          b.loc_bld LIKE ?
+          b.loc_bld LIKE ? OR
+          b.province LIKE ?
         )`)
         const term = `%${search}%`
-        params.push(term, term, term, term, term, term, term)
+        params.push(term, term, term, term, term, term, term, term)
       }
     }
 

@@ -3131,6 +3131,9 @@ tbody tr:hover td {
   gap: 14px;
   margin-top: 16px;
 }
+.handover-signatures-grid.is-two-col {
+  grid-template-columns: repeat(2, 1fr);
+}
 
 .handover-sig-box {
   border: 1px solid #cbd5e1;
@@ -4608,7 +4611,8 @@ tbody tr:hover td {
     gap: 6px;
     padding: 12px;
   }
-  .handover-signatures-grid {
+  .handover-signatures-grid,
+  .handover-signatures-grid.is-two-col {
     grid-template-columns: 1fr;
     gap: 12px;
     margin-top: 16px;
@@ -4816,6 +4820,9 @@ tbody tr:hover td {
     margin-top: 10px;
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+  .handover-signatures-grid.is-two-col {
+    grid-template-columns: repeat(2, 1fr) !important;
   }
   .handover-sig-box {
     padding: 10px 8px;

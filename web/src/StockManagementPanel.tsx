@@ -11,6 +11,7 @@ import {
   Info,
   Loader2,
   Package,
+  Printer,
   RefreshCw,
   RotateCcw,
   ScanBarcode,
@@ -28,10 +29,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
+import { HybridReconcileCard } from './StockLookupBadge'
 import {
   ApiError,
   d1Api,
   type StockDocumentRecord,
+  type StockImportCommitResponse,
   type StockImportDefaultsPayload,
   type StockImportInputPayload,
   type StockImportPreviewResponse,
@@ -315,7 +318,16 @@ export function StockManagementPanel({ role, onToast }: StockManagementPanelProp
       )}
 
       {timelineLookup && createPortal(
-        <StockSerialTimelineModal lookup={timelineLookup} onClose={() => setTimelineLookup(null)} />,
+        <StockSerialTimelineModal
+          lookup={timelineLookup}
+          canManageStock={canManageStock}
+          onReconciled={async res => {
+            onToast(`จับคู่รับเข้า Supplier (${res.doc_code}) สำเร็จ`)
+            refreshAll()
+            await openSerialTimeline(timelineLookup.serial_number)
+          }}
+          onClose={() => setTimelineLookup(null)}
+        />,
         document.body,
       )}
     </div>
@@ -1689,11 +1701,19 @@ function StockReverseSection({
   const [note, setNote] = useState('')
   const [showScanner, setShowScanner] = useState(false)
   const [queueItems, setQueueItems] = useState<StockItemRecord[]>([])
+  const [queueTotal, setQueueTotal] = useState(0)
+  const [queueSearchDraft, setQueueSearchDraft] = useState('')
+  const [queueSearch, setQueueSearch] = useState('')
   const [queueLoading, setQueueLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [invalidSerials, setInvalidSerials] = useState<string[]>([])
   const [resultMsg, setResultMsg] = useState('')
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQueueSearch(queueSearchDraft.trim()), 250)
+    return () => window.clearTimeout(timer)
+  }, [queueSearchDraft])
 
   useEffect(() => {
     setMode(initialMode)
@@ -1720,18 +1740,25 @@ function StockReverseSection({
         const res = await d1Api.getStockItems({
           unit_type: 'old_removed',
           status: targetStatus,
+          search: queueSearch || undefined,
           limit: 50,
           offset: 0,
         })
-        if (active) setQueueItems(res.rows || [])
+        if (active) {
+          setQueueItems(res.rows || [])
+          setQueueTotal(res.total || 0)
+        }
       } catch {
-        if (active) setQueueItems([])
+        if (active) {
+          setQueueItems([])
+          setQueueTotal(0)
+        }
       } finally {
         if (active) setQueueLoading(false)
       }
     })()
     return () => { active = false }
-  }, [mode, reloadTick])
+  }, [mode, reloadTick, queueSearch])
 
   const parsedSerials = useMemo(() => parseBatchSerialText(serialText), [serialText])
   const selectedSet = useMemo(() => new Set(parsedSerials), [parsedSerials])
@@ -1832,12 +1859,12 @@ function StockReverseSection({
         </div>
 
         {/* Quick pick queue from D1 */}
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div className="mb-2 flex items-center justify-between gap-2 text-xs">
+        <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <strong className="text-slate-700">
               {mode === 'receive'
-                ? `คิวซากเครื่องที่ถอดหน้างาน รอรับเข้าคลัง (${queueItems.length} รายการล่าสุด)`
-                : `คิวซากเครื่องในคลัง SYM รอส่งมอบคืนลูกค้า (${queueItems.length} รายการล่าสุด)`}
+                ? `คิวซากเครื่องที่ถอดหน้างาน รอรับเข้าคลัง (${queueItems.length}${queueTotal > queueItems.length ? ` / ${queueTotal}` : ''} รายการล่าสุด)`
+                : `คิวซากเครื่องในคลัง SYM รอส่งมอบคืนลูกค้า (${queueItems.length}${queueTotal > queueItems.length ? ` / ${queueTotal}` : ''} รายการล่าสุด)`}
             </strong>
             {queueItems.length > 0 && (
               <Button
@@ -1855,32 +1882,64 @@ function StockReverseSection({
             )}
           </div>
 
+          <div className="relative">
+            <Search size={14} className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-slate-400" />
+            <Input
+              aria-label="ค้นหาคิวซากเครื่องเดิม"
+              value={queueSearchDraft}
+              onChange={e => setQueueSearchDraft(e.target.value)}
+              placeholder="ค้นหา SN, รหัสสาขา, ชื่อสาขา, จังหวัด..."
+              className="h-8 bg-white pl-8 pr-8 text-xs"
+            />
+            {queueSearchDraft && (
+              <button
+                type="button"
+                aria-label="ล้างคำค้นหาคิวซากเครื่อง"
+                onClick={() => setQueueSearchDraft('')}
+                className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
           {queueLoading ? (
             <div className="flex items-center gap-1.5 py-2 text-xs text-slate-500">
               <Loader2 size={13} className="animate-spin" /> กำลังโหลดคิวซากเครื่อง…
             </div>
           ) : queueItems.length === 0 ? (
             <div className="py-2 text-xs text-slate-500">
-              {mode === 'receive' ? 'ยังไม่มีซากเครื่องเดิมค้างรับเข้าคลัง' : 'ยังไม่มีซากเครื่องในคลังรอส่งมอบลูกค้า'}
+              {queueSearch
+                ? 'ไม่พบคิวซากเครื่องที่ตรงกับคำค้นหา'
+                : mode === 'receive'
+                  ? 'ยังไม่มีซากเครื่องเดิมค้างรับเข้าคลัง'
+                  : 'ยังไม่มีซากเครื่องในคลังรอส่งมอบลูกค้า'}
             </div>
           ) : (
-            <div className="flex max-h-44 flex-wrap gap-1.5 overflow-y-auto">
+            <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto">
               {queueItems.map(item => {
                 const picked = selectedSet.has(item.serial_number)
+                const branchSubtitle = [
+                  item.branch_code,
+                  item.branch_name,
+                  item.branch_province ? `จ.${item.branch_province}` : '',
+                ].filter(Boolean).join(' · ')
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => toggleQueueSerial(item.serial_number)}
                     className={cn(
-                      'inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors',
+                      'inline-flex max-w-full flex-col items-start rounded-lg border px-2.5 py-1.5 text-left text-xs transition-colors',
                       picked
                         ? 'border-emerald-600 bg-emerald-50 text-emerald-900'
                         : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100',
                     )}
                   >
-                    <span className="font-mono font-bold">{item.serial_number}</span>
-                    {item.branch_code && <span className="text-[11px] text-slate-500">· {item.branch_code}</span>}
+                    <span className="break-all font-mono font-bold">{item.serial_number}</span>
+                    {branchSubtitle && (
+                      <span className="text-[11px] text-slate-500">{branchSubtitle}</span>
+                    )}
                   </button>
                 )
               })}
@@ -2185,9 +2244,13 @@ function StockDocumentsSection({ reloadTick }: { reloadTick: number }) {
 
 function StockSerialTimelineModal({
   lookup,
+  canManageStock = false,
+  onReconciled,
   onClose,
 }: {
   lookup: StockLookupResponse
+  canManageStock?: boolean
+  onReconciled?: (res: StockImportCommitResponse) => void | Promise<void>
   onClose: () => void
 }) {
   const dialogRef = useDialogControls<HTMLElement>(onClose)
@@ -2242,6 +2305,19 @@ function StockSerialTimelineModal({
             </div>
           )}
 
+          {canManageStock && item?.source_mode === 'hybrid_unregistered' && (
+            <HybridReconcileCard
+              serial={item.serial_number}
+              defaultBrand={item.brand}
+              defaultModel={item.model_name}
+              defaultLotNo={item.lot_no}
+              defaultExpanded={true}
+              onReconciled={res => {
+                void onReconciled?.(res)
+              }}
+            />
+          )}
+
           <div>
             <h3 className="mb-2 text-xs font-bold text-slate-700">ลำดับการเคลื่อนไหว (Stock Movements)</h3>
             {lookup.movements.length === 0 ? (
@@ -2273,6 +2349,15 @@ function StockSerialTimelineModal({
   )
 }
 
+const STOCK_DOC_SUBTITLES: Record<StockDocumentRecord['doc_type'], string> = {
+  receive: 'เอกสารบันทึกการตรวจรับเครื่องสแกนใหม่เข้าคลังจาก Supplier (หรือจับคู่ Hybrid Mode)',
+  dispatch: 'ใบเบิกจ่ายและกระจายเครื่องสแกนใหม่ไปยังพื้นที่ปฏิบัติงาน / ทีมช่างภาคสนาม',
+  return_in: 'ใบรับคืนซากเครื่องสแกนเก่าที่ถอดจากสาขาเข้าสู่คลังกลาง SYM (Reverse Logistics ขาเข้า)',
+  handover_out: 'ใบส่งมอบซากเครื่องสแกนเก่าคืนให้ลูกค้า AIS / G-Able (Reverse Logistics ขาออก)',
+  doa_claim: 'เอกสารบันทึกเครื่องใหม่ชำรุดจากโรงงานเพื่อรอส่งเคลม Supplier (DOA)',
+  adjustment: 'เอกสารปรับปรุงรายการหรือแก้ไขสถานะสต็อกภายในระบบ',
+}
+
 function StockDocumentDetailModal({
   document: doc,
   movements,
@@ -2293,82 +2378,195 @@ function StockDocumentDetailModal({
   const dialogRef = useDialogControls<HTMLElement>(onClose)
 
   const meta = STOCK_DOC_TYPE_META[doc.doc_type] || { label: doc.doc_type, tone: 'neutral' as const }
+  const subtitle = STOCK_DOC_SUBTITLES[doc.doc_type] || 'เอกสารรายการเคลื่อนไหวสต็อกเครื่องสแกนบาร์โค้ด'
+  const secondSignerRole =
+    doc.doc_type === 'handover_out'
+      ? 'ตัวแทนลูกค้าผู้รับมอบ (AIS / G-Able)'
+      : doc.doc_type === 'dispatch'
+        ? 'หัวหน้าพื้นที่ / ช่างผู้เบิกเครื่อง'
+        : doc.doc_type === 'receive' || doc.doc_type === 'return_in'
+          ? 'ผู้ตรวจสอบคลัง / เจ้าหน้าที่ตรวจรับ (SYM)'
+          : 'ผู้อนุมัติ / ผู้ตรวจรับรายการ'
+
+  const handleExportCsv = () => {
+    downloadStockCsv(
+      `${doc.doc_code}.csv`,
+      ['Serial Number', 'ประเภท', 'สถานะปัจจุบัน', 'ยี่ห้อ', 'รุ่น', 'เหตุการณ์', 'สาขา', 'หมายเหตุ'],
+      movements.map(m => [
+        m.serial_number,
+        m.unit_type === 'new_unit' ? 'เครื่องใหม่' : 'ซากเครื่องเดิม',
+        getStockStatusMeta(m.current_status).label,
+        m.brand || '',
+        m.model_name || '',
+        getStockActionLabel(m.action),
+        m.branch_code ? `${m.branch_code} ${m.branch_name || ''}`.trim() : '',
+        m.note || '',
+      ]),
+    )
+  }
 
   return (
-    <div className="detail-overlay" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="detail-dialog max-w-3xl" role="dialog" aria-modal="true" aria-labelledby="stock-doc-title" tabIndex={-1}>
-        <header className="detail-dialog-header">
-          <div>
-            <span className="detail-eyebrow">{meta.label}</span>
-            <h2 id="stock-doc-title" className="font-mono">{doc.doc_code}</h2>
+    <div className="handover-modal-backdrop" role="presentation" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <section ref={dialogRef} className="handover-modal-content max-w-[920px]" role="dialog" aria-modal="true" aria-labelledby="stock-doc-title" tabIndex={-1}>
+        <div className="handover-modal-bar flex-wrap gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Badge variant={meta.tone}>{meta.label}</Badge>
+            <strong id="stock-doc-title" className="font-mono text-sm text-slate-900">{doc.doc_code}</strong>
+            <span className="text-xs text-slate-500">({doc.item_count.toLocaleString('th-TH')} เครื่อง)</span>
           </div>
-          <button type="button" className="detail-close" aria-label="ปิดรายละเอียดเอกสาร" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </header>
-
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
-            <div className="space-y-0.5">
-              <div>จำนวนรายการในเอกสาร: <strong>{doc.item_count.toLocaleString('th-TH')}</strong> เครื่อง</div>
-              <div>ผู้จัดทำ: <strong>{doc.created_by}</strong> · เมื่อ {formatStockDate(doc.created_at)}</div>
-              {doc.lot_no && <div>Lot / PO: <strong className="font-mono">{doc.lot_no}</strong></div>}
-              {doc.destination_area && <div>พื้นที่/ทีมปลายทาง: <strong>{doc.destination_area}</strong></div>}
-              {doc.recipient_name && <div>ผู้รับมอบ: <strong>{doc.recipient_name}</strong></div>}
-              {doc.note && <div>หมายเหตุ: {doc.note}</div>}
-            </div>
+          <div className="flex flex-wrap items-center gap-2">
             {movements.length > 0 && (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => downloadStockCsv(
-                  `${doc.doc_code}.csv`,
-                  ['Serial Number', 'ประเภท', 'สถานะปัจจุบัน', 'ยี่ห้อ', 'รุ่น', 'เหตุการณ์', 'สาขา', 'หมายเหตุ'],
-                  movements.map(m => [
-                    m.serial_number,
-                    m.unit_type === 'new_unit' ? 'เครื่องใหม่' : 'ซากเครื่องเดิม',
-                    getStockStatusMeta(m.current_status).label,
-                    m.brand || '',
-                    m.model_name || '',
-                    getStockActionLabel(m.action),
-                    m.branch_code ? `${m.branch_code} ${m.branch_name || ''}`.trim() : '',
-                    m.note || '',
-                  ]),
-                )}
-              >
-                <FileDown size={14} /> Export รายการ SN
+              <Button type="button" size="sm" variant="outline" onClick={handleExportCsv}>
+                <FileDown size={14} /> Export CSV
               </Button>
+            )}
+            <Button type="button" size="sm" onClick={() => window.print()}>
+              <Printer size={14} /> พิมพ์เอกสาร (PDF)
+            </Button>
+            <button type="button" className="detail-close shrink-0" aria-label="ปิดรายละเอียดเอกสาร" onClick={onClose}>
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="handover-sheet space-y-4">
+          <div className="handover-header">
+            <div>
+              <span className="handover-doc-kicker">SYM WAREHOUSE · AIS SCANNER STOCK OPERATIONS</span>
+              <h2>{meta.label}</h2>
+              <p>{subtitle}</p>
+            </div>
+            <div className="handover-header-meta">
+              <div className="handover-status-pill is-delivered font-mono">{doc.doc_code}</div>
+              <span>วันที่บันทึก: {formatStockDate(doc.created_at)}</span>
+            </div>
+          </div>
+
+          <div className="handover-meta-grid">
+            <div className="handover-meta-item">
+              <span className="handover-meta-label">เลขที่เอกสาร</span>
+              <span className="handover-meta-value font-mono">{doc.doc_code}</span>
+            </div>
+            <div className="handover-meta-item">
+              <span className="handover-meta-label">จำนวนทั้งหมด</span>
+              <span className="handover-meta-value">{doc.item_count.toLocaleString('th-TH')} เครื่อง</span>
+            </div>
+            <div className="handover-meta-item">
+              <span className="handover-meta-label">ผู้จัดทำเอกสาร</span>
+              <span className="handover-meta-value break-all">{doc.created_by}</span>
+            </div>
+            {doc.lot_no && (
+              <div className="handover-meta-item">
+                <span className="handover-meta-label">Lot / PO Supplier</span>
+                <span className="handover-meta-value font-mono">{doc.lot_no}</span>
+              </div>
+            )}
+            {doc.destination_area && (
+              <div className="handover-meta-item">
+                <span className="handover-meta-label">พื้นที่ / ทีมปลายทาง</span>
+                <span className="handover-meta-value">{doc.destination_area}</span>
+              </div>
+            )}
+            {doc.recipient_name && (
+              <div className="handover-meta-item">
+                <span className="handover-meta-label">ผู้รับมอบ</span>
+                <span className="handover-meta-value">{doc.recipient_name}</span>
+              </div>
+            )}
+            {doc.note && (
+              <div className="handover-meta-item col-span-full">
+                <span className="handover-meta-label">หมายเหตุเอกสาร</span>
+                <span className="handover-meta-value font-normal">{doc.note}</span>
+              </div>
             )}
           </div>
 
-          <div className="max-h-80 overflow-y-auto rounded-xl border border-slate-200">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>#</TableHead>
-                  <TableHead>Serial Number</TableHead>
-                  <TableHead>ยี่ห้อ / รุ่น</TableHead>
-                  <TableHead>สถานะปัจจุบัน</TableHead>
-                  <TableHead>หมายเหตุ</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+          {movements.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-xs text-slate-500">
+              ไม่พบรายการเคลื่อนไหวในเอกสารฉบับนี้
+            </div>
+          ) : (
+            <>
+              {/* Mobile item cards (hidden on desktop and print) */}
+              <div className="grid gap-2 md:hidden print:hidden">
                 {movements.map((mv, idx) => (
-                  <TableRow key={mv.id}>
-                    <TableCell className="text-xs text-slate-500">{idx + 1}</TableCell>
-                    <TableCell className="font-mono text-xs font-bold">{mv.serial_number}</TableCell>
-                    <TableCell className="text-xs">{[mv.brand, mv.model_name].filter(Boolean).join(' ') || '—'}</TableCell>
-                    <TableCell>
+                  <article key={mv.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5">
+                      <span className="break-all font-mono font-bold text-slate-900">
+                        #{idx + 1} · {mv.serial_number}
+                      </span>
                       <Badge variant={getStockStatusMeta(mv.current_status).tone}>
                         {getStockStatusMeta(mv.current_status).label}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-slate-600">{mv.note || '—'}</TableCell>
-                  </TableRow>
+                    </div>
+                    <div className="mt-1.5 grid gap-0.5 text-[11.5px] text-slate-600">
+                      <span>ประเภท: {mv.unit_type === 'new_unit' ? 'เครื่องใหม่' : 'ซากเครื่องเดิม'} · เหตุการณ์: {getStockActionLabel(mv.action)}</span>
+                      <span>ยี่ห้อ/รุ่น: {[mv.brand, mv.model_name].filter(Boolean).join(' ') || '—'}</span>
+                      {mv.branch_code && <span>สาขา: {mv.branch_code} {mv.branch_name || ''}</span>}
+                      {mv.note && <span className="text-slate-700">หมายเหตุ: {mv.note}</span>}
+                    </div>
+                  </article>
                 ))}
-              </TableBody>
-            </Table>
+              </div>
+
+              {/* Desktop & A4 Print Table */}
+              <div className="table-wrap hidden md:block print:block">
+                <table className="handover-table">
+                  <thead>
+                    <tr>
+                      <th className="w-10">#</th>
+                      <th>Serial Number</th>
+                      <th>ประเภท</th>
+                      <th>ยี่ห้อ / รุ่น</th>
+                      <th>สาขาที่เชื่อมโยง</th>
+                      <th>สถานะปัจจุบัน</th>
+                      <th>หมายเหตุ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {movements.map((mv, idx) => (
+                      <tr key={mv.id}>
+                        <td className="text-slate-500">{idx + 1}</td>
+                        <td className="font-mono font-bold text-slate-900">{mv.serial_number}</td>
+                        <td>{mv.unit_type === 'new_unit' ? 'เครื่องใหม่' : 'ซากเครื่องเดิม'}</td>
+                        <td>{[mv.brand, mv.model_name].filter(Boolean).join(' ') || '—'}</td>
+                        <td>{mv.branch_code ? `${mv.branch_code} ${mv.branch_name || ''}`.trim() : '—'}</td>
+                        <td>{getStockStatusMeta(mv.current_status).label}</td>
+                        <td className="text-slate-600">{mv.note || getStockActionLabel(mv.action)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          <div className="handover-cert-note">
+            เอกสารฉบับนี้ออกโดยระบบควบคุมสต็อกกลาง (SYM Branch &amp; Asset Operations) เพื่อใช้ประกอบการตรวจนับ รับ-จ่าย และส่งมอบเครื่องสแกนบาร์โค้ดอย่างเป็นทางการ
+          </div>
+
+          <div className="handover-signatures-grid is-two-col">
+            <div className="handover-sig-box">
+              <div className="handover-sig-step">1. ผู้จัดทำ / ส่งมอบเอกสาร</div>
+              <div className="handover-sig-line">
+                <span className="handover-sig-empty">ลงชื่อ ....................................................</span>
+              </div>
+              <strong className="handover-sig-role">เจ้าหน้าที่คลัง / ผู้จัดทำ (SYM)</strong>
+              <span className="handover-sig-org">ผู้บันทึก: {doc.created_by}</span>
+              <span className="handover-sig-meta">วันที่: {formatStockDate(doc.created_at)}</span>
+            </div>
+
+            <div className="handover-sig-box">
+              <div className="handover-sig-step">2. ผู้รับมอบ / ตรวจรับเอกสาร</div>
+              <div className="handover-sig-line">
+                <span className="handover-sig-empty">ลงชื่อ ....................................................</span>
+              </div>
+              <strong className="handover-sig-role">{secondSignerRole}</strong>
+              <span className="handover-sig-org">
+                ชื่อผู้รับมอบ: {doc.recipient_name || doc.destination_area || '........................................'}
+              </span>
+              <span className="handover-sig-meta">วันที่: ____ / ____ / ________</span>
+            </div>
           </div>
         </div>
       </section>
