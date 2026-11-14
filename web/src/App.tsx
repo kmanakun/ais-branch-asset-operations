@@ -78,7 +78,7 @@ const pageCopy: Record<MenuKey, { title: string; subtitle: string }> = {
   completed: { title: 'ใบงานที่เสร็จแล้ว', subtitle: 'ดูงานที่ส่งมอบหรือปิดผลแล้ว พร้อมเปิดหลักฐานและประวัติย้อนหลัง' },
   discovery: { title: 'เครื่องนอกทะเบียน', subtitle: 'ตรวจรายการที่ช่างพบเพิ่ม โดยไม่ปะปนกับทะเบียนอุปกรณ์หลัก' },
   imports: { title: 'นำเข้าข้อมูล', subtitle: 'ตรวจสอบไฟล์ทะเบียนก่อนบันทึกเป็นชุดข้อมูลเดียว' },
-  people: { title: 'สิทธิ์ผู้ใช้งาน', subtitle: 'Admin Office ดูแลงานปฏิบัติการ ส่วนสิทธิ์ผู้ใช้และการตั้งค่าระบบเป็นคนละขอบเขต' },
+  people: { title: 'สิทธิ์ผู้ใช้งาน', subtitle: 'จัดการบัญชี Google และบทบาทผู้มีสิทธิ์เข้าใช้งานระบบ (Allowlist)' },
 }
 
 const ACTIVE_MENU_STORAGE_KEY = 'ais-branch-asset-operations:active-menu'
@@ -122,7 +122,7 @@ const statusPresentation: Record<string, { label: string; tone: string }> = {
   confirmed: { label: 'กำลังดำเนินการ', tone: 'progress' },
   in_progress: { label: 'กำลังดำเนินการ', tone: 'progress' },
   awaiting_admin_acceptance: { label: 'รอ SYM Admin ตรวจรับ', tone: 'blocked' },
-  awaiting_customer_acceptance: { label: 'รอ Gable ตรวจรับมอบ', tone: 'ready' },
+  awaiting_customer_acceptance: { label: 'รอ G-Able ตรวจรับมอบ', tone: 'ready' },
   awaiting_admin_exception_review: { label: 'Pending · รอ Admin ตรวจ', tone: 'blocked' },
   pending_exception: { label: 'Pending · รอ Admin พิจารณา', tone: 'blocked' },
   replaced: { label: 'เปลี่ยนเครื่องสำเร็จ', tone: 'done' },
@@ -214,7 +214,7 @@ function DevAuthBar({ currentEmail, onSwitch }: { currentEmail: string; onSwitch
         ช่างเทคนิค 2
       </button>
       <button type="button" className={`dev-auth-pill ${currentEmail === 'reviewer@gable.co.th' ? 'active' : ''}`} onClick={() => onSwitch('reviewer@gable.co.th')}>
-        Gable Reviewer
+        G-Able Reviewer
       </button>
       <button type="button" className={`dev-auth-pill ${currentEmail === 'viewer@ais.co.th' ? 'active' : ''}`} onClick={() => onSwitch('viewer@ais.co.th')}>
         AIS Viewer
@@ -448,18 +448,18 @@ function App() {
     if (!authError && !oauthError && !errorCode && !errorDescription) return
 
     const authErrorMessages: Record<string, string> = {
-      not_allowlisted: 'เข้าสู่ระบบ Google สำเร็จ แต่บัญชีอีเมลนี้ยังไม่ได้รับอนุญาตในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) กรุณาติดต่อ Identity Admin หรือลองบัญชี Google อื่น',
+      not_allowlisted: 'เข้าสู่ระบบ Google สำเร็จ แต่บัญชีอีเมลนี้ยังไม่อยู่ในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) กรุณาติดต่อผู้ดูแลระบบ (Admin) หรือลองบัญชี Google อื่น',
       unverified_email: 'บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล จึงไม่สามารถเข้าใช้งานระบบได้',
       access_denied: 'ยกเลิกการเข้าสู่ระบบด้วย Google',
       invalid_state: 'ลิงก์ยืนยันตัวตนหมดอายุหรือไม่ถูกต้อง กรุณากดเข้าสู่ระบบด้วย Google ใหม่อีกครั้ง',
       oauth_misconfigured: 'การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อผู้ดูแลระบบ',
       oauth_not_configured: 'ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / SESSION_SECRET บน Cloudflare Pages',
-      oauth_failed: 'Google Sign-In ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อ Identity Admin',
+      oauth_failed: 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อผู้ดูแลระบบ (Admin)',
     }
 
     setLoginError(
       (authError && authErrorMessages[authError]) ||
-        'Google Sign-In ไม่สำเร็จ บัญชีอาจยังไม่ได้รับอนุญาต หรือการตั้งค่า OAuth ยังไม่ครบ โปรดติดต่อ Identity Admin',
+        'เข้าสู่ระบบด้วย Google ไม่สำเร็จ บัญชีอาจยังไม่ได้รับอนุญาต หรือการตั้งค่าการยืนยันตัวตนยังไม่ครบ โปรดติดต่อผู้ดูแลระบบ (Admin)',
     )
     callbackUrl.searchParams.delete('auth_error')
     callbackUrl.searchParams.delete('error')
@@ -883,7 +883,7 @@ function App() {
     return (
       <>
         {authConfig.dev_auth_enabled && <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />}
-        <LoginPage onGoogleSignIn={() => void signInWithGoogle()} onDemo={() => setDemoMode(true)} onHelp={() => setLoginError('ใช้บัญชี Google ที่อยู่ในรายชื่อผู้มีสิทธิ์ หากยังเข้าไม่ได้โปรดติดต่อ Identity Admin')} error={loginError} configured={authConfig.mode !== 'misconfigured'} submitting={isSigningIn} />
+        <LoginPage onGoogleSignIn={() => void signInWithGoogle()} onDemo={() => setDemoMode(true)} onHelp={() => setLoginError('ใช้บัญชี Google ที่ได้รับอนุมัติในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) หากยังเข้าไม่ได้โปรดติดต่อผู้ดูแลระบบ (Admin)')} error={loginError} configured={authConfig.mode !== 'misconfigured'} submitting={isSigningIn} />
       </>
     )
   }
@@ -1121,7 +1121,7 @@ function LoginPage({ onGoogleSignIn, onDemo, onHelp, error, configured, submitti
       <div className="login-brand"><div className="brand-mark"><span>AIS</span></div><span>BRANCH & ASSET OPERATIONS</span></div>
       <div className="login-content">
         <div className="eyebrow">SCANNER REPLACEMENT PROGRAM</div>
-        <h1>จัดการงานเปลี่ยนเครื่อง<br /><em>ได้ในที่เดียว</em></h1>
+        <h1>จัดการงานเปลี่ยนเครื่อง <br /><em>ได้ในที่เดียว</em></h1>
         <p className="login-intro">เปิดใบงานแยกตามสาขา ให้ช่างทุกคนเห็นและบันทึกผล Onsite ได้ในที่เดียว</p>
         <div className="login-feature"><div><ClipboardList size={18} /></div><span>ติดตามใบงานตั้งแต่เปิดงานจนส่งมอบ</span></div>
         <div className="login-feature"><div><MapPin size={18} /></div><span>ค้นหาสาขาและอุปกรณ์จากทะเบียนกลาง</span></div>
@@ -1133,24 +1133,25 @@ function LoginPage({ onGoogleSignIn, onDemo, onHelp, error, configured, submitti
       <div className="login-card">
         <div className="login-icon"><LockKeyhole size={21} /></div>
         <h2>เข้าสู่ระบบ</h2>
-        <p>ใช้บัญชี Google ที่ Identity Admin อนุมัติไว้</p>
+        <p>ใช้บัญชี Google ที่ได้รับอนุมัติจากผู้ดูแลระบบ (Admin)</p>
         {error && <div className="form-error" role="alert">{error}</div>}
-        {!configured && <div className="config-note">ระบบยืนยันตัวตนยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ</div>}
+        {!configured && <div className="config-note">ระบบยืนยันตัวตนยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ (Admin)</div>}
         <button className="google-sign-in-button" type="button" onClick={onGoogleSignIn} disabled={submitting || !configured}>
           <GoogleMark />
           <span>{submitting ? 'กำลังเชื่อมต่อ Google…' : 'เข้าสู่ระบบด้วย Google'}</span>
         </button>
         <div className="login-separator"><span>หรือ</span></div>
-        <button className="demo-button" onClick={onDemo}><Activity size={17} /> ดูตัวอย่างระบบด้วยข้อมูลจำลอง</button>
-        <div className="privacy-note"><ShieldCheck size={15} /> อนุญาตเฉพาะอีเมลใน whitelist · โหมดตัวอย่างใช้ข้อมูลจำลอง</div>
+        <button className="demo-button" type="button" onClick={onDemo}><Activity size={17} /> ดูตัวอย่างระบบด้วยข้อมูลจำลอง</button>
+        <div className="privacy-note"><ShieldCheck size={15} className="shrink-0" /> <span>อนุญาตเฉพาะบัญชีใน Allowlist · โหมดตัวอย่างใช้ข้อมูลจำลอง</span></div>
       </div>
-      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={onHelp}>ติดต่อ Identity Admin</button></div>
+      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={onHelp}>ติดต่อผู้ดูแลระบบ (Admin)</button></div>
+      <div className="login-mobile-copyright">© 2026 AIS Branch &amp; Asset Operations · ระบบภายใน</div>
     </section>
   </div>
 }
 
 function NoAccess({ email, error, onSignOut, onRetry, retry = false }: { email: string; error: string; onSignOut: () => void; onRetry?: () => void; retry?: boolean }) {
-  return <div className="no-access"><div className="no-access-card"><div className="login-icon"><ShieldCheck size={22} /></div><div className="eyebrow">AIS BRANCH & ASSET OPERATIONS</div><h1>{retry ? 'ตรวจสอบสิทธิ์ไม่ได้' : 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน'}</h1><p>{retry ? email : `เข้าสู่ระบบสำเร็จด้วย ${email || 'บัญชีของคุณ'} แต่ยังไม่มีบทบาทที่ผู้ดูแลกำหนดไว้ โปรดติดต่อ Identity Admin`}</p>{error && <div className="form-error" role="alert">{error}</div>}{retry && onRetry && <button className="primary-button" onClick={onRetry}>ลองตรวจสอบอีกครั้ง</button>}<button className="secondary-button" onClick={onSignOut}><LogOut size={16} /> ออกจากระบบ</button></div></div>
+  return <div className="no-access"><div className="no-access-card"><div className="login-icon"><ShieldCheck size={22} /></div><div className="eyebrow">AIS BRANCH & ASSET OPERATIONS</div><h1>{retry ? 'ตรวจสอบสิทธิ์ไม่ได้' : 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน'}</h1><p>{retry ? email : `เข้าสู่ระบบสำเร็จด้วย ${email || 'บัญชีของคุณ'} แต่ยังไม่มีบทบาทที่กำหนดไว้ กรุณาติดต่อผู้ดูแลระบบ (Admin)`}</p>{error && <div className="form-error" role="alert">{error}</div>}{retry && onRetry && <button type="button" className="primary-button" onClick={onRetry}>ลองตรวจสอบอีกครั้ง</button>}<button type="button" className="secondary-button" onClick={onSignOut}><LogOut size={16} /> ออกจากระบบ</button></div></div>
 }
 
 function Overview({ demo, dashboard, error, onNavigate, role }: { demo: boolean; dashboard: DashboardData | null; error: string; onNavigate: (key: MenuKey, search?: string) => void; role?: string }) {
@@ -1190,7 +1191,7 @@ function Overview({ demo, dashboard, error, onNavigate, role }: { demo: boolean;
     <div className="welcome-strip">
       <div className="welcome-mark">{isCustomerReviewer ? <ShieldCheck size={20} /> : <Activity size={20} />}</div>
       <div>
-        <strong>{isCustomerReviewer ? 'งานรอตรวจรับมอบ Scanner (Gable Review)' : 'ติดตามความคืบหน้าการเปลี่ยน Scanner'}</strong>
+        <strong>{isCustomerReviewer ? 'งานรอตรวจรับมอบ Scanner (G-Able Review)' : 'ติดตามความคืบหน้าการเปลี่ยน Scanner'}</strong>
         <span>{isCustomerReviewer ? 'ตรวจสอบหลักฐานภาพถ่าย ลายเซ็นช่าง และลงนามรับมอบงานแบบรวมทั้งสาขา' : 'เลือกจังหวัด สาขา และเครื่องจากทะเบียน เพื่อดูรายละเอียดหรือเริ่มงานกับเครื่องนั้นได้ทันที'}</span>
       </div>
       <button onClick={() => onNavigate(isCustomerReviewer ? 'pending' : 'assets')}>
@@ -1334,11 +1335,30 @@ function Assets({ role, currentEmail, demo, items, loading, error, onRetry, onTa
         </label>
         <label className="asset-filter-field"><span>จังหวัด</span><select aria-label="กรองตามจังหวัด" value={provinceFilter} onChange={event => setProvinceFilter(event.target.value)}><option value="">ทุกจังหวัด</option>{provinceOptions.map(province => <option value={province} key={province}>{province}</option>)}</select></label>
         <label className="asset-filter-field"><span>สถานะงาน</span><select aria-label="กรองตามสถานะงาน" value={statusFilter} onChange={event => setStatusFilter(event.target.value)}><option value="all">ทุกสถานะ</option><option value="open">รอเปิดใบงาน</option><option value="on_process">On Process · กำลังดำเนินการ</option><option value="complete">Complete · เสร็จสมบูรณ์</option></select></label>
-        {(provinceFilter || statusFilter !== 'all' || search) && <Button type="button" variant="outline" className="asset-filter-reset h-10" onClick={() => { setProvinceFilter(''); setStatusFilter('all'); setSearch(''); setPage(0) }}>ล้างตัวกรอง</Button>}
-        {branchGroups.length > 0 && (
-          <Button type="button" variant="ghost" size="sm" onClick={toggleAllBranches} className="ml-auto whitespace-nowrap text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800">
-            {allBranchesExpanded ? 'ยุบทุกสาขา' : 'ขยายทุกสาขา'}
-          </Button>
+        {(provinceFilter || statusFilter !== 'all' || search || branchGroups.length > 0) && (
+          <div className="asset-toolbar-actions">
+            {(provinceFilter || statusFilter !== 'all' || search) && (
+              <Button
+                type="button"
+                variant="outline"
+                className="asset-filter-reset h-10"
+                onClick={() => { setProvinceFilter(''); setStatusFilter('all'); setSearch(''); setPage(0) }}
+              >
+                ล้างตัวกรอง
+              </Button>
+            )}
+            {branchGroups.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={toggleAllBranches}
+                className="asset-expand-all whitespace-nowrap text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+              >
+                {allBranchesExpanded ? 'ยุบทุกสาขา' : 'ขยายทุกสาขา'}
+              </Button>
+            )}
+          </div>
         )}
       </div>
       {focusMessage && <div className="detail-readonly-note" role="status">{focusMessage}</div>}
@@ -2050,11 +2070,11 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
       <section className="panel pending-review-panel">
         <div className="panel-heading">
           <div>
-            <h2>{isCustomerReviewer ? 'งานรอตรวจรับมอบ (Gable Customer Review)' : 'งานที่รอ SYM Admin ตรวจรับ'}</h2>
+            <h2>{isCustomerReviewer ? 'งานรอตรวจรับมอบ (G-Able Customer Review)' : 'งานที่รอ SYM Admin ตรวจรับ'}</h2>
             <p>
               {isCustomerReviewer
                 ? 'ตรวจรับงานที่ผ่านการตรวจสอบจาก SYM แล้วแบบรวมต่อสาขา (1 ลายเซ็นต่อ Shop)'
-                : 'ตรวจผลงาน Onsite รูปภาพ และลายเซ็นที่ช่างส่งมา ก่อนส่งมอบให้ Gable'}
+                : 'ตรวจผลงาน Onsite รูปภาพ และลายเซ็นที่ช่างส่งมา ก่อนส่งมอบให้ G-Able'}
             </p>
           </div>
           <span className="pending-review-count">
@@ -2074,10 +2094,12 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
               aria-label="ค้นหารายการ Pending"
             />
           </label>
-          <button type="submit" className="secondary-button">ค้นหา</button>
-          <button type="button" className="text-button" disabled={loading} onClick={() => setReload(r => r + 1)}>
-            รีเฟรช
-          </button>
+          <div className="pending-review-search-actions">
+            <button type="submit" className="secondary-button">ค้นหา</button>
+            <button type="button" className="text-button" disabled={loading} onClick={() => setReload(r => r + 1)}>
+              รีเฟรช
+            </button>
+          </div>
         </form>
 
         {actionError && !batchBranch && !rejectingTask && !selectedAdminTask && !viewingEvidenceTask && (
@@ -2186,7 +2208,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
               })}
             </div>
           ) : (
-            <EmptyState compact title="ไม่มีงานที่รอตรวจรับมอบ" detail="เมื่อ SYM Admin ตรวจรับงานแล้ว งานจะเข้ามาที่คิวตรวจรับของ Gable" />
+            <EmptyState compact title="ไม่มีงานที่รอตรวจรับมอบ" detail="เมื่อ SYM Admin ตรวจรับงานแล้ว งานจะเข้ามาที่คิวตรวจรับของ G-Able" />
           )
         ) : (
           tasks.length ? (
@@ -2231,7 +2253,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
         )}
       </section>
 
-      {/* Modal: Batch / Single Acceptance by Gable */}
+      {/* Modal: Batch / Single Acceptance by G-Able */}
       {batchBranch && (
         <div className="handover-modal-backdrop" onClick={() => { setBatchBranch(null); setActionError('') }}>
           <div className="handover-modal-content max-w-[600px]" onClick={e => e.stopPropagation()}>
@@ -2283,7 +2305,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
 
               <div className="mb-3">
                 <span className="mb-1.5 block text-[13px] font-semibold text-slate-800">
-                  ลายเซ็นผู้ตรวจรับมอบงาน (Gable Representative)
+                  ลายเซ็นผู้ตรวจรับมอบงาน (G-Able Representative)
                 </span>
                 <SignaturePad
                   ref={sigPadRef}
@@ -2604,8 +2626,8 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                         className="relative flex max-h-[94vh] max-w-[94vw] flex-col items-center justify-center"
                         onClick={e => e.stopPropagation()}
                       >
-                        <div className="mb-3 flex w-full items-center justify-between text-white">
-                          <div className="flex items-center gap-2">
+                        <div className="mb-3 flex w-full flex-wrap items-center justify-between gap-2 text-white">
+                          <div className="flex min-w-0 flex-wrap items-center gap-2">
                             <strong className="text-base">
                               {lightboxList[zoomedEvidenceIndex].title}
                             </strong>
@@ -2615,7 +2637,8 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                           </div>
                           <button
                             type="button"
-                            className="icon-button bg-white/20 text-white hover:bg-white/30 hover:text-white"
+                            className="icon-button shrink-0 bg-white/20 text-white hover:bg-white/30 hover:text-white"
+                            aria-label="ปิดหน้าต่างรูปภาพ"
                             onClick={() => setZoomedEvidenceIndex(null)}
                           >
                             <X size={18} />
@@ -2745,7 +2768,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                             disabled={submitting || isSelfActorForTask(selectedAdminTask)}
                             onClick={() => handleSymPass(selectedAdminTask)}
                           >
-                            <CheckCircle2 size={14} /> ตรวจผ่าน (ส่งต่อ Gable)
+                            <CheckCircle2 size={14} /> ตรวจผ่าน (ส่งต่อ G-Able)
                           </Button>
                         </>
                       ) : null}
@@ -3098,7 +3121,7 @@ function AssetDetailDialog({ asset, role, currentEmail, demo, onClose, onUpdated
                       <DetailField label="ผู้ปฏิบัติงาน" value={selectedHistoryTask.performed_by_name || 'ยังไม่มีผู้ปฏิบัติงานที่บันทึกผล'} />
                       <DetailField label="วันและเวลาที่ปฏิบัติงาน" value={formatDate(selectedHistoryTask.performed_at) || 'ยังไม่มีเวลาบันทึก'} />
                       <DetailField label="ตรวจรับโดย SYM Admin" value={selectedHistoryTask.admin_accepted_at ? `${String(selectedHistoryTask.admin_accepted_by || 'SYM Admin')} · ${formatDate(selectedHistoryTask.admin_accepted_at)}` : 'รอการตรวจรับ'} />
-                      <DetailField label="ตรวจรับมอบโดย Gable" value={selectedHistoryTask.customer_accepted_at ? `${String(selectedHistoryTask.customer_accepted_by || 'Gable Reviewer')} · ${formatDate(selectedHistoryTask.customer_accepted_at)}` : 'รอการตรวจรับมอบ'} />
+                      <DetailField label="ตรวจรับมอบโดย G-Able" value={selectedHistoryTask.customer_accepted_at ? `${String(selectedHistoryTask.customer_accepted_by || 'G-Able Reviewer')} · ${formatDate(selectedHistoryTask.customer_accepted_at)}` : 'รอการตรวจรับมอบ'} />
                       <DetailField label="เหตุผล/หมายเหตุ" value={[selectedHistoryTask.exception_reason, selectedHistoryTask.old_scanner_note, selectedHistoryTask.customer_reject_reason].map(value => String(value || '').trim()).filter(Boolean).join(' · ')} />
                     </div>
                   </section>
@@ -3362,7 +3385,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
                       )}
                     >
                       <div className="mb-1 flex items-center justify-between gap-2">
-                        <strong>{isSym ? 'ด่านที่ 1: SYM Admin ตรวจรับงาน' : 'ด่านที่ 2: Gable Customer ตรวจรับมอบ'}</strong>
+                        <strong>{isSym ? 'ด่านที่ 1: SYM Admin ตรวจรับงาน' : 'ด่านที่ 2: G-Able Customer ตรวจรับมอบ'}</strong>
                         <Badge variant={isPass ? 'done' : 'destructive'}>
                           {isPass ? '✔ ผ่านการตรวจรับ' : '✖ ปฏิเสธงาน / ส่งกลับช่าง'}
                         </Badge>
@@ -3584,7 +3607,7 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
         ['เริ่มงานเมื่อ', row => row.started_at || ''],
         ['ส่งปิดงานเมื่อ', row => row.closeout_submitted_at || ''],
         ['SYM ตรวจรับเมื่อ', row => row.admin_accepted_at || ''],
-        ['Gable ตรวจรับเมื่อ', row => row.customer_accepted_at || ''],
+        ['G-Able ตรวจรับเมื่อ', row => row.customer_accepted_at || ''],
       ]
       const csvCell = (input: unknown) => {
         let value = String(input ?? '').replaceAll('\r\n', '\n').replaceAll('\r', '\n')
@@ -3821,7 +3844,7 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
   const roleLabels: Record<string, { label: string; tone: string }> = {
     admin: { label: 'Admin Office', tone: 'ready' },
     field_technician: { label: 'ช่าง Onsite', tone: 'done' },
-    customer_reviewer: { label: 'Gable Reviewer', tone: 'progress' },
+    customer_reviewer: { label: 'G-Able Reviewer', tone: 'progress' },
     viewer: { label: 'Viewer', tone: 'neutral' },
   }
 
@@ -3848,60 +3871,104 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
         ) : error ? (
           <EmptyState compact title="โหลดรายชื่อไม่สำเร็จ" detail={error} onRetry={() => setReload(r => r + 1)} />
         ) : (
-          <div className="mb-6 overflow-x-auto">
-            <table className="summary-table w-full text-[13px]">
-              <thead>
-                <tr>
-                  <th className="text-left">อีเมล (Google Account)</th>
-                  <th className="text-left">ชื่อ-นามสกุล</th>
-                  <th className="text-left">บทบาท (Role)</th>
-                  <th className="text-center">สถานะ</th>
-                  {isAdmin && <th className="text-right">การจัดการ</th>}
-                </tr>
-              </thead>
-              <tbody>
-                {users.map(u => {
-                  const rolePres = roleLabels[u.role] || { label: u.role, tone: 'neutral' }
-                  const isCurrent = u.email.trim().toLowerCase() === String(currentEmail || '').trim().toLowerCase()
-                  const isToggling = togglingUserId === u.id
-                  return (
-                    <tr key={u.id} className={u.is_active ? 'opacity-100' : 'opacity-60'}>
-                      <td>
-                        <strong>{u.email}</strong>
-                        {isCurrent && <span className="ml-1.5 text-[11px] font-semibold text-emerald-600">(คุณ)</span>}
-                      </td>
-                      <td>{u.full_name || '—'}</td>
-                      <td>
-                        <StatusPill label={rolePres.label} tone={rolePres.tone} />
-                      </td>
-                      <td className="text-center">
-                        <Badge variant={u.is_active ? 'done' : 'neutral'}>
-                          {u.is_active ? 'เปิดใช้งาน' : 'ระงับชั่วคราว'}
-                        </Badge>
-                      </td>
-                      {isAdmin && (
-                        <td className="text-right">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className={cn(
-                              'text-xs font-semibold',
-                              isCurrent ? 'text-slate-400' : u.is_active ? 'text-red-700 hover:bg-red-50 hover:text-red-800' : 'text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800',
-                            )}
-                            disabled={isCurrent || Boolean(togglingUserId)}
-                            onClick={() => handleToggleActive(u)}
-                          >
-                            {isToggling ? 'กำลังบันทึก…' : u.is_active ? 'ระงับสิทธิ์' : 'เปิดสิทธิ์'}
-                          </Button>
+          <>
+            <div className="people-table-wrap mb-6 overflow-x-auto">
+              <table className="summary-table w-full text-[13px]">
+                <thead>
+                  <tr>
+                    <th className="text-left">อีเมล (Google Account)</th>
+                    <th className="text-left">ชื่อ-นามสกุล</th>
+                    <th className="text-left">บทบาท (Role)</th>
+                    <th className="text-center">สถานะ</th>
+                    {isAdmin && <th className="text-right">การจัดการ</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map(u => {
+                    const rolePres = roleLabels[u.role] || { label: u.role, tone: 'neutral' }
+                    const isCurrent = u.email.trim().toLowerCase() === String(currentEmail || '').trim().toLowerCase()
+                    const isToggling = togglingUserId === u.id
+                    return (
+                      <tr key={u.id} className={u.is_active ? 'opacity-100' : 'opacity-60'}>
+                        <td>
+                          <strong>{u.email}</strong>
+                          {isCurrent && <span className="ml-1.5 text-[11px] font-semibold text-emerald-600">(คุณ)</span>}
                         </td>
+                        <td>{u.full_name || '—'}</td>
+                        <td>
+                          <StatusPill label={rolePres.label} tone={rolePres.tone} />
+                        </td>
+                        <td className="text-center">
+                          <Badge variant={u.is_active ? 'done' : 'neutral'}>
+                            {u.is_active ? 'เปิดใช้งาน' : 'ระงับชั่วคราว'}
+                          </Badge>
+                        </td>
+                        {isAdmin && (
+                          <td className="text-right">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className={cn(
+                                'text-xs font-semibold',
+                                isCurrent ? 'text-slate-400' : u.is_active ? 'text-red-700 hover:bg-red-50 hover:text-red-800' : 'text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800',
+                              )}
+                              disabled={isCurrent || Boolean(togglingUserId)}
+                              onClick={() => handleToggleActive(u)}
+                            >
+                              {isToggling ? 'กำลังบันทึก…' : u.is_active ? 'ระงับสิทธิ์' : 'เปิดสิทธิ์'}
+                            </Button>
+                          </td>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="people-mobile-list mb-6">
+              {users.map(u => {
+                const rolePres = roleLabels[u.role] || { label: u.role, tone: 'neutral' }
+                const isCurrent = u.email.trim().toLowerCase() === String(currentEmail || '').trim().toLowerCase()
+                const isToggling = togglingUserId === u.id
+                return (
+                  <article key={u.id} className={cn('people-mobile-card', !u.is_active && 'opacity-65')}>
+                    <div className="people-mobile-card-top">
+                      <div className="min-w-0 flex-1">
+                        <strong className="block break-all text-[13.5px] font-bold text-slate-900">
+                          {u.email}
+                          {isCurrent && <span className="ml-1.5 text-[11px] font-semibold text-emerald-600">(คุณ)</span>}
+                        </strong>
+                        <span className="mt-0.5 block text-xs text-slate-500">{u.full_name || 'ไม่ได้ระบุชื่อ'}</span>
+                      </div>
+                      <Badge variant={u.is_active ? 'done' : 'neutral'} className="shrink-0">
+                        {u.is_active ? 'เปิดใช้งาน' : 'ระงับชั่วคราว'}
+                      </Badge>
+                    </div>
+                    <div className="people-mobile-card-foot">
+                      <StatusPill label={rolePres.label} tone={rolePres.tone} />
+                      {isAdmin && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className={cn(
+                            'h-9 px-3 text-xs font-semibold',
+                            isCurrent ? 'text-slate-400' : u.is_active ? 'border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800',
+                          )}
+                          disabled={isCurrent || Boolean(togglingUserId)}
+                          onClick={() => handleToggleActive(u)}
+                        >
+                          {isToggling ? 'กำลังบันทึก…' : u.is_active ? 'ระงับสิทธิ์' : 'เปิดสิทธิ์'}
+                        </Button>
                       )}
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </>
         )}
 
         {/* ฟอร์มเพิ่มผู้ใช้งาน (สำหรับ Admin) */}
@@ -3945,14 +4012,14 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
                 >
                   <option value="field_technician">ช่าง Onsite (Field Technician)</option>
                   <option value="admin">Admin ประจำ Office</option>
-                  <option value="customer_reviewer">Gable Customer Reviewer</option>
+                  <option value="customer_reviewer">G-Able Customer Reviewer</option>
                   <option value="viewer">Viewer (ดูได้อย่างเดียว)</option>
                 </select>
               </label>
               <Button
                 type="submit"
                 disabled={submitting}
-                className="h-10"
+                className="h-10 w-full sm:w-auto"
               >
                 {submitting ? 'กำลังบันทึก…' : 'เพิ่มผู้ใช้งาน'}
               </Button>

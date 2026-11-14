@@ -257,7 +257,7 @@ export function BarcodeScannerModal({
               <h2 id="scanner-modal-title" className="m-0 text-base font-bold text-slate-900">
                 {title}
               </h2>
-              <small className="block truncate text-xs text-slate-500">{subtitle}</small>
+              <small className="mt-0.5 block text-xs leading-snug text-slate-500">{subtitle}</small>
             </div>
           </div>
           <button
