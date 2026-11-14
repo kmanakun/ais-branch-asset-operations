@@ -148,6 +148,6 @@ npm run test:all     # รันชุดทดสอบทั้งหมดร
 
 ### 7.2 การสำรองและกู้คืนระบบ (Disaster Recovery)
 * ดำเนินการตาม [recovery-runbook.md](recovery-runbook.md)
-* สำรองข้อมูลด้วย Supabase CLI (`db dump` แยก Roles, Schema, Data)
+* สำรองข้อมูล Cloudflare D1 และ R2 ด้วย `web/scripts/backup-d1-production.ps1` และ `web/scripts/backup-r2-evidence.mjs`
 * เข้ารหัสไฟล์สำรองด้วย **7-Zip AES-256** ก่อนซิงค์ไปเก็บใน OneDrive โดยไม่มีค่าใช้จ่ายเพิ่มเติม
 * ทำการซ้อมกู้คืนข้อมูลบนฐานข้อมูลจำลอง (Isolated Restore Drill) เป็นระยะเพื่อยืนยันความพร้อม

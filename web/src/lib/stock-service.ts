@@ -168,6 +168,64 @@ export async function runBatchChunks(
   }
 }
 
+async function runBatchChunksWithResults(
+  db: StockD1Database,
+  statements: StockD1PreparedStatement[],
+  chunkSize = 150
+): Promise<StockD1StatementResult[]> {
+  const results: StockD1StatementResult[] = []
+  for (const chunk of chunkArray(statements, chunkSize)) {
+    if (chunk.length > 0) {
+      const chunkRes = await db.batch(chunk)
+      results.push(...chunkRes)
+    }
+  }
+  return results
+}
+
+/**
+ * Commits a stock document and its optimistic-locked item updates atomically,
+ * removing the header document if concurrent callers already updated every item
+ * and recording movements strictly for items that actually won the version lock.
+ */
+async function commitOptimisticStockDocumentBatch(
+  db: StockD1Database,
+  params: {
+    docId: string
+    docInsertStmt: StockD1PreparedStatement
+    items: StockItemRow[]
+    buildUpdateStmt: (item: StockItemRow) => StockD1PreparedStatement
+    buildMovementStmt: (item: StockItemRow) => StockD1PreparedStatement
+    conflictMessage: string
+  }
+): Promise<{ ok: true; committedCount: number; totalRequested: number } | { ok: false; status: 409; error: string }> {
+  const { docId, docInsertStmt, items, buildUpdateStmt, buildMovementStmt, conflictMessage } = params
+  const updateStmts = items.map(buildUpdateStmt)
+  const batch1Results = await runBatchChunksWithResults(db, [docInsertStmt, ...updateStmts], 150)
+
+  const wonItems: StockItemRow[] = []
+  for (let i = 0; i < items.length; i++) {
+    if ((batch1Results[i + 1]?.meta?.changes || 0) === 1) {
+      wonItems.push(items[i])
+    }
+  }
+
+  if (wonItems.length === 0) {
+    await db.prepare('DELETE FROM stock_documents WHERE id = ?').bind(docId).run()
+    return { ok: false, status: 409, error: conflictMessage }
+  }
+
+  const followupStmts: StockD1PreparedStatement[] = wonItems.map(buildMovementStmt)
+  if (wonItems.length < items.length) {
+    followupStmts.unshift(
+      db.prepare('UPDATE stock_documents SET item_count = ? WHERE id = ?').bind(wonItems.length, docId)
+    )
+  }
+  await runBatchChunks(db, followupStmts, 150)
+
+  return { ok: true, committedCount: wonItems.length, totalRequested: items.length }
+}
+
 function cleanOptionalText(value: unknown, maxLength: number): string | null {
   const text = String(value ?? '').replace(/[\x00-\x1F\x7F]/g, '').trim()
   if (!text) return null
@@ -531,7 +589,38 @@ export async function prepareCloseoutStockPlan(
       )
     }
 
-    return { ok: true, itemStatements, movementStatements, sourceMode: null }
+    const raceClauses: string[] = []
+    const raceBinds: unknown[] = []
+    if (previousAllocatedNew) {
+      raceClauses.push(
+        `EXISTS (SELECT 1 FROM stock_items si WHERE si.id = ? AND si.version = ? AND si.status = 'allocated_to_task' AND si.linked_task_id = ?)`
+      )
+      raceBinds.push(previousAllocatedNew.id, previousAllocatedNew.version, taskId)
+    } else {
+      raceClauses.push(
+        `NOT EXISTS (SELECT 1 FROM stock_items si WHERE si.linked_task_id = replacement_tasks.id AND si.unit_type = 'new_unit' AND si.status = 'allocated_to_task')`
+      )
+    }
+    if (oldAssetStock) {
+      raceClauses.push(
+        `EXISTS (SELECT 1 FROM stock_items si WHERE si.id = ? AND si.version = ? AND si.status = ?)`
+      )
+      raceBinds.push(oldAssetStock.id, oldAssetStock.version, oldAssetStock.status)
+    } else if (oldComSn) {
+      raceClauses.push(
+        `NOT EXISTS (SELECT 1 FROM stock_items si WHERE si.serial_number = ?)`
+      )
+      raceBinds.push(normalizeSerialInput(oldComSn))
+    }
+
+    return {
+      ok: true,
+      taskRaceGuardSql: raceClauses.join(' AND '),
+      taskRaceGuardBinds: raceBinds,
+      itemStatements,
+      movementStatements,
+      sourceMode: null,
+    }
   }
 
   // Case B: Replaced outcome
@@ -846,8 +935,8 @@ export async function prepareCloseoutStockPlan(
     }
   }
 
-  const taskRaceGuardSql = `
-    NOT EXISTS (
+  const raceClauses: string[] = [
+    `NOT EXISTS (
       SELECT 1 FROM stock_items si
       WHERE si.serial_number = ?
         AND (
@@ -855,13 +944,51 @@ export async function prepareCloseoutStockPlan(
           OR si.status IN ('installed', 'doa_defective')
           OR (si.status = 'allocated_to_task' AND si.linked_task_id != replacement_tasks.id)
         )
+    )`,
+  ]
+  const raceBinds: unknown[] = [cleanNewSn]
+
+  if (previousAllocatedNew && previousAllocatedNew.serial_number !== cleanNewSn) {
+    raceClauses.push(
+      `EXISTS (SELECT 1 FROM stock_items si WHERE si.id = ? AND si.version = ? AND si.status = 'allocated_to_task' AND si.linked_task_id = ?)`
     )
-  `
+    raceBinds.push(previousAllocatedNew.id, previousAllocatedNew.version, taskId)
+  } else if (!previousAllocatedNew) {
+    raceClauses.push(
+      `NOT EXISTS (SELECT 1 FROM stock_items si WHERE si.linked_task_id = replacement_tasks.id AND si.unit_type = 'new_unit' AND si.status = 'allocated_to_task')`
+    )
+  }
+
+  if (targetStock) {
+    raceClauses.push(
+      `EXISTS (SELECT 1 FROM stock_items si WHERE si.id = ? AND si.version = ? AND si.status = ?)`
+    )
+    raceBinds.push(targetStock.id, targetStock.version, targetStock.status)
+  } else {
+    raceClauses.push(
+      `NOT EXISTS (SELECT 1 FROM stock_items si WHERE si.serial_number = ?)`
+    )
+    raceBinds.push(cleanNewSn)
+  }
+
+  if (cleanOldComSn) {
+    if (oldAssetStock) {
+      raceClauses.push(
+        `EXISTS (SELECT 1 FROM stock_items si WHERE si.id = ? AND si.version = ? AND si.status = ?)`
+      )
+      raceBinds.push(oldAssetStock.id, oldAssetStock.version, oldAssetStock.status)
+    } else {
+      raceClauses.push(
+        `NOT EXISTS (SELECT 1 FROM stock_items si WHERE si.serial_number = ?)`
+      )
+      raceBinds.push(cleanOldComSn)
+    }
+  }
 
   return {
     ok: true,
-    taskRaceGuardSql,
-    taskRaceGuardBinds: [cleanNewSn],
+    taskRaceGuardSql: raceClauses.join(' AND '),
+    taskRaceGuardBinds: raceBinds,
     itemStatements,
     movementStatements,
     sourceMode: resolvedSourceMode,
@@ -913,9 +1040,11 @@ export async function prepareCustomerAcceptStockStatements(
 ): Promise<{
   itemStatements: StockD1PreparedStatement[]
   movementStatements: StockD1PreparedStatement[]
+  movementEntries: Array<{ taskId: string; statement: StockD1PreparedStatement }>
 }> {
   const itemStatements: StockD1PreparedStatement[] = []
   const movementStatements: StockD1PreparedStatement[] = []
+  const movementEntries: Array<{ taskId: string; statement: StockD1PreparedStatement }> = []
   for (const chunk of chunkArray(params.taskIds, 50)) {
     const placeholders = chunk.map(() => '?').join(', ')
     const allocated = await db
@@ -938,24 +1067,30 @@ export async function prepareCustomerAcceptStockStatements(
             updated_by = ?,
             version = version + 1,
             updated_at = datetime('now')
-          WHERE id = ? AND status = 'allocated_to_task' AND version = ?
-        `).bind(params.actorEmail, item.id, item.version)
+          WHERE id = ?
+            AND status = 'allocated_to_task'
+            AND version = ?
+            AND EXISTS (
+              SELECT 1 FROM replacement_tasks rt
+              WHERE rt.id = ? AND rt.status = 'delivered'
+            )
+        `).bind(params.actorEmail, item.id, item.version, item.linked_task_id)
       )
-      movementStatements.push(
-        buildMovementInsert(db, {
-          stockItemId: item.id,
-          taskId: item.linked_task_id,
-          branchId: item.linked_branch_id,
-          action: 'installed',
-          fromStatus: 'allocated_to_task',
-          toStatus: 'installed',
-          actorEmail: params.actorEmail,
-          note: 'ผ่านตรวจรับ G-Able ส่งมอบติดตั้งถาวร',
-        })
-      )
+      const movementStmt = buildMovementInsert(db, {
+        stockItemId: item.id,
+        taskId: item.linked_task_id,
+        branchId: item.linked_branch_id,
+        action: 'installed',
+        fromStatus: 'allocated_to_task',
+        toStatus: 'installed',
+        actorEmail: params.actorEmail,
+        note: 'ผ่านตรวจรับ G-Able ส่งมอบติดตั้งถาวร',
+      })
+      movementStatements.push(movementStmt)
+      movementEntries.push({ taskId: item.linked_task_id, statement: movementStmt })
     }
   }
-  return { itemStatements, movementStatements }
+  return { itemStatements, movementStatements, movementEntries }
 }
 
 /**
@@ -973,6 +1108,8 @@ export async function prepareCancelTaskStockPlan(
   ok: boolean
   status?: number
   error?: string
+  taskRaceGuardSql?: string
+  taskRaceGuardBinds?: unknown[]
   itemStatements?: StockD1PreparedStatement[]
   movementStatements?: StockD1PreparedStatement[]
 }> {
@@ -999,10 +1136,24 @@ export async function prepareCancelTaskStockPlan(
     binds: [taskId, expectedNextTaskVersion],
   }
 
+  const raceClauses: string[] = [
+    `NOT EXISTS (
+      SELECT 1 FROM stock_items si
+      WHERE si.linked_task_id = replacement_tasks.id
+        AND si.unit_type = 'old_removed'
+        AND si.status IN ('returned_to_warehouse', 'handed_over_to_customer')
+    )`,
+  ]
+  const raceBinds: unknown[] = []
+
   const itemStatements: StockD1PreparedStatement[] = []
   const movementStatements: StockD1PreparedStatement[] = []
   for (const item of linked) {
     if (item.unit_type === 'new_unit' && item.status === 'allocated_to_task') {
+      raceClauses.push(
+        `EXISTS (SELECT 1 FROM stock_items si WHERE si.id = ? AND si.version = ? AND si.status = 'allocated_to_task' AND si.linked_task_id = ?)`
+      )
+      raceBinds.push(item.id, item.version, taskId)
       const rel = buildReleaseOrVoidPairs(
         db,
         item,
@@ -1015,6 +1166,10 @@ export async function prepareCancelTaskStockPlan(
       itemStatements.push(...rel.itemStatements)
       movementStatements.push(...rel.movementStatements)
     } else if (item.unit_type === 'old_removed' && item.status === 'removed_onsite') {
+      raceClauses.push(
+        `EXISTS (SELECT 1 FROM stock_items si WHERE si.id = ? AND si.version = ? AND si.status = 'removed_onsite' AND si.linked_task_id = ?)`
+      )
+      raceBinds.push(item.id, item.version, taskId)
       itemStatements.push(
         db.prepare(`
           UPDATE stock_items SET
@@ -1041,7 +1196,13 @@ export async function prepareCancelTaskStockPlan(
     }
   }
 
-  return { ok: true, itemStatements, movementStatements }
+  return {
+    ok: true,
+    taskRaceGuardSql: raceClauses.join(' AND '),
+    taskRaceGuardBinds: raceBinds,
+    itemStatements,
+    movementStatements,
+  }
 }
 
 /**
@@ -1901,7 +2062,14 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       }
     }
 
-    await runBatchChunks(c.env.DB, statements, 150)
+    try {
+      await runBatchChunks(c.env.DB, statements, 150)
+    } catch (err) {
+      if (/UNIQUE constraint failed/i.test(String((err as any)?.message || err || ''))) {
+        return c.json({ error: 'มีรายการ SN ในชุดนี้ถูกนำเข้าหรือเปลี่ยนแปลงจากหน้าจออื่นแล้ว กรุณากด Preview ตรวจสอบใหม่' }, 409)
+      }
+      throw err
+    }
 
     return c.json({
       success: true,
@@ -1988,15 +2156,14 @@ export function createStockRouter(): Hono<StockRouterEnv> {
 
     const docId = makeStockUniqueId('sdoc')
     const docCode = makeStockDocCode('DSP')
-    const statements: StockD1PreparedStatement[] = [
-      c.env.DB.prepare(`
+    const committed = await commitOptimisticStockDocumentBatch(c.env.DB, {
+      docId,
+      docInsertStmt: c.env.DB.prepare(`
         INSERT INTO stock_documents (id, doc_code, doc_type, destination_area, note, item_count, created_by)
         VALUES (?, ?, 'dispatch', ?, ?, ?, ?)
       `).bind(docId, docCode, dispatchArea, note, eligible.length, user.email),
-    ]
-
-    for (const item of eligible) {
-      statements.push(
+      items: eligible,
+      buildUpdateStmt: item =>
         c.env.DB.prepare(`
           UPDATE stock_items SET
             status = 'dispatched',
@@ -2009,6 +2176,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
             updated_at = datetime('now')
           WHERE id = ? AND status IN ('in_warehouse', 'dispatched') AND version = ?
         `).bind(docId, dispatchArea, note, user.email, item.id, item.version),
+      buildMovementStmt: item =>
         buildMovementInsert(c.env.DB, {
           stockItemId: item.id,
           docId,
@@ -2017,19 +2185,21 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           toStatus: 'dispatched',
           actorEmail: user.email,
           note: note || `เบิกกระจายไปยัง ${dispatchArea} (${docCode})`,
-        })
-      )
-    }
+        }),
+      conflictMessage: 'ข้อมูลสต็อกถูกแก้ไขจากรายการอื่นแล้ว กรุณาค้นหาและลองเบิกกระจายใหม่อีกครั้ง',
+    })
 
-    await runBatchChunks(c.env.DB, statements, 150)
+    if (!committed.ok) {
+      return c.json({ error: committed.error }, 409)
+    }
 
     return c.json({
       success: true,
       doc_id: docId,
       doc_code: docCode,
-      count: eligible.length,
+      count: committed.committedCount,
       dispatch_area: dispatchArea,
-      message: `เบิกกระจาย ${eligible.length} เครื่องไปยัง ${dispatchArea} เรียบร้อย (${docCode})`,
+      message: `เบิกกระจาย ${committed.committedCount} เครื่องไปยัง ${dispatchArea} เรียบร้อย (${docCode})`,
     })
   })
 
@@ -2060,15 +2230,14 @@ export function createStockRouter(): Hono<StockRouterEnv> {
 
     const docId = makeStockUniqueId('sdoc')
     const docCode = makeStockDocCode('ADJ')
-    const statements: StockD1PreparedStatement[] = [
-      c.env.DB.prepare(`
+    const committed = await commitOptimisticStockDocumentBatch(c.env.DB, {
+      docId,
+      docInsertStmt: c.env.DB.prepare(`
         INSERT INTO stock_documents (id, doc_code, doc_type, destination_area, note, item_count, created_by)
         VALUES (?, ?, 'adjustment', 'คลังกลาง SYM', ?, ?, ?)
       `).bind(docId, docCode, note, eligible.length, user.email),
-    ]
-
-    for (const item of eligible) {
-      statements.push(
+      items: eligible,
+      buildUpdateStmt: item =>
         c.env.DB.prepare(`
           UPDATE stock_items SET
             status = 'in_warehouse',
@@ -2080,6 +2249,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
             updated_at = datetime('now')
           WHERE id = ? AND status = 'dispatched' AND version = ?
         `).bind(user.email, item.id, item.version),
+      buildMovementStmt: item =>
         buildMovementInsert(c.env.DB, {
           stockItemId: item.id,
           docId,
@@ -2088,18 +2258,20 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           toStatus: 'in_warehouse',
           actorEmail: user.email,
           note: `${note} (${docCode})`,
-        })
-      )
-    }
+        }),
+      conflictMessage: 'ข้อมูลสต็อกถูกแก้ไขจากรายการอื่นแล้ว กรุณาค้นหาและลองรับคืนคลังใหม่อีกครั้ง',
+    })
 
-    await runBatchChunks(c.env.DB, statements, 150)
+    if (!committed.ok) {
+      return c.json({ error: committed.error }, 409)
+    }
 
     return c.json({
       success: true,
       doc_id: docId,
       doc_code: docCode,
-      count: eligible.length,
-      message: `ดึงเครื่องใหม่กลับเข้าคลังกลาง ${eligible.length} เครื่องสำเร็จ (${docCode})`,
+      count: committed.committedCount,
+      message: `ดึงเครื่องใหม่กลับเข้าคลังกลาง ${committed.committedCount} เครื่องสำเร็จ (${docCode})`,
     })
   })
 
@@ -2134,15 +2306,14 @@ export function createStockRouter(): Hono<StockRouterEnv> {
 
     const docId = makeStockUniqueId('sdoc')
     const docCode = makeStockDocCode('DOA')
-    const statements: StockD1PreparedStatement[] = [
-      c.env.DB.prepare(`
+    const committed = await commitOptimisticStockDocumentBatch(c.env.DB, {
+      docId,
+      docInsertStmt: c.env.DB.prepare(`
         INSERT INTO stock_documents (id, doc_code, doc_type, note, item_count, created_by)
         VALUES (?, ?, 'doa_claim', ?, ?, ?)
       `).bind(docId, docCode, note, eligible.length, user.email),
-    ]
-
-    for (const item of eligible) {
-      statements.push(
+      items: eligible,
+      buildUpdateStmt: item =>
         c.env.DB.prepare(`
           UPDATE stock_items SET
             status = 'doa_defective',
@@ -2152,6 +2323,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
             updated_at = datetime('now')
           WHERE id = ? AND status IN ('in_warehouse', 'dispatched') AND version = ?
         `).bind(note, user.email, item.id, item.version),
+      buildMovementStmt: item =>
         buildMovementInsert(c.env.DB, {
           stockItemId: item.id,
           docId,
@@ -2160,18 +2332,20 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           toStatus: 'doa_defective',
           actorEmail: user.email,
           note: `แจ้งเสีย DOA: ${note} (${docCode})`,
-        })
-      )
-    }
+        }),
+      conflictMessage: 'ข้อมูลสต็อกถูกแก้ไขจากรายการอื่นแล้ว กรุณาค้นหาและลองแจ้งเสีย DOA ใหม่อีกครั้ง',
+    })
 
-    await runBatchChunks(c.env.DB, statements, 150)
+    if (!committed.ok) {
+      return c.json({ error: committed.error }, 409)
+    }
 
     return c.json({
       success: true,
       doc_id: docId,
       doc_code: docCode,
-      count: eligible.length,
-      message: `บันทึกสถานะ DOA ${eligible.length} เครื่องสำเร็จ (${docCode})`,
+      count: committed.committedCount,
+      message: `บันทึกสถานะ DOA ${committed.committedCount} เครื่องสำเร็จ (${docCode})`,
     })
   })
 
@@ -2202,15 +2376,14 @@ export function createStockRouter(): Hono<StockRouterEnv> {
 
     const docId = makeStockUniqueId('sdoc')
     const docCode = makeStockDocCode('ADJ')
-    const statements: StockD1PreparedStatement[] = [
-      c.env.DB.prepare(`
+    const committed = await commitOptimisticStockDocumentBatch(c.env.DB, {
+      docId,
+      docInsertStmt: c.env.DB.prepare(`
         INSERT INTO stock_documents (id, doc_code, doc_type, destination_area, note, item_count, created_by)
         VALUES (?, ?, 'adjustment', 'คลังกลาง SYM', ?, ?, ?)
       `).bind(docId, docCode, note, eligible.length, user.email),
-    ]
-
-    for (const item of eligible) {
-      statements.push(
+      items: eligible,
+      buildUpdateStmt: item =>
         c.env.DB.prepare(`
           UPDATE stock_items SET
             status = 'in_warehouse',
@@ -2223,6 +2396,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
             updated_at = datetime('now')
           WHERE id = ? AND status = 'doa_defective' AND version = ?
         `).bind(note, user.email, item.id, item.version),
+      buildMovementStmt: item =>
         buildMovementInsert(c.env.DB, {
           stockItemId: item.id,
           docId,
@@ -2231,18 +2405,20 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           toStatus: 'in_warehouse',
           actorEmail: user.email,
           note: `${note} (${docCode})`,
-        })
-      )
-    }
+        }),
+      conflictMessage: 'ข้อมูลสต็อก DOA ถูกแก้ไขจากรายการอื่นแล้ว กรุณาค้นหาและลองใหม่อีกครั้ง',
+    })
 
-    await runBatchChunks(c.env.DB, statements, 150)
+    if (!committed.ok) {
+      return c.json({ error: committed.error }, 409)
+    }
 
     return c.json({
       success: true,
       doc_id: docId,
       doc_code: docCode,
-      count: eligible.length,
-      message: `รับเครื่องจากสถานะ DOA กลับเข้าคลังกลาง ${eligible.length} เครื่องสำเร็จ (${docCode})`,
+      count: committed.committedCount,
+      message: `รับเครื่องจากสถานะ DOA กลับเข้าคลังกลาง ${committed.committedCount} เครื่องสำเร็จ (${docCode})`,
     })
   })
 
@@ -2273,15 +2449,14 @@ export function createStockRouter(): Hono<StockRouterEnv> {
 
     const docId = makeStockUniqueId('sdoc')
     const docCode = makeStockDocCode('RET')
-    const statements: StockD1PreparedStatement[] = [
-      c.env.DB.prepare(`
+    const committed = await commitOptimisticStockDocumentBatch(c.env.DB, {
+      docId,
+      docInsertStmt: c.env.DB.prepare(`
         INSERT INTO stock_documents (id, doc_code, doc_type, note, item_count, created_by)
         VALUES (?, ?, 'return_in', ?, ?, ?)
       `).bind(docId, docCode, note, eligible.length, user.email),
-    ]
-
-    for (const item of eligible) {
-      statements.push(
+      items: eligible,
+      buildUpdateStmt: item =>
         c.env.DB.prepare(`
           UPDATE stock_items SET
             status = 'returned_to_warehouse',
@@ -2293,6 +2468,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
             updated_at = datetime('now')
           WHERE id = ? AND status = 'removed_onsite' AND version = ?
         `).bind(docId, note, user.email, item.id, item.version),
+      buildMovementStmt: item =>
         buildMovementInsert(c.env.DB, {
           stockItemId: item.id,
           docId,
@@ -2303,18 +2479,20 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           toStatus: 'returned_to_warehouse',
           actorEmail: user.email,
           note: note || `คลังกลาง SYM รับซากเครื่องเดิมเข้าคลัง (${docCode})`,
-        })
-      )
-    }
+        }),
+      conflictMessage: 'รายการรับคืนซากถูกบันทึกจากหน้าจออื่นแล้ว กรุณาค้นหาและลองใหม่อีกครั้ง',
+    })
 
-    await runBatchChunks(c.env.DB, statements, 150)
+    if (!committed.ok) {
+      return c.json({ error: committed.error }, 409)
+    }
 
     return c.json({
       success: true,
       doc_id: docId,
       doc_code: docCode,
-      count: eligible.length,
-      message: `ยืนยันรับซากเครื่องเดิมเข้าคลัง ${eligible.length} เครื่องสำเร็จ (${docCode})`,
+      count: committed.committedCount,
+      message: `ยืนยันรับซากเครื่องเดิมเข้าคลัง ${committed.committedCount} เครื่องสำเร็จ (${docCode})`,
     })
   })
 
@@ -2350,15 +2528,14 @@ export function createStockRouter(): Hono<StockRouterEnv> {
 
     const docId = makeStockUniqueId('sdoc')
     const docCode = makeStockDocCode('HOV')
-    const statements: StockD1PreparedStatement[] = [
-      c.env.DB.prepare(`
+    const committed = await commitOptimisticStockDocumentBatch(c.env.DB, {
+      docId,
+      docInsertStmt: c.env.DB.prepare(`
         INSERT INTO stock_documents (id, doc_code, doc_type, recipient_name, note, item_count, created_by)
         VALUES (?, ?, 'handover_out', ?, ?, ?, ?)
       `).bind(docId, docCode, recipientName, note, eligible.length, user.email),
-    ]
-
-    for (const item of eligible) {
-      statements.push(
+      items: eligible,
+      buildUpdateStmt: item =>
         c.env.DB.prepare(`
           UPDATE stock_items SET
             status = 'handed_over_to_customer',
@@ -2370,6 +2547,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
             updated_at = datetime('now')
           WHERE id = ? AND status = 'returned_to_warehouse' AND version = ?
         `).bind(docId, note, user.email, item.id, item.version),
+      buildMovementStmt: item =>
         buildMovementInsert(c.env.DB, {
           stockItemId: item.id,
           docId,
@@ -2380,19 +2558,21 @@ export function createStockRouter(): Hono<StockRouterEnv> {
           toStatus: 'handed_over_to_customer',
           actorEmail: user.email,
           note: `ส่งมอบคืนลูกค้าให้ ${recipientName} (${docCode})${note ? ` — ${note}` : ''}`,
-        })
-      )
-    }
+        }),
+      conflictMessage: 'รายการส่งมอบซากเครื่องถูกบันทึกจากหน้าจออื่นแล้ว กรุณาค้นหาและลองใหม่อีกครั้ง',
+    })
 
-    await runBatchChunks(c.env.DB, statements, 150)
+    if (!committed.ok) {
+      return c.json({ error: committed.error }, 409)
+    }
 
     return c.json({
       success: true,
       doc_id: docId,
       doc_code: docCode,
-      count: eligible.length,
+      count: committed.committedCount,
       recipient_name: recipientName,
-      message: `บันทึกส่งมอบซากเครื่องคืนลูกค้า ${eligible.length} เครื่องให้ ${recipientName} สำเร็จ (${docCode})`,
+      message: `บันทึกส่งมอบซากเครื่องคืนลูกค้า ${committed.committedCount} เครื่องให้ ${recipientName} สำเร็จ (${docCode})`,
     })
   })
 

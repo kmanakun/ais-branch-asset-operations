@@ -62,22 +62,21 @@ Gemini เป็น Implementation, QA และ Engineering Partner สำห�
   * **Cloudflare D1 (SQLite Edge DB):** จัดเก็บข้อมูลหลัก `branches`, `scanner_assets`, `replacement_tasks`, และ `google_signin_allowlist` (โควตาฟรี 5M reads/วัน)
   * **Cloudflare R2 Storage:** จัดเก็บภาพถ่าย 10 รูปและลายเซ็น โดยไม่มีค่าธรรมเนียม Egress Bandwidth
   * **Two-Stage Governance:** รองรับระบบตรวจรับ 2 ด่าน (ด่าน 1: SYM Admin verify + ด่าน 2: Gable Customer Batch Accept)
-* **Legacy Backend Baseline:** Supabase (PostgreSQL 15+, RLS, `app_private` schema) สำหรับสภาพแวดล้อมเดิมที่เตรียมย้ายระบบ
-* **Import Engine:** `web/src/xlsx-register.mjs`
+* **Import Engine:** `web/src/xlsx-register.mjs` & `web/src/lib/xlsx-stock.mjs`
   * ป้องกัน Zip Bomb และตรวจสอบพิกัด Cell ผิดปกติ
-  * กลไก Preview → Validate → Atomic Commit/Rollback ไปยัง D1/Supabase
+  * กลไก Preview → Validate → Atomic Commit/Rollback ไปยัง Cloudflare D1
 
 ---
 
 ## 4. ขอบเขตความปลอดภัยและการจัดการข้อมูล (Data & Safety Boundaries)
 
 1. **ห้ามเปิดเผย Secrets หรือข้อมูล Production:**
-   * ห้ามอ่าน, แสดงผล, สรุป หรือส่งต่อข้อมูล Credentials จาก `.env*`, ไฟล์ Backup, Token หรือ Cloudflare/Supabase Secrets
+   * ห้ามอ่าน, แสดงผล, สรุป หรือส่งต่อข้อมูล Credentials จาก `.env*`, ไฟล์ Backup, Token หรือ Cloudflare Secrets
    * ใช้ข้อมูลจำลอง (Synthetic Fixtures) ในการทดสอบเสมอ
 2. **ห้ามแก้ไข Production โดยตรง:**
    * ไม่รัน Migration บน Live Production, ไม่ Deploy, ไม่ Commit/Push หรือลบข้อมูลจริง เว้นแต่ได้รับคำสั่งเฉพาะจากทาม
 3. **การควบคุมต้นทุน (0 บาท):**
-   * ใช้เฉพาะความจุและฟีเจอร์ใน Free-tier ของ Supabase, Cloudflare และ OneDrive
+   * ใช้เฉพาะความจุและฟีเจอร์ใน Free-tier ของ Cloudflare (Pages, D1, R2) และ OneDrive
    * ห้ามแนะนำหรือเปิดใช้ Add-on ที่มีค่าใช้จ่ายโดยไม่ได้รับความเห็นชอบ
 
 ---
@@ -89,13 +88,13 @@ Gemini เป็น Implementation, QA และ Engineering Partner สำห�
 * `npm run typecheck` — ตรวจสอบ Type ของ TypeScript ทั้งโปรเจกต์
 * `npm run build` — ตรวจสอบว่าคอมไพล์ผ่านและไม่มีข้อผิดพลาดใน Bundle
 * `npm run test:xlsx` — ทดสอบตัวอ่านและตรวจสอบไฟล์ Excel
-* `npm run test:app` — ทดสอบ Application Flow & E2E logic
-* `npm run test:db` — รันการทดสอบ Database Regression ด้วย pgTAP (386+ assertions)
-* `npm run test:all` — รันชุดทดสอบทั้งหมดทั้ง App Flow และ Database Tests
+* `npm run test:d1` — ทดสอบ Schema, Stock Ledger และ Edge API Endpoints บน D1
+* `npm run test:e2e` — ทดสอบ Full Live E2E & Security Checks บน Local Wrangler Pages Dev
+* `npm run test:all` — รันชุดทดสอบทั้งหมด (`test:xlsx`, `test:d1`, `test:e2e`)
 
 ### 5.2 การกู้คืนระบบ (Disaster Recovery Runbook)
 * ดำเนินการตาม [recovery-runbook.md](file:///c:/Users/ASUS/OneDrive/เอกสาร/ChatGPT/SYM-Project%20AIS%20Replace%20Scanners/docs/recovery-runbook.md)
-* ใช้ Supabase CLI dump แยก Roles, Schema และ Data
+* ใช้ `web/scripts/backup-d1-production.ps1` และ `web/scripts/backup-r2-evidence.mjs` สำรองข้อมูล Cloudflare D1 และ R2
 * ทำการบีบอัดและเข้ารหัสไฟล์ด้วย **7-Zip AES-256** ก่อนซิงค์เก็บไว้ใน OneDrive
 * ต้องมีการซ้อมกู้คืนข้อมูลบนสภาพแวดล้อมจำลอง (Isolated Restore Drill) ก่อนยืนยันความพร้อมของระบบ
 

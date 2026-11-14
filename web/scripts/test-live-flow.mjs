@@ -32,7 +32,7 @@ function resolveOptions(argv) {
 
 const { baseUrl: BASE_URL, isLocal, cleanupLocal } = resolveOptions(process.argv.slice(2))
 
-async function req(path, method = 'GET', body = null, email = 'admin@sym.co.th') {
+async function reqRaw(path, method = 'GET', body = null, email = 'admin@sym.co.th') {
   const options = {
     method,
     headers: {
@@ -42,9 +42,16 @@ async function req(path, method = 'GET', body = null, email = 'admin@sym.co.th')
   }
   if (body) options.body = JSON.stringify(body)
   const res = await fetch(`${BASE_URL}${path}`, options)
-  const json = await res.json()
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} on ${method} ${path}: ${json.error || JSON.stringify(json)}`)
+  const text = await res.text()
+  let json = null
+  try { json = JSON.parse(text) } catch {}
+  return { status: res.status, headers: res.headers, text, json }
+}
+
+async function req(path, method = 'GET', body = null, email = 'admin@sym.co.th') {
+  const { status, json } = await reqRaw(path, method, body, email)
+  if (status < 200 || status >= 300) {
+    throw new Error(`HTTP ${status} on ${method} ${path}: ${json?.error || JSON.stringify(json)}`)
   }
   return json
 }
@@ -59,7 +66,7 @@ async function main() {
   const branchCode = `BKK-${timestamp.toString().slice(-4)}`
 
   // 1. นำเข้าข้อมูล Master Register
-  console.log('\n[1/13] Testing /api/register/import...')
+  console.log('\n[1/14] Testing /api/register/import...')
   const importResult = await req('/api/register/import', 'POST', {
     source_name: `E2E_Test_${timestamp}.xlsx`,
     rows: [
@@ -80,7 +87,7 @@ async function main() {
   console.log('  ✔ Import successful:', importResult.message)
 
   // 2. ตรวจสอบทะเบียนอุปกรณ์ & รับเข้าสต็อกเครื่องใหม่
-  console.log('\n[2/13] Testing /api/scanners search & /api/stock/import/commit...')
+  console.log('\n[2/14] Testing /api/scanners search & /api/stock/import/commit...')
   const scanners = await req(`/api/scanners?search=${testSn}`, 'GET', null, 'admin@sym.co.th')
   if (!scanners.rows?.length) throw new Error('Scanner not found after import')
   const scanner = scanners.rows[0]
@@ -139,13 +146,13 @@ async function main() {
   console.log('  ✔ DOA -> ADJ resolve verified cleanly:', doaMark.doc_code, '->', doaResolve.doc_code)
 
   // 3. ช่างกดเริ่มงาน Onsite
-  console.log('\n[3/13] Testing /api/tasks/start (Technician begins replacement)...')
+  console.log('\n[3/14] Testing /api/tasks/start (Technician begins replacement)...')
   const startTask = await req('/api/tasks/start', 'POST', { scanner_id: scanner.id }, 'tech1@sym.co.th')
   console.log('  ✔ Task started:', startTask.task_id, 'Status:', startTask.status)
   const taskId = startTask.task_id
 
   // 4. ทดสอบ Action: พักงานชั่วคราว (Block) และทำต่อ (Resume)
-  console.log('\n[4/13] Testing /api/tasks/:id/action (Block & Resume)...')
+  console.log('\n[4/14] Testing /api/tasks/:id/action (Block & Resume)...')
   const blockResult = await req(`/api/tasks/${taskId}/action`, 'POST', {
     action: 'block',
     reason: 'รอช่างอาคารเปิดตู้ Rack',
@@ -160,7 +167,7 @@ async function main() {
   console.log('  ✔ Task resumed successfully. Status:', resumeResult.status)
 
   // 5. อัปโหลดและลบภาพถ่ายหลักฐาน (Cloudflare R2 + D1)
-  console.log('\n[5/13] Testing /api/tasks/:id/evidence (Upload & Delete Evidence)...')
+  console.log('\n[5/14] Testing /api/tasks/:id/evidence (Upload & Delete Evidence)...')
   const sampleJpg = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA='
   const uploadResult = await req(`/api/tasks/${taskId}/evidence`, 'POST', {
     evidence_type: 'photo_old_serial',
@@ -183,7 +190,7 @@ async function main() {
   console.log('  ✔ Evidence upload + delete verified. Remaining count:', evidenceList.evidence.length)
 
   // 6. ช่างส่งมอบผลงาน Closeout
-  console.log('\n[6/13] Testing /api/tasks/:id/closeout (Technician Closeout)...')
+  console.log('\n[6/14] Testing /api/tasks/:id/closeout (Technician Closeout)...')
   const closeout = await req(`/api/tasks/${taskId}/closeout`, 'POST', {
     new_serial_number: newSn,
     observed_serial: testSn,
@@ -194,7 +201,7 @@ async function main() {
   console.log('  ✔ Closeout submitted. Status:', closeout.status)
 
   // 7. SYM Admin ตรวจสอบงาน Onsite (Stage 1 SYM Verification)
-  console.log('\n[7/13] Testing /api/review/sym-verify & pending stock metadata...')
+  console.log('\n[7/14] Testing /api/review/sym-verify & pending stock metadata...')
   const adminPending = await req('/api/tasks/pending', 'GET', null, 'admin@sym.co.th')
   const targetTask = adminPending.tasks?.find(t => t.id === taskId)
   if (!targetTask) throw new Error('Task not found in Admin pending queue')
@@ -211,7 +218,7 @@ async function main() {
   console.log('  ✔ Stage 1 SYM Verify passed. Status:', symVerify.status)
 
   // 8. Gable Customer ตรวจรับงานแบบรวมสาขา (Stage 2 Batch Acceptance)
-  console.log('\n[8/13] Testing /api/review/customer-batch-accept (Stage 2 Customer Accept & Least Privilege)...')
+  console.log('\n[8/14] Testing /api/review/customer-batch-accept (Stage 2 Customer Accept & Least Privilege)...')
   const gablePending = await req('/api/tasks/pending', 'GET', null, 'reviewer@gable.co.th')
   const gableTask = gablePending.tasks?.find(t => t.id === taskId)
   if (!gableTask) throw new Error('Task not found in Gable pending queue')
@@ -228,7 +235,7 @@ async function main() {
   console.log('  ✔ Stage 2 Customer Batch Accept complete:', customerBatch.message)
 
   // 9. รายงานเครื่องนอกทะเบียน และ Admin ตรวจอนุมัติ (Scanner Discovery)
-  console.log('\n[9/13] Testing /api/discovery (Scanner Discovery Report & Review)...')
+  console.log('\n[9/14] Testing /api/discovery (Scanner Discovery Report & Review)...')
   const unregSn = `UNREG-SN-${timestamp}`
   const discoveryReport = await req('/api/discovery', 'POST', {
     branch_id: scanner.branch_id,
@@ -250,7 +257,7 @@ async function main() {
   console.log('  ✔ Admin approved discovery report:', reviewReport.status)
 
   // 10. Dashboard Summary ภาพรวม
-  console.log('\n[10/13] Testing /api/dashboard/summary...')
+  console.log('\n[10/14] Testing /api/dashboard/summary...')
   const summary = await req('/api/dashboard/summary', 'GET', null, 'admin@sym.co.th')
   console.log('  ✔ Dashboard Summary Stats:', summary.summary)
   if (!Array.isArray(summary.weekly_activity) || summary.weekly_activity.length !== 7) {
@@ -262,7 +269,7 @@ async function main() {
   console.log('  ✔ Dashboard Weekly Activity verified (7 days):', summary.weekly_activity.map(d => `${d.date}: ${d.opened}/${d.completed}`).join(', '))
 
   // 11. Task Review Audit Trail
-  console.log('\n[11/13] Testing /api/tasks/:id/reviews (Governance Audit Trail)...')
+  console.log('\n[11/14] Testing /api/tasks/:id/reviews (Governance Audit Trail)...')
   const taskReviews = await req(`/api/tasks/${taskId}/reviews`, 'GET', null, 'admin@sym.co.th')
   if (!taskReviews.reviews || taskReviews.reviews.length < 2) {
     throw new Error('Task reviews audit trail incomplete')
@@ -270,7 +277,7 @@ async function main() {
   console.log('  ✔ Audit trail records found:', taskReviews.reviews.length, 'Stages:', taskReviews.reviews.map(r => r.stage).join(', '))
 
   // 12. Google Sign-In Allowlist Management
-  console.log('\n[12/13] Testing /api/allowlist (User Management)...')
+  console.log('\n[12/14] Testing /api/allowlist (User Management)...')
   const newTechEmail = `testtech_${timestamp}@sym.co.th`
   const addAllowlist = await req('/api/allowlist', 'POST', {
     email: newTechEmail,
@@ -288,7 +295,7 @@ async function main() {
   console.log('  ✔ Toggled user active status. New is_active:', toggleUser.is_active)
 
   // 13. Stock Installed + Reverse Logistics (RET -> HOV) + Stock Document Detail
-  console.log('\n[13/13] Testing Stock Installed state, Reverse Logistics (RET -> HOV), & Document Detail...')
+  console.log('\n[13/14] Testing Stock Installed state, Reverse Logistics (RET -> HOV), & Document Detail...')
   const installedLookup = await req(`/api/stock/lookup?serial=${encodeURIComponent(newSn)}`, 'GET', null, 'admin@sym.co.th')
   if (installedLookup.item?.status !== 'installed') {
     throw new Error(`Expected new stock SN status='installed', got ${installedLookup.item?.status}`)
@@ -328,7 +335,132 @@ async function main() {
   }
   console.log('  ✔ Reverse Logistics RET -> HOV -> Document Detail verified cleanly')
 
-  console.log('\n🎉 ALL 13/13 EDGE INTEGRATION CHECKS PASSED!')
+  // 14. Security Hardening, Least-Privilege Privacy, ID Collisions & Live Concurrency
+  console.log('\n[14/14] Testing Security Hardening, Least-Privilege Privacy, ID Collisions & Live Concurrency...')
+
+  // 14a. Least-privilege privacy redaction for G-Able reviewer
+  const gableScanners = await req(`/api/scanners?search=${encodeURIComponent(testSn)}`, 'GET', null, 'reviewer@gable.co.th')
+  const gableScannerRow = gableScanners.rows?.[0] || {}
+  for (const field of ['started_by', 'closeout_submitted_by', 'performed_by_name', 'admin_accepted_by']) {
+    if (field in gableScannerRow) {
+      throw new Error(`Expected ${field} to be redacted for customer_reviewer in /api/scanners`)
+    }
+  }
+  const gableReviews = await req(`/api/tasks/${taskId}/reviews`, 'GET', null, 'reviewer@gable.co.th')
+  const symReviewRow = gableReviews.reviews?.find(r => r.stage === 'sym')
+  if (!symReviewRow || symReviewRow.reviewer_email !== null) {
+    throw new Error(`Expected sym reviewer_email redacted to null for customer_reviewer, got ${JSON.stringify(symReviewRow)}`)
+  }
+  console.log('  ✔ G-Able least-privilege privacy redaction verified cleanly')
+
+  // 14b. Key traversal protection & Allowlist data_manager parity + privilege escalation block
+  const travRes = await reqRaw('/api/evidence/%2e%2e%2f%2e%2e%2fetc%2fpasswd', 'GET', null, 'admin@sym.co.th')
+  if (
+    travRes.status !== 404 ||
+    travRes.headers.get('x-content-type-options') !== 'nosniff' ||
+    !String(travRes.headers.get('content-security-policy') || '').includes('sandbox')
+  ) {
+    throw new Error(`Unexpected /api/evidence traversal response: status=${travRes.status}`)
+  }
+  console.log('  ✔ Evidence key traversal security headers verified')
+
+  // 14c. Allowlist data_manager parity + privilege escalation block
+  const dmEmail = `testtech_${timestamp}2@sym.co.th`
+  await req('/api/allowlist', 'POST', {
+    email: dmEmail,
+    role: 'data_manager',
+    full_name: 'E2E Data Manager',
+  }, 'admin@sym.co.th')
+  const dmListRes = await reqRaw('/api/allowlist', 'GET', null, dmEmail)
+  const dmEscRes = await reqRaw('/api/allowlist', 'POST', { email: dmEmail, role: 'admin' }, dmEmail)
+  if (dmListRes.status !== 403 || dmEscRes.status !== 403) {
+    throw new Error(`Expected data_manager allowlist access to fail 403, got ${dmListRes.status}/${dmEscRes.status}`)
+  }
+  console.log('  ✔ Allowlist data_manager parity & escalation protection (403) verified')
+
+  // 14d. Sanitized branch ID collision guard, SVG XSS upload block, & live concurrency
+  const secSnA = `SN-E2E-SEC-A-${timestamp}`
+  const secSnB = `SN-E2E-SEC-B-${timestamp}`
+  await req('/api/register/import', 'POST', {
+    source_name: `E2E_Test_SecA_${timestamp}.xlsx`,
+    rows: [{ location_code: `E2E-SEC/${timestamp}`, loc_bld: `AIS Shop E2E Sec A ${timestamp}`, com_sn: secSnA, province: 'กรุงเทพมหานคร' }],
+  }, 'admin@sym.co.th')
+  await req('/api/register/import', 'POST', {
+    source_name: `E2E_Test_SecB_${timestamp}.xlsx`,
+    rows: [{ location_code: `E2E-SEC_${timestamp}`, loc_bld: `AIS Shop E2E Sec B ${timestamp}`, com_sn: secSnB, province: 'กรุงเทพมหานคร' }],
+  }, 'admin@sym.co.th')
+
+  const secScanners = await req(`/api/scanners?search=${encodeURIComponent(secSnA)}`, 'GET', null, 'admin@sym.co.th')
+  const secScannerA = secScanners.rows?.[0]
+  if (!secScannerA) throw new Error('Security test scannerA not found')
+
+  const [st1, st2] = await Promise.all([
+    reqRaw('/api/tasks/start', 'POST', { scanner_id: secScannerA.id }, 'tech1@sym.co.th'),
+    reqRaw('/api/tasks/start', 'POST', { scanner_id: secScannerA.id }, 'tech2@sym.co.th'),
+  ])
+  if (st1.status !== 200 || st2.status !== 200 || st1.json?.task_id !== st2.json?.task_id) {
+    throw new Error(`Concurrent /tasks/start expected matching 200 task_id, got ${st1.status}:${st1.json?.task_id} vs ${st2.status}:${st2.json?.task_id}`)
+  }
+  const raceTaskId = st1.json.task_id
+
+  const svgRes = await reqRaw(`/api/tasks/${raceTaskId}/evidence`, 'POST', {
+    evidence_type: 'spare_photo_1',
+    file_base64: `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>').toString('base64')}`,
+    mime_type: 'image/svg+xml',
+  }, 'tech1@sym.co.th')
+  if (svgRes.status !== 400) {
+    throw new Error(`Expected SVG evidence upload to fail with 400 on active task, got ${svgRes.status}`)
+  }
+  console.log('  ✔ SVG XSS evidence upload blocked (400) cleanly')
+
+  const stockRace1 = `SN-STOCK-E2E-SEC1-${timestamp}`
+  const stockRace2 = `SN-STOCK-E2E-SEC2-${timestamp}`
+  await req('/api/stock/import/commit', 'POST', {
+    source_name: `E2E_Test_SecStock_${timestamp}.xlsx`,
+    defaults: { lot_no: `LOT-E2E-SEC-${timestamp}`, brand: 'Zebra', model_name: 'DS2208', note: `E2E_Test_Sec_${timestamp}` },
+    rows: [
+      { source_row: 2, serial_number: stockRace1 },
+      { source_row: 3, serial_number: stockRace2 },
+    ],
+  }, 'admin@sym.co.th')
+  await req('/api/stock/dispatch', 'POST', {
+    serial_numbers: [stockRace1],
+    dispatch_area: `E2E_Test_Team_${timestamp}`,
+  }, 'admin@sym.co.th')
+
+  const [rc1, rc2] = await Promise.all([
+    reqRaw('/api/stock/recall', 'POST', { serial_numbers: [stockRace1], note: `E2E_Test_RC1_${timestamp}` }, 'admin@sym.co.th'),
+    reqRaw('/api/stock/recall', 'POST', { serial_numbers: [stockRace1], note: `E2E_Test_RC2_${timestamp}` }, 'admin@sym.co.th'),
+  ])
+  if ([rc1.status, rc2.status].sort().join(',') !== '200,409') {
+    throw new Error(`Concurrent /stock/recall expected 200+409, got ${rc1.status}/${rc2.status}`)
+  }
+
+  const [coRace, doaRace] = await Promise.all([
+    reqRaw(`/api/tasks/${raceTaskId}/closeout`, 'POST', {
+      version: 1,
+      outcome: 'replaced',
+      new_serial_number: stockRace2,
+      notes: `E2E_Test_Race_${timestamp}`,
+    }, 'tech1@sym.co.th'),
+    reqRaw('/api/stock/doa', 'POST', {
+      serial_numbers: [stockRace2],
+      note: `E2E_Test_DOA_Race_${timestamp}`,
+    }, 'admin@sym.co.th'),
+  ])
+  const afterRaceTask = await req(`/api/scanners?search=${encodeURIComponent(secSnA)}`, 'GET', null, 'admin@sym.co.th')
+  const afterRaceStock = await req(`/api/stock/lookup?serial=${encodeURIComponent(stockRace2)}`, 'GET', null, 'admin@sym.co.th')
+  const raceStatuses = [coRace.status, doaRace.status].sort().join(',')
+  if (
+    raceStatuses !== '200,409' ||
+    (afterRaceTask.rows?.[0]?.task_status === 'awaiting_admin_acceptance' && afterRaceStock.item?.status !== 'allocated_to_task') ||
+    (afterRaceTask.rows?.[0]?.task_status === 'in_progress' && afterRaceStock.item?.status !== 'doa_defective')
+  ) {
+    throw new Error(`Closeout vs DOA race state mismatch: statuses=${raceStatuses}, task=${afterRaceTask.rows?.[0]?.task_status}, stock=${afterRaceStock.item?.status}`)
+  }
+  console.log('  ✔ Collision safety & live HTTP concurrency (tasks/start, stock/recall, closeout vs doa) verified cleanly')
+
+  console.log('\n🎉 ALL 14/14 EDGE INTEGRATION & SECURITY CHECKS PASSED!')
 }
 
 main()

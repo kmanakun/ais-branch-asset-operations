@@ -53,28 +53,48 @@ function createMemoryD1() {
     }
   }
 
+  let batchQueue = Promise.resolve()
+
   return {
     raw: db,
     prepare(sql) {
       return makeStatement(sql)
     },
-    async batch(stmts) {
-      const results = []
-      db.exec('BEGIN IMMEDIATE;')
-      try {
-        for (const stmt of stmts) {
-          if (/^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(stmt.sql)) {
-            results.push(await stmt.all())
-          } else {
-            results.push(await stmt.run())
+    batch(stmts) {
+      const execBatch = async () => {
+        const results = []
+        db.exec('BEGIN IMMEDIATE;')
+        try {
+          for (const stmt of stmts) {
+            const prepared = db.prepare(stmt.sql)
+            if (/^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(stmt.sql)) {
+              const rows = prepared.all(...stmt.params)
+              results.push({
+                success: true,
+                results: rows.map(row => ({ ...row })),
+                meta: { changes: 0 }
+              })
+            } else {
+              const res = prepared.run(...stmt.params)
+              results.push({
+                success: true,
+                meta: {
+                  changes: Number(res.changes || 0),
+                  last_row_id: Number(res.lastInsertRowid || 0)
+                }
+              })
+            }
           }
+          db.exec('COMMIT;')
+          return results
+        } catch (err) {
+          db.exec('ROLLBACK;')
+          throw err
         }
-        db.exec('COMMIT;')
-        return results
-      } catch (err) {
-        db.exec('ROLLBACK;')
-        throw err
       }
+      const next = batchQueue.then(execBatch, execBatch)
+      batchQueue = next.catch(() => {})
+      return next
     }
   }
 }
@@ -89,13 +109,21 @@ function createMemoryR2() {
         : ArrayBuffer.isView(value)
           ? new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
           : new Uint8Array(Buffer.from(String(value)))
-      store.set(key, { bytes, httpMetadata: opts.httpMetadata || {} })
+      store.set(key, { bytes, httpMetadata: opts.httpMetadata || {}, httpEtag: `etag-${store.size + 1}` })
     },
     async get(key) {
       const entry = store.get(key)
       if (!entry) return null
       return {
         httpMetadata: entry.httpMetadata,
+        httpEtag: entry.httpEtag,
+        size: entry.bytes.byteLength,
+        body: entry.bytes.slice(),
+        writeHttpMetadata(headers) {
+          if (entry.httpMetadata?.contentType) {
+            headers.set('content-type', entry.httpMetadata.contentType)
+          }
+        },
         async arrayBuffer() {
           return entry.bytes.slice().buffer
         }
@@ -1045,4 +1073,300 @@ test('HTTP runtime: /export/raw-data includes stock & reverse logistics metadata
   for (const key of ['stock_source_mode', 'stock_status', 'stock_lot_no', 'stock_dispatch_area', 'old_return_status']) {
     assert.equal(key in revRow, false, `customer_reviewer /export/raw-data must not receive ${key}`)
   }
+})
+
+test('HTTP runtime: Security hardening blocks XSS evidence/signature uploads, enforces nosniff/key allowlist, and fixes ID collisions', async () => {
+  const env = createTestEnv()
+
+  // 1. Register import with sanitized ID collisions ('BKK/01' vs 'BKK_01' and 'SN/A1' vs 'SN_A1') must never 500
+  const imp1 = await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'Coll1.xlsx',
+      rows: [{ location_code: 'BKK/01', loc_bld: 'AIS Branch Slash', com_sn: 'SN/A1', province: 'กรุงเทพมหานคร' }],
+    },
+  })
+  assert.equal(imp1.status, 200)
+
+  const imp2 = await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'Coll2.xlsx',
+      rows: [{ location_code: 'BKK_01', loc_bld: 'AIS Branch Under', com_sn: 'SN_A1', province: 'กรุงเทพมหานคร' }],
+    },
+  })
+  assert.equal(imp2.status, 200)
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) as c FROM branches').get().c, 2)
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) as c FROM scanner_assets').get().c, 2)
+
+  // Discovery sanitized ID collision & input validation
+  const list = await apiReq(env, '/api/scanners?search=SN/A1', { email: 'admin@sym.co.th' })
+  const branchId = list.json.rows[0].branch_id
+  const scannerId = list.json.rows[0].id
+
+  const disc1 = await apiReq(env, '/api/discovery', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { branch_id: branchId, serial_number: 'SN/DISC-01' },
+  })
+  assert.equal(disc1.status, 200)
+
+  const disc2 = await apiReq(env, '/api/discovery', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { branch_id: branchId, serial_number: 'SN_DISC-01' },
+  })
+  assert.equal(disc2.status, 200)
+
+  const badDiscCtrl = await apiReq(env, '/api/discovery', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { branch_id: branchId, serial_number: 'BAD\nSERIAL' },
+  })
+  assert.equal(badDiscCtrl.status, 400)
+
+  const badDiscLongNote = await apiReq(env, '/api/discovery', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { branch_id: branchId, serial_number: 'SN-DISC-VALID', notes: 'x'.repeat(1001) },
+  })
+  assert.equal(badDiscLongNote.status, 400)
+
+  // Allowlist collision ('user.a@sym.co.th' vs 'user+a@sym.co.th') must succeed cleanly
+  const usr1 = await apiReq(env, '/api/allowlist', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { email: 'user.a@sym.co.th', role: 'field_technician' },
+  })
+  assert.equal(usr1.status, 200)
+  const usr2 = await apiReq(env, '/api/allowlist', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { email: 'user+a@sym.co.th', role: 'viewer' },
+  })
+  assert.equal(usr2.status, 200)
+
+  // 2. Start task & test Stored XSS / magic byte / size validation on evidence upload
+  const started = await apiReq(env, '/api/tasks/start', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { scanner_id: scannerId },
+  })
+  assert.equal(started.status, 200)
+  const taskId = started.json.task_id
+
+  const svgB64 = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>').toString('base64')
+  const svgRes = await apiReq(env, `/api/tasks/${taskId}/evidence`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { evidence_type: 'photo_old_serial', mime_type: 'image/svg+xml', file_base64: `data:image/svg+xml;base64,${svgB64}` },
+  })
+  assert.equal(svgRes.status, 400)
+
+  const spoofHtmlB64 = Buffer.from('<html><script>alert(1)</script></html>').toString('base64')
+  const htmlRes = await apiReq(env, `/api/tasks/${taskId}/evidence`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { evidence_type: 'photo_old_serial', mime_type: 'image/jpeg', file_base64: `data:image/jpeg;base64,${spoofHtmlB64}` },
+  })
+  assert.equal(htmlRes.status, 400)
+
+  const hugeJpgBytes = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(600000, 0x41)])
+  const hugeRes = await apiReq(env, `/api/tasks/${taskId}/evidence`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { evidence_type: 'photo_old_serial', mime_type: 'image/jpeg', file_base64: hugeJpgBytes.toString('base64') },
+  })
+  assert.equal(hugeRes.status, 413)
+
+  const samplePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const validEvd = await apiReq(env, `/api/tasks/${taskId}/evidence`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { evidence_type: 'photo_old_serial', mime_type: 'image/png', file_base64: samplePng },
+  })
+  assert.equal(validEvd.status, 200)
+  assert.match(validEvd.json.storage_path, /\.png$/)
+
+  // 3. /api/evidence/* enforces key allowlist, nosniff, and sandbox/attachment fallback for non-raster objects
+  const served = await apiReq(env, `/api/evidence/${validEvd.json.storage_path}`, { email: 'admin@sym.co.th' })
+  assert.equal(served.status, 200)
+  assert.equal(served.res.headers.get('x-content-type-options'), 'nosniff')
+  assert.equal(served.res.headers.get('content-type'), 'image/png')
+
+  const badKey = await apiReq(env, '/api/evidence/other-bucket/secret.txt', { email: 'admin@sym.co.th' })
+  assert.equal(badKey.status, 404)
+  assert.equal(badKey.res.headers.get('x-content-type-options'), 'nosniff')
+  assert.match(badKey.res.headers.get('content-security-policy') || '', /sandbox/)
+
+  // Legacy SVG left in R2 must NEVER be served inline as image/svg+xml
+  await env.EVIDENCE_BUCKET.put(`tasks/${taskId}/legacy_evil.jpg`, Buffer.from('<svg onload="alert(1)"/>'), {
+    httpMetadata: { contentType: 'image/svg+xml' },
+  })
+  const legacyRes = await apiReq(env, `/api/evidence/tasks/${taskId}/legacy_evil.jpg`, { email: 'admin@sym.co.th' })
+  assert.equal(legacyRes.status, 200)
+  assert.equal(legacyRes.res.headers.get('content-type'), 'application/octet-stream')
+  assert.equal(legacyRes.res.headers.get('content-disposition'), 'attachment')
+  assert.equal(legacyRes.res.headers.get('x-content-type-options'), 'nosniff')
+  assert.match(legacyRes.res.headers.get('content-security-policy') || '', /sandbox/)
+})
+
+test('HTTP runtime: Allowlist RBAC blocks data_manager privilege escalation, supports data_manager parity, and protects privacy', async () => {
+  const env = createTestEnv()
+
+  // Admin creates a data_manager account (role parity with schema)
+  const addDm = await apiReq(env, '/api/allowlist', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { email: 'dm1@sym.co.th', role: 'data_manager', full_name: 'Data Manager 1' },
+  })
+  assert.equal(addDm.status, 200)
+
+  // Admin cannot demote themselves
+  const selfDemote = await apiReq(env, '/api/allowlist', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { email: 'admin@sym.co.th', role: 'viewer' },
+  })
+  assert.equal(selfDemote.status, 400)
+
+  // data_manager MUST NOT read or mutate allowlist (prevent escalating self to admin)
+  assert.equal((await apiReq(env, '/api/allowlist', { email: 'dm1@sym.co.th' })).status, 403)
+  assert.equal(
+    (await apiReq(env, '/api/allowlist', {
+      method: 'POST',
+      email: 'dm1@sym.co.th',
+      body: { email: 'dm1@sym.co.th', role: 'admin' },
+    })).status,
+    403
+  )
+  assert.equal(
+    (await apiReq(env, '/api/allowlist/usr-tech1/toggle', { method: 'POST', email: 'dm1@sym.co.th' })).status,
+    403
+  )
+
+  // Setup full flow for privacy redaction checks
+  await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'Priv.xlsx',
+      rows: [{ location_code: 'BKK-PRIV', loc_bld: 'AIS Priv Shop', com_sn: 'SN-PRIV-01', province: 'กรุงเทพมหานคร' }],
+    },
+  })
+  const scannerId = (await apiReq(env, '/api/scanners?search=SN-PRIV-01', { email: 'admin@sym.co.th' })).json.rows[0].id
+  const start = await apiReq(env, '/api/tasks/start', { method: 'POST', email: 'tech1@sym.co.th', body: { scanner_id: scannerId } })
+  const close = await apiReq(env, `/api/tasks/${start.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'no_damage_found', notes: 'เครื่องใช้งานปกติ', version: 1 },
+  })
+  assert.equal(close.status, 200)
+  const symPass = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: start.json.task_id, decision: 'pass', version: 2 },
+  })
+  assert.equal(symPass.status, 200)
+
+  // /api/scanners redacts SYM staff emails & names for customer_reviewer and viewer
+  for (const restrictedEmail of ['reviewer@gable.co.th', 'viewer@ais.co.th']) {
+    const sc = await apiReq(env, '/api/scanners?search=SN-PRIV-01', { email: restrictedEmail })
+    assert.equal(sc.status, 200)
+    const row = sc.json.rows[0]
+    assert.equal('started_by' in row, false)
+    assert.equal('closeout_submitted_by' in row, false)
+    assert.equal('performed_by_name' in row, false)
+    assert.equal('admin_accepted_by' in row, false)
+
+    const revRes = await apiReq(env, `/api/tasks/${start.json.task_id}/reviews`, { email: restrictedEmail })
+    assert.equal(revRes.status, 200)
+    assert.equal(revRes.json.reviews[0].stage, 'sym')
+    assert.equal(revRes.json.reviews[0].reviewer_email, null)
+  }
+
+  const pendingRev = await apiReq(env, '/api/tasks/pending?stage=customer', { email: 'reviewer@gable.co.th' })
+  assert.equal(pendingRev.status, 200)
+  assert.equal('admin_accepted_by' in pendingRev.json.tasks[0], false)
+
+  // Invalid customer-batch-accept SVG signature must be rejected 400
+  const svgB64 = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>').toString('base64')
+  const badSigAccept = await apiReq(env, '/api/review/customer-batch-accept', {
+    method: 'POST',
+    email: 'reviewer@gable.co.th',
+    body: {
+      branch_id: pendingRev.json.tasks[0].branch_id,
+      task_ids: [start.json.task_id],
+      signature_base64: `data:image/svg+xml;base64,${svgB64}`,
+    },
+  })
+  assert.equal(badSigAccept.status, 400)
+})
+
+test('HTTP runtime: Concurrent /tasks/start is idempotent and concurrent /review/customer-batch-accept prevents duplicate reviews/R2/stock writes', async () => {
+  const env = createTestEnv()
+  await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'Race.xlsx',
+      rows: [{ location_code: 'BKK-RACE', loc_bld: 'AIS Race Shop', com_sn: 'SN-RACE-OLD', province: 'กรุงเทพมหานคร' }],
+    },
+  })
+  const scanner = (await apiReq(env, '/api/scanners?search=SN-RACE-OLD', { email: 'admin@sym.co.th' })).json.rows[0]
+
+  // Simultaneous /tasks/start calls must both return 200 with the same single task & work order
+  const [s1, s2] = await Promise.all([
+    apiReq(env, '/api/tasks/start', { method: 'POST', email: 'tech1@sym.co.th', body: { scanner_id: scanner.id } }),
+    apiReq(env, '/api/tasks/start', { method: 'POST', email: 'tech2@sym.co.th', body: { scanner_id: scanner.id } }),
+  ])
+  assert.equal(s1.status, 200)
+  assert.equal(s2.status, 200)
+  assert.equal(s1.json.task_id, s2.json.task_id)
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) as c FROM replacement_tasks WHERE scanner_asset_id = ?').get(scanner.id).c, 1)
+  assert.equal(env.DB.raw.prepare('SELECT COUNT(*) as c FROM branch_work_orders WHERE branch_id = ?').get(scanner.branch_id).c, 1)
+
+  const taskId = s1.json.task_id
+  const close = await apiReq(env, `/api/tasks/${taskId}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'replaced', new_serial_number: 'SN-RACE-NEW', new_model_name: 'DS9308', version: 1 },
+  })
+  assert.equal(close.status, 200)
+
+  const symPass = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: taskId, decision: 'pass', version: 2 },
+  })
+  assert.equal(symPass.status, 200)
+
+  const samplePng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const [ca1, ca2] = await Promise.all([
+    apiReq(env, '/api/review/customer-batch-accept', {
+      method: 'POST',
+      email: 'reviewer@gable.co.th',
+      body: { branch_id: scanner.branch_id, task_ids: [taskId], signature_base64: samplePng },
+    }),
+    apiReq(env, '/api/review/customer-batch-accept', {
+      method: 'POST',
+      email: 'reviewer@gable.co.th',
+      body: { branch_id: scanner.branch_id, task_ids: [taskId], signature_base64: samplePng },
+    }),
+  ])
+  const statuses = [ca1.status, ca2.status].sort((a, b) => a - b)
+  assert.deepEqual(statuses, [200, 409])
+
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM task_reviews WHERE task_id = ? AND stage = 'customer'").get(taskId).c,
+    1
+  )
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM stock_movements WHERE task_id = ? AND action = 'installed'").get(taskId).c,
+    1
+  )
+  // Only the winning call writes R2 signatures (1 branch sign + 1 task inspector_signature = 2 objects)
+  assert.equal(env.EVIDENCE_BUCKET.store.size, 2)
 })

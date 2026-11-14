@@ -25,9 +25,6 @@
 **/.wrangler-artifacts/
 **/.wrangler-logs/
 **/.tmp*/
-**/.supabase-home/
-**/supabase/.temp/
-**/supabase/.branches/
 **/telemetry.json
 *.log
 **/.asset-completion.jwt
@@ -45,6 +42,5 @@
 
 # Local production recovery helpers
 /web/Run AIS Backup.cmd
-/web/scripts/backup-production.ps1
 
 /docs/word-review-20261111/

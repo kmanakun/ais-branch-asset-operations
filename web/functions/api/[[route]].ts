@@ -49,9 +49,149 @@ type Variables = {
 
 const OPERATIONAL_WRITE_ROLES = new Set(['admin', 'data_manager', 'field_technician'])
 const ALLOWED_CLOSEOUT_OUTCOMES = new Set(['replaced', 'no_damage_found', 'different_device_found', 'target_device_not_found'])
+const MAX_EVIDENCE_BYTES = 512 * 1024
+const MAX_REGISTER_IMPORT_ROWS = 5000
+const MAX_BATCH_ACCEPT_TASKS = 200
+const ALLOWED_IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const SAFE_EVIDENCE_KEY_RE = /^(tasks|branches)\/[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/
 
 function hasOperationalWriteAccess(role: string): boolean {
   return OPERATIONAL_WRITE_ROLES.has(role)
+}
+
+function detectImageMagic(
+  bytes: Uint8Array
+): { mimeType: 'image/jpeg' | 'image/png' | 'image/webp'; ext: 'jpg' | 'png' | 'webp' } | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return { mimeType: 'image/jpeg', ext: 'jpg' }
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return { mimeType: 'image/png', ext: 'png' }
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return { mimeType: 'image/webp', ext: 'webp' }
+  }
+  return null
+}
+
+function normalizeDeclaredImageMime(raw?: string): string {
+  const lower = String(raw || '').trim().toLowerCase()
+  return lower === 'image/jpg' ? 'image/jpeg' : lower
+}
+
+/** Validates image uploads using MIME allowlists, decoded size cap, and binary magic bytes. */
+function parseValidatedImageUpload(
+  rawInput: string,
+  declaredMimeType?: string
+):
+  | {
+      ok: true
+      bytes: Uint8Array
+      mimeType: 'image/jpeg' | 'image/png' | 'image/webp'
+      ext: 'jpg' | 'png' | 'webp'
+      normalizedDataUrl: string
+    }
+  | { ok: false; status: 400 | 413; error: string } {
+  const trimmed = rawInput.trim()
+  if (!trimmed) {
+    return { ok: false, status: 400, error: 'ไฟล์ภาพถ่ายว่างเปล่า' }
+  }
+
+  if (declaredMimeType !== undefined && declaredMimeType.trim() !== '') {
+    const normalizedDeclared = normalizeDeclaredImageMime(declaredMimeType)
+    if (!ALLOWED_IMAGE_MIME_TYPES.has(normalizedDeclared)) {
+      return { ok: false, status: 400, error: 'รองรับเฉพาะไฟล์ภาพ JPEG, PNG หรือ WebP เท่านั้น' }
+    }
+  }
+
+  let cleanBase64 = trimmed
+  const dataUriMatch = trimmed.match(/^data:([^;,\s]+);base64,([\s\S]+)$/i)
+  if (dataUriMatch) {
+    const uriMime = normalizeDeclaredImageMime(dataUriMatch[1])
+    if (!ALLOWED_IMAGE_MIME_TYPES.has(uriMime)) {
+      return { ok: false, status: 400, error: 'รองรับเฉพาะไฟล์ภาพ JPEG, PNG หรือ WebP เท่านั้น' }
+    }
+    cleanBase64 = dataUriMatch[2]
+  } else if (/^data:/i.test(trimmed)) {
+    return { ok: false, status: 400, error: 'รูปแบบ Data URI ของไฟล์ภาพไม่ถูกต้อง' }
+  }
+
+  cleanBase64 = cleanBase64.replace(/\s+/g, '')
+  if (cleanBase64.length > Math.ceil((MAX_EVIDENCE_BYTES * 4) / 3) + 16) {
+    return { ok: false, status: 413, error: 'ขนาดไฟล์ภาพเกินกำหนด (สูงสุด 512 KB ต่อไฟล์)' }
+  }
+
+  let bytes: Uint8Array
+  try {
+    const binaryString = atob(cleanBase64)
+    if (binaryString.length === 0) {
+      return { ok: false, status: 400, error: 'ไฟล์ภาพถ่ายว่างเปล่า' }
+    }
+    if (binaryString.length > MAX_EVIDENCE_BYTES) {
+      return { ok: false, status: 413, error: 'ขนาดไฟล์ภาพเกินกำหนด (สูงสุด 512 KB ต่อไฟล์)' }
+    }
+    bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+  } catch {
+    return { ok: false, status: 400, error: 'ข้อมูลภาพถ่าย Base64 ไม่ถูกต้อง' }
+  }
+
+  const detected = detectImageMagic(bytes)
+  if (!detected) {
+    return { ok: false, status: 400, error: 'เนื้อหาไฟล์ไม่ใช่ภาพ JPEG, PNG หรือ WebP ที่ถูกต้อง' }
+  }
+
+  return {
+    ok: true,
+    bytes,
+    mimeType: detected.mimeType,
+    ext: detected.ext,
+    normalizedDataUrl: `data:${detected.mimeType};base64,${cleanBase64}`,
+  }
+}
+
+function buildSafeCandidateId(prefix: string, rawKey: string, maxSlugLen = 80): string {
+  const slug = rawKey.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, maxSlugLen)
+  if (!slug) return makeUniqueId(prefix)
+  return `${prefix}-${slug}`
+}
+
+async function resolveUniqueRowId(
+  db: D1Database,
+  table: 'branches' | 'scanner_assets' | 'google_signin_allowlist',
+  prefix: string,
+  rawKey: string
+): Promise<string> {
+  const candidate = buildSafeCandidateId(prefix, rawKey)
+  const existing = await db.prepare(`SELECT id FROM ${table} WHERE id = ?`).bind(candidate).first<{ id: string }>()
+  return existing ? makeUniqueId(prefix) : candidate
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  const msg = String((err as any)?.message || err || '')
+  return /UNIQUE constraint failed/i.test(msg)
 }
 
 function parseUtcMs(value?: string | null): number {
@@ -867,8 +1007,14 @@ app.get('/scanners', async (c) => {
   const totalCount = await c.env.DB.prepare(countSql).bind(...countParams).first<{ count: number; province_count: number }>()
 
   const sanitizedRows = rows.results.map((r: any) => {
-    if (user.role === 'customer_reviewer') {
-      const { started_by, closeout_submitted_by, ...rest } = r
+    if (user.role === 'customer_reviewer' || user.role === 'viewer') {
+      const {
+        started_by: _sb,
+        closeout_submitted_by: _csb,
+        performed_by_name: _pbn,
+        admin_accepted_by: _aab,
+        ...rest
+      } = r
       return rest
     }
     return r
@@ -984,14 +1130,15 @@ app.get('/tasks/pending', async (c) => {
 
     if (user.role === 'customer_reviewer') {
       const {
-        started_by,
-        closeout_submitted_by,
-        stock_source_mode,
-        stock_status,
-        stock_brand,
-        stock_model,
-        stock_lot_no,
-        stock_dispatch_area,
+        started_by: _sb,
+        closeout_submitted_by: _csb,
+        admin_accepted_by: _aab,
+        stock_source_mode: _ssm,
+        stock_status: _ss,
+        stock_brand: _sbr,
+        stock_model: _sm,
+        stock_lot_no: _sln,
+        stock_dispatch_area: _sda,
         ...rest
       } = r
       return { ...rest, is_overdue }
@@ -1021,6 +1168,14 @@ app.post('/register/import', async (c) => {
   if (!Array.isArray(rows) || rows.length === 0) {
     return c.json({ error: 'ไม่พบข้อมูลแถวสำหรับนำเข้า' }, 400)
   }
+  if (rows.length > MAX_REGISTER_IMPORT_ROWS) {
+    return c.json({ error: `จำกัดการนำเข้าสูงสุด ${MAX_REGISTER_IMPORT_ROWS.toLocaleString()} แถวต่อชุด` }, 400)
+  }
+
+  const sourceName = String(body.source_name || 'Detail1.xlsx')
+    .replace(/[\x00-\x1F\x7F]/g, '')
+    .trim()
+    .slice(0, 160) || 'Detail1.xlsx'
 
   const branchMap = new Map<string, string>()
   const usedBranchIds = new Set<string>()
@@ -1034,6 +1189,18 @@ app.post('/register/import', async (c) => {
     for (const eb of (existingBranches.results || [])) {
       branchMap.set(eb.location_code, eb.id)
       usedBranchIds.add(eb.id)
+    }
+    const candidateBranchIds = Array.from(
+      new Set(chunkCodes.map(c => buildSafeCandidateId('brn', c)).filter(id => !usedBranchIds.has(id)))
+    )
+    if (candidateBranchIds.length > 0) {
+      const idPlaceholders = candidateBranchIds.map(() => '?').join(', ')
+      const takenIds = await c.env.DB.prepare(
+        `SELECT id FROM branches WHERE id IN (${idPlaceholders})`
+      ).bind(...candidateBranchIds).all<{ id: string }>()
+      for (const row of (takenIds.results || [])) {
+        usedBranchIds.add(row.id)
+      }
     }
   }
 
@@ -1049,6 +1216,18 @@ app.post('/register/import', async (c) => {
     for (const ea of (existingAssets.results || [])) {
       existingAssetMap.set(ea.com_sn, ea.id)
       usedAssetIds.add(ea.id)
+    }
+    const candidateAssetIds = Array.from(
+      new Set(chunkSerials.map(sn => buildSafeCandidateId('ast', sn)).filter(id => !usedAssetIds.has(id)))
+    )
+    if (candidateAssetIds.length > 0) {
+      const idPlaceholders = candidateAssetIds.map(() => '?').join(', ')
+      const takenIds = await c.env.DB.prepare(
+        `SELECT id FROM scanner_assets WHERE id IN (${idPlaceholders})`
+      ).bind(...candidateAssetIds).all<{ id: string }>()
+      for (const row of (takenIds.results || [])) {
+        usedAssetIds.add(row.id)
+      }
     }
   }
 
@@ -1105,8 +1284,8 @@ app.post('/register/import', async (c) => {
 
     let branchId = branchMap.get(locationCode)
     if (!branchId) {
-      const candidateBranchId = `brn-${locationCode.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-      branchId = candidateBranchId.length > 4 && !usedBranchIds.has(candidateBranchId)
+      const candidateBranchId = buildSafeCandidateId('brn', locationCode)
+      branchId = !usedBranchIds.has(candidateBranchId)
         ? candidateBranchId
         : makeUniqueId('brn')
       branchMap.set(locationCode, branchId)
@@ -1141,8 +1320,8 @@ app.post('/register/import', async (c) => {
 
     let assetId = existingAssetMap.get(comSn) || assetRecords.get(comSn)?.id
     if (!assetId) {
-      const candidateAssetId = `ast-${comSn.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-      assetId = candidateAssetId.length > 4 && !usedAssetIds.has(candidateAssetId)
+      const candidateAssetId = buildSafeCandidateId('ast', comSn)
+      assetId = !usedAssetIds.has(candidateAssetId)
         ? candidateAssetId
         : makeUniqueId('ast')
       usedAssetIds.add(assetId)
@@ -1250,7 +1429,7 @@ app.post('/register/import', async (c) => {
     VALUES (?, ?, ?, ?, ?)
   `).bind(
     batchId,
-    body.source_name || 'Detail1.xlsx',
+    sourceName,
     validRowsCount,
     JSON.stringify({
       branches: branchMap.size,
@@ -1337,69 +1516,115 @@ app.post('/tasks/start', async (c) => {
     return c.json({ error: 'ไม่พบเครื่องอ่านบาร์โค้ดนี้ในระบบ' }, 404)
   }
 
-  // ค้นหาหรือเปิด Branch Work Order
-  let workOrder = await c.env.DB.prepare("SELECT id FROM branch_work_orders WHERE branch_id = ? AND status != 'completed'").bind(scanner.branch_id).first<{ id: string }>()
+  // ค้นหาหรือเปิด Branch Work Order (ป้องกัน Race Duplicate WO)
+  let workOrder = await c.env.DB.prepare(
+    "SELECT id FROM branch_work_orders WHERE branch_id = ? AND status != 'completed' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+  ).bind(scanner.branch_id).first<{ id: string }>()
   if (!workOrder) {
     const woId = makeUniqueId(`wo-${scanner.branch_id}`)
     const woCode = makeUniqueId('WO').toUpperCase()
-    await c.env.DB.prepare(`
+    const woInsert = await c.env.DB.prepare(`
       INSERT INTO branch_work_orders (id, branch_id, work_order_code, status, created_by)
-      VALUES (?, ?, ?, 'in_progress', ?)
-    `).bind(woId, scanner.branch_id, woCode, user.email).run()
-    workOrder = { id: woId }
+      SELECT ?, ?, ?, 'in_progress', ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM branch_work_orders WHERE branch_id = ? AND status != 'completed'
+      )
+    `).bind(woId, scanner.branch_id, woCode, user.email, scanner.branch_id).run()
+    if ((woInsert.meta?.changes || 0) > 0) {
+      workOrder = { id: woId }
+    } else {
+      workOrder = await c.env.DB.prepare(
+        "SELECT id FROM branch_work_orders WHERE branch_id = ? AND status != 'completed' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+      ).bind(scanner.branch_id).first<{ id: string }>()
+    }
+    if (!workOrder) {
+      return c.json({ error: 'ไม่สามารถเปิดใบงานสาขาได้ กรุณาลองใหม่อีกครั้ง' }, 409)
+    }
+  }
+
+  const resolveStartFromTask = (current: { id: string; status: string; version: number }) => {
+    if (current.status === 'delivered') {
+      return c.json({ error: 'เครื่องสแกนเนอร์นี้ได้รับการเปลี่ยนและตรวจรับเสร็จสมบูรณ์แล้ว' }, 400)
+    }
+    if (['awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception'].includes(current.status)) {
+      return c.json({ error: 'เครื่องสแกนเนอร์นี้อยู่ระหว่างขั้นตอนรอการตรวจรับ' }, 400)
+    }
+    if (['in_progress', 'blocked'].includes(current.status)) {
+      return c.json({
+        success: true,
+        task_id: current.id,
+        status: current.status,
+        version: current.version,
+      })
+    }
+    return null
   }
 
   // ค้นหาหรือสร้าง Replacement Task
-  let task = await c.env.DB.prepare(
+  const task = await c.env.DB.prepare(
     'SELECT id, status, version FROM replacement_tasks WHERE scanner_asset_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
   ).bind(scanner.id).first<{ id: string; status: string; version: number }>()
-  
+
   if (task) {
-    if (task.status === 'delivered') {
-      return c.json({ error: 'เครื่องสแกนเนอร์นี้ได้รับการเปลี่ยนและตรวจรับเสร็จสมบูรณ์แล้ว' }, 400)
-    }
-    if (['awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception'].includes(task.status)) {
-      return c.json({ error: 'เครื่องสแกนเนอร์นี้อยู่ระหว่างขั้นตอนรอการตรวจรับ' }, 400)
-    }
-    if (['in_progress', 'blocked'].includes(task.status)) {
-      return c.json({
-        success: true,
-        task_id: task.id,
-        status: task.status,
-        version: task.version
-      })
-    }
+    const existingRes = resolveStartFromTask(task)
+    if (existingRes) return existingRes
     if (task.status === 'open') {
-      await c.env.DB.prepare(`
-        UPDATE replacement_tasks 
+      const startOpenRes = await c.env.DB.prepare(`
+        UPDATE replacement_tasks
         SET status = 'in_progress', started_at = datetime('now'), started_by = ?, updated_at = datetime('now')
-        WHERE id = ?
+        WHERE id = ? AND status = 'open'
       `).bind(user.email, task.id).run()
 
-      return c.json({
-        success: true,
-        task_id: task.id,
-        status: 'in_progress',
-        version: task.version
-      })
+      if ((startOpenRes.meta?.changes || 0) > 0) {
+        return c.json({
+          success: true,
+          task_id: task.id,
+          status: 'in_progress',
+          version: task.version,
+        })
+      }
+      const refreshed = await c.env.DB.prepare(
+        'SELECT id, status, version FROM replacement_tasks WHERE scanner_asset_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
+      ).bind(scanner.id).first<{ id: string; status: string; version: number }>()
+      if (refreshed) {
+        const refreshedRes = resolveStartFromTask(refreshed)
+        if (refreshedRes) return refreshedRes
+      }
+      return c.json({ error: 'สถานะใบงานมีการเปลี่ยนแปลง กรุณารีเฟรชและลองใหม่อีกครั้ง' }, 409)
     }
   }
 
-  // สร้าง Task ใหม่สำหรับกรณีที่ยังไม่มีงาน หรือกรณีงานเดิมถูกยกเลิก (cancelled)
+  // สร้าง Task ใหม่สำหรับกรณีที่ยังไม่มีงาน หรือกรณีงานเดิมถูกยกเลิก (cancelled) พร้อมกันชนกัน (Race Guard)
   const taskId = task ? makeUniqueId(`tsk-${scanner.id}`) : `tsk-${scanner.id}`
-  await c.env.DB.prepare(`
+  const insertTaskRes = await c.env.DB.prepare(`
     INSERT INTO replacement_tasks (
-      id, branch_work_order_id, scanner_asset_id, status, outcome, 
+      id, branch_work_order_id, scanner_asset_id, status, outcome,
       started_at, started_by, version
-    ) VALUES (?, ?, ?, 'in_progress', 'replaced', datetime('now'), ?, 1)
-  `).bind(taskId, workOrder.id, scanner.id, user.email).run()
+    )
+    SELECT ?, ?, ?, 'in_progress', 'replaced', datetime('now'), ?, 1
+    WHERE NOT EXISTS (
+      SELECT 1 FROM replacement_tasks
+      WHERE scanner_asset_id = ? AND status != 'cancelled'
+    )
+  `).bind(taskId, workOrder.id, scanner.id, user.email, scanner.id).run()
 
-  return c.json({
-    success: true,
-    task_id: taskId,
-    status: 'in_progress',
-    version: 1
-  })
+  if ((insertTaskRes.meta?.changes || 0) > 0) {
+    return c.json({
+      success: true,
+      task_id: taskId,
+      status: 'in_progress',
+      version: 1,
+    })
+  }
+
+  const winnerTask = await c.env.DB.prepare(
+    'SELECT id, status, version FROM replacement_tasks WHERE scanner_asset_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1'
+  ).bind(scanner.id).first<{ id: string; status: string; version: number }>()
+  if (winnerTask) {
+    const winnerRes = resolveStartFromTask(winnerTask)
+    if (winnerRes) return winnerRes
+  }
+  return c.json({ error: 'ไม่สามารถเริ่มงานได้เนื่องจากสถานะเครื่องเปลี่ยนแปลง กรุณารีเฟรชหน้าจอ' }, 409)
 })
 
 // 8. อัปโหลดและดูภาพถ่ายหลักฐาน (Cloudflare R2 Integration)
@@ -1426,27 +1651,18 @@ app.post('/tasks/:id/evidence', async (c) => {
 
   const evidenceType = typeof body.evidence_type === 'string' ? body.evidence_type.trim() : ''
   const fileBase64 = typeof body.file_base64 === 'string' ? body.file_base64 : ''
-  const mimeType = typeof body.mime_type === 'string' ? body.mime_type : 'image/jpeg'
+  const rawMimeType = typeof body.mime_type === 'string' ? body.mime_type : undefined
   if (!evidenceType || !/^[a-zA-Z0-9_-]{1,64}$/.test(evidenceType) || !fileBase64) {
     return c.json({ error: 'ข้อมูลภาพถ่ายหรือประเภทหลักฐานไม่ครบถ้วนหรือรูปแบบไม่ถูกต้อง' }, 400)
   }
 
-  let bytes: Uint8Array
-  try {
-    const cleanBase64 = fileBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
-    const binaryString = atob(cleanBase64)
-    bytes = new Uint8Array(binaryString.length)
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i)
-    }
-    if (bytes.length === 0) {
-      return c.json({ error: 'ไฟล์ภาพถ่ายว่างเปล่า' }, 400)
-    }
-  } catch {
-    return c.json({ error: 'ข้อมูลภาพถ่าย Base64 ไม่ถูกต้อง' }, 400)
+  const parsedImage = parseValidatedImageUpload(fileBase64, rawMimeType)
+  if (!parsedImage.ok) {
+    return c.json({ error: parsedImage.error }, parsedImage.status)
   }
 
-  const storageKey = `tasks/${taskId}/${evidenceType}_${Date.now()}.jpg`
+  const { bytes, mimeType, ext, normalizedDataUrl } = parsedImage
+  const storageKey = `tasks/${taskId}/${evidenceType}_${Date.now()}.${ext}`
 
   // บันทึกลง Cloudflare R2
   if (c.env.EVIDENCE_BUCKET) {
@@ -1473,9 +1689,9 @@ app.post('/tasks/:id/evidence', async (c) => {
     evidenceType,
     storageKey,
     bytes.length,
-    body.mime_type || 'image/jpeg',
+    mimeType,
     user.role,
-    body.file_base64
+    normalizedDataUrl
   ).run()
 
   return c.json({
@@ -1573,6 +1789,19 @@ function buildSignatureSvg(label: string, signerText: string) {
 // 8.2 ดูภาพหลักฐานจาก Storage (Cloudflare R2 พร้อม D1 Storage Persistence Fallback)
 app.get('/evidence/:key{.*}', async (c) => {
   const key = c.req.param('key')
+  if (!key || key.includes('..') || key.includes('\\') || !SAFE_EVIDENCE_KEY_RE.test(key)) {
+    const badKeySvg = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="240" viewBox="0 0 320 240"><rect width="100%" height="100%" fill="#f8fafc"/><text x="50%" y="45%" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="14" font-weight="600">ไม่พบรูปภาพหลักฐาน</text><text x="50%" y="60%" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="12">File Not Found</text></svg>`
+    return new Response(badKeySvg, {
+      status: 404,
+      headers: {
+        'Content-Type': 'image/svg+xml; charset=utf-8',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; sandbox",
+        'Cache-Control': 'no-store'
+      }
+    })
+  }
+
   const taskMatch = key.match(/^tasks\/([^/]+)\/([^/]+)$/)
   const matchedTaskId = taskMatch ? taskMatch[1] : ''
   const rawFilename = taskMatch ? taskMatch[2] : ''
@@ -1586,6 +1815,15 @@ app.get('/evidence/:key{.*}', async (c) => {
       if (object && !(sigConfig && object.size <= 200)) {
         const headers = new Headers()
         object.writeHttpMetadata(headers)
+        const safeContentType = normalizeDeclaredImageMime(headers.get('content-type') || undefined)
+        if (ALLOWED_IMAGE_MIME_TYPES.has(safeContentType)) {
+          headers.set('Content-Type', safeContentType)
+        } else {
+          headers.set('Content-Type', 'application/octet-stream')
+          headers.set('Content-Disposition', 'attachment')
+          headers.set('Content-Security-Policy', "default-src 'none'; sandbox")
+        }
+        headers.set('X-Content-Type-Options', 'nosniff')
         headers.set('etag', object.httpEtag)
         headers.set('Cache-Control', 'public, max-age=86400')
         return new Response(object.body, { headers })
@@ -1625,21 +1863,30 @@ app.get('/evidence/:key{.*}', async (c) => {
 
   if (row && row.data_base64) {
     try {
-      const mimeType = row.mime_type || 'image/jpeg'
-      const base64Clean = row.data_base64.replace(/^data:[^;]+;base64,/, '')
+      const base64Clean = row.data_base64.replace(/^data:[^;]+;base64,/i, '')
       const binaryString = atob(base64Clean)
       const bytes = new Uint8Array(binaryString.length)
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i)
       }
       if (!(sigConfig && bytes.length <= 200)) {
-        return new Response(bytes.buffer, {
-          headers: {
-            'Content-Type': mimeType,
-            'Content-Length': String(bytes.length),
-            'Cache-Control': 'public, max-age=86400'
-          }
-        })
+        const detected = detectImageMagic(bytes)
+        const headers: Record<string, string> = detected
+          ? {
+              'Content-Type': detected.mimeType,
+              'Content-Length': String(bytes.length),
+              'X-Content-Type-Options': 'nosniff',
+              'Cache-Control': 'public, max-age=86400'
+            }
+          : {
+              'Content-Type': 'application/octet-stream',
+              'Content-Disposition': 'attachment',
+              'Content-Security-Policy': "default-src 'none'; sandbox",
+              'Content-Length': String(bytes.length),
+              'X-Content-Type-Options': 'nosniff',
+              'Cache-Control': 'no-store'
+            }
+        return new Response(bytes.buffer, { headers })
       }
     } catch {
       // Base64 decode failed
@@ -1674,6 +1921,8 @@ app.get('/evidence/:key{.*}', async (c) => {
         status: 200,
         headers: {
           'Content-Type': 'image/svg+xml; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': "default-src 'none'; sandbox",
           'Cache-Control': 'public, max-age=3600'
         }
       })
@@ -1686,6 +1935,8 @@ app.get('/evidence/:key{.*}', async (c) => {
     status: 404,
     headers: {
       'Content-Type': 'image/svg+xml; charset=utf-8',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; sandbox",
       'Cache-Control': 'no-store'
     }
   })
@@ -2002,11 +2253,14 @@ app.post('/tasks/:id/action', async (c) => {
       return c.json({ error: cancelStockPlan.error }, 409)
     }
 
+    const cancelRaceGuardSql = cancelStockPlan.taskRaceGuardSql ? ` AND ${cancelStockPlan.taskRaceGuardSql}` : ''
+    const cancelRaceGuardBinds = cancelStockPlan.taskRaceGuardBinds || []
+
     const cancelTaskStmt = c.env.DB.prepare(`
       UPDATE replacement_tasks
       SET status = ?, notes = ?, version = version + 1, updated_at = datetime('now')
-      WHERE id = ? AND version = ?
-    `).bind(nextStatus, notes, taskId, task.version)
+      WHERE id = ? AND version = ?${cancelRaceGuardSql}
+    `).bind(nextStatus, notes, taskId, task.version, ...cancelRaceGuardBinds)
 
     const cancelResults = await c.env.DB.batch([
       cancelTaskStmt,
@@ -2073,7 +2327,11 @@ app.post('/review/sym-verify', async (c) => {
     return c.json({ error: 'กรุณาระบุ version ของใบงานเป็นตัวเลขจำนวนเต็มที่ถูกต้อง' }, 400)
   }
 
-  if (decision === 'reject' && !reason?.trim()) {
+  const cleanReviewReason = reason ? reason.trim() : ''
+  if (cleanReviewReason.length > 1000) {
+    return c.json({ error: 'เหตุผลข้อบกพร่องต้องไม่เกิน 1,000 ตัวอักษร' }, 400)
+  }
+  if (decision === 'reject' && !cleanReviewReason) {
     return c.json({ error: 'กรณีปฏิเสธงาน ต้องระบุเหตุผลข้อบกพร่อง' }, 400)
   }
 
@@ -2222,36 +2480,28 @@ app.post('/review/customer-batch-accept', async (c) => {
   if (!branch_id || uniqueTaskIds.length === 0 || !signature_base64) {
     return c.json({ error: 'ข้อมูลไม่ครบถ้วน ต้องระบุสาขา รายการอุปกรณ์ และมีลายเซ็นรับมอบ' }, 400)
   }
+  if (uniqueTaskIds.length > MAX_BATCH_ACCEPT_TASKS) {
+    return c.json({ error: `ตรวจรับได้สูงสุด ${MAX_BATCH_ACCEPT_TASKS} รายการต่อครั้ง` }, 400)
+  }
 
-  const nowTs = Date.now()
-  const mimeMatch = signature_base64.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/)
-  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg'
-  const base64Clean = signature_base64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '')
-  let bytes: Uint8Array
-  try {
-    const binary = atob(base64Clean)
-    bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    if (bytes.length === 0) {
-      return c.json({ error: 'ไฟล์ลายเซ็นว่างเปล่า กรุณาเซ็นใหม่' }, 400)
-    }
-  } catch {
-    return c.json({ error: 'ข้อมูลลายเซ็น Base64 ไม่ถูกต้อง' }, 400)
+  const parsedSig = parseValidatedImageUpload(signature_base64)
+  if (!parsedSig.ok) {
+    return c.json({ error: parsedSig.error }, parsedSig.status)
   }
 
   // ตรวจสอบรายการใบงานที่จะตรวจรับล่วงหน้า: ต้องอยู่ในสาขาที่ระบุ และอยู่สถานะ awaiting_customer_acceptance จริงทั้งหมด
-  const eligibleTasks: Array<{ id: string }> = []
+  const eligibleTasks: Array<{ id: string; version: number }> = []
   for (let i = 0; i < uniqueTaskIds.length; i += 50) {
     const chunk = uniqueTaskIds.slice(i, i + 50)
     const placeholders = chunk.map(() => '?').join(', ')
     const matched = await c.env.DB.prepare(`
-      SELECT t.id
+      SELECT t.id, t.version
       FROM replacement_tasks t
       JOIN scanner_assets s ON s.id = t.scanner_asset_id
       WHERE t.id IN (${placeholders})
         AND s.branch_id = ?
         AND t.status = 'awaiting_customer_acceptance'
-    `).bind(...chunk, branch_id).all<{ id: string }>()
+    `).bind(...chunk, branch_id).all<{ id: string; version: number }>()
     eligibleTasks.push(...(matched.results || []))
   }
 
@@ -2262,38 +2512,66 @@ app.post('/review/customer-batch-accept', async (c) => {
     return c.json({ error: 'มีบางรายการไม่ได้อยู่ในสาขานี้หรือไม่ได้รอตรวจรับมอบแล้ว โปรดรีเฟรชรายการก่อนยืนยัน' }, 409)
   }
 
-  const stmts: D1PreparedStatement[] = []
+  // เปลี่ยนสถานะใบงานและสต็อกเครื่องใหม่ (allocated_to_task -> installed) ใน Transaction เดียวกันก่อนจึงเขียน R2/Audit
+  const stockAcceptPlan = await prepareCustomerAcceptStockStatements(c.env.DB, {
+    taskIds: eligibleTasks.map(t => t.id),
+    actorEmail: user.email,
+  })
 
-  for (const { id: taskId } of eligibleTasks) {
-    stmts.push(
-      c.env.DB.prepare(`
-        UPDATE replacement_tasks SET
-          status = 'delivered',
-          customer_accepted_at = datetime('now'),
-          customer_accepted_by = ?,
-          version = version + 1,
-          updated_at = datetime('now')
-        WHERE id = ? AND status = 'awaiting_customer_acceptance'
-      `).bind(user.email, taskId)
-    )
+  const taskUpdateStmts: D1PreparedStatement[] = eligibleTasks.map(t =>
+    c.env.DB.prepare(`
+      UPDATE replacement_tasks SET
+        status = 'delivered',
+        customer_accepted_at = datetime('now'),
+        customer_accepted_by = ?,
+        version = version + 1,
+        updated_at = datetime('now')
+      WHERE id = ? AND status = 'awaiting_customer_acceptance' AND version = ?
+    `).bind(user.email, t.id, t.version)
+  )
 
+  const batch1Results = await c.env.DB.batch([
+    ...taskUpdateStmts,
+    ...(stockAcceptPlan.itemStatements as D1PreparedStatement[]),
+  ])
+
+  const wonTasks = eligibleTasks.filter((_, idx) => (batch1Results[idx]?.meta?.changes || 0) === 1)
+  if (wonTasks.length === 0) {
+    return c.json({ error: 'รายการใบงานถูกตรวจรับหรือเปลี่ยนสถานะไปก่อนหน้าแล้ว กรุณารีเฟรชรายการ' }, 409)
+  }
+
+  const nowTs = Date.now()
+  const sigNonce = makeUniqueId('sig').split('-').pop() || '0'
+  const { bytes: sigBytes, mimeType: sigMimeType, ext: sigExt, normalizedDataUrl: sigDataUrl } = parsedSig
+
+  // บันทึกลายเซ็น Gable ลง R2 (เฉพาะคำขอที่ชนะ Optimistic Lock แล้วเท่านั้น)
+  const branchSigKey = `branches/${branch_id}/gable_sign_${nowTs}_${sigNonce}.${sigExt}`
+  if (c.env.EVIDENCE_BUCKET) {
+    await c.env.EVIDENCE_BUCKET.put(branchSigKey, sigBytes.buffer, {
+      httpMetadata: { contentType: sigMimeType }
+    })
+  }
+
+  const wonTaskSet = new Set(wonTasks.map(t => t.id))
+  const followupStmts: D1PreparedStatement[] = []
+  for (const { id: taskId } of wonTasks) {
     const revId = makeUniqueId(`rev-gst-${taskId}`)
-    stmts.push(
+    followupStmts.push(
       c.env.DB.prepare(`
         INSERT INTO task_reviews (id, task_id, stage, decision, reviewer_email)
         VALUES (?, ?, 'customer', 'pass', ?)
       `).bind(revId, taskId, user.email)
     )
 
-    const taskSigKey = `tasks/${taskId}/inspector_signature_${nowTs}.jpg`
+    const taskSigKey = `tasks/${taskId}/inspector_signature_${nowTs}_${sigNonce}.${sigExt}`
     if (c.env.EVIDENCE_BUCKET) {
-      await c.env.EVIDENCE_BUCKET.put(taskSigKey, bytes.buffer, {
-        httpMetadata: { contentType: mimeType }
+      await c.env.EVIDENCE_BUCKET.put(taskSigKey, sigBytes.buffer, {
+        httpMetadata: { contentType: sigMimeType }
       })
     }
 
     const evdId = `evd-${taskId}-inspector_signature`
-    stmts.push(
+    followupStmts.push(
       c.env.DB.prepare(`
         INSERT INTO replacement_task_evidence (
           id, replacement_task_id, evidence_type, storage_path, byte_size, mime_type, role_assigned, data_base64
@@ -2309,39 +2587,26 @@ app.post('/review/customer-batch-accept', async (c) => {
         evdId,
         taskId,
         taskSigKey,
-        bytes.length,
-        mimeType,
-        signature_base64
+        sigBytes.length,
+        sigMimeType,
+        sigDataUrl
       )
     )
   }
 
-  // บันทึกลายเซ็น Gable ลง Storage (ระดับสาขา)
-  const sigKey = `branches/${branch_id}/gable_sign_${nowTs}.png`
-  if (c.env.EVIDENCE_BUCKET) {
-    await c.env.EVIDENCE_BUCKET.put(sigKey, bytes.buffer, {
-      httpMetadata: { contentType: mimeType }
-    })
+  for (const entry of stockAcceptPlan.movementEntries) {
+    if (wonTaskSet.has(entry.taskId)) {
+      followupStmts.push(entry.statement as D1PreparedStatement)
+    }
   }
 
-  // เปลี่ยนสถานะเครื่องใหม่ที่ผูกอยู่ (allocated_to_task) เป็นติดตั้งถาวร (installed) พร้อมกับอัปเดต delivered
-  const stockAcceptPlan = await prepareCustomerAcceptStockStatements(c.env.DB, {
-    taskIds: eligibleTasks.map(t => t.id),
-    actorEmail: user.email,
-  })
-  stmts.push(...(stockAcceptPlan.itemStatements as D1PreparedStatement[]))
-
-  await c.env.DB.batch(stmts)
-
-  if (stockAcceptPlan.movementStatements.length > 0) {
-    await runBatchChunks(c.env.DB, stockAcceptPlan.movementStatements, 150)
-  }
+  await runBatchChunks(c.env.DB, followupStmts, 150)
 
   return c.json({
     success: true,
     status: 'delivered',
-    count: eligibleTasks.length,
-    message: `G-Able ตรวจรับงานสำเร็จจำนวน ${eligibleTasks.length} เครื่อง`
+    count: wonTasks.length,
+    message: `G-Able ตรวจรับงานสำเร็จจำนวน ${wonTasks.length} เครื่อง`
   })
 })
 
@@ -2361,8 +2626,8 @@ app.post('/review/customer-reject', async (c) => {
   if (!task_id) {
     return c.json({ error: 'กรุณาระบุรหัสใบงาน (task_id)' }, 400)
   }
-  if (!cleanReason) {
-    return c.json({ error: 'การปฏิเสธงานต้องระบุเหตุผลข้อบกพร่อง' }, 400)
+  if (!cleanReason || cleanReason.length > 1000) {
+    return c.json({ error: 'การปฏิเสธงานต้องระบุเหตุผลข้อบกพร่อง (ไม่เกิน 1,000 ตัวอักษร)' }, 400)
   }
 
   const res = await c.env.DB.prepare(`
@@ -2371,6 +2636,7 @@ app.post('/review/customer-reject', async (c) => {
       customer_rejected_at = datetime('now'),
       customer_reject_reason = ?,
       admin_accepted_at = NULL,
+      admin_accepted_by = NULL,
       closeout_submitted_at = NULL,
       version = version + 1,
       updated_at = datetime('now')
@@ -2491,11 +2757,22 @@ app.post('/discovery', async (c) => {
   }
 
   const branch_id = typeof body.branch_id === 'string' ? body.branch_id.trim() : ''
-  const cleanSn = typeof body.serial_number === 'string' ? body.serial_number.trim() : ''
-  const observed_model = typeof body.observed_model === 'string' ? body.observed_model : undefined
-  const notes = typeof body.notes === 'string' ? body.notes : undefined
-  if (!branch_id || !cleanSn || cleanSn.length > 100) {
-    return c.json({ error: 'ต้องระบุสาขาและ Serial Number ที่ถูกต้อง (ไม่เกิน 100 ตัวอักษร)' }, 400)
+  const rawSn = typeof body.serial_number === 'string' ? body.serial_number : ''
+  const serialCheck = validateSerialFormat(rawSn)
+  const cleanSn = serialCheck.serial
+  const cleanModel = typeof body.observed_model === 'string' ? body.observed_model.trim() : ''
+  const cleanNotes = typeof body.notes === 'string' ? body.notes.trim() : ''
+  if (!branch_id) {
+    return c.json({ error: 'ต้องระบุสาขาที่พบเครื่องสแกนเนอร์' }, 400)
+  }
+  if (!serialCheck.valid) {
+    return c.json({ error: serialCheck.reason || 'รูปแบบ Serial Number ไม่ถูกต้อง' }, 400)
+  }
+  if (cleanModel.length > 160) {
+    return c.json({ error: 'ชื่อรุ่นที่พบต้องไม่เกิน 160 ตัวอักษร' }, 400)
+  }
+  if (cleanNotes.length > 1000) {
+    return c.json({ error: 'หมายเหตุการพบเครื่องต้องไม่เกิน 1,000 ตัวอักษร' }, 400)
   }
 
   const branchRow = await c.env.DB.prepare('SELECT id FROM branches WHERE id = ?').bind(branch_id).first<{ id: string }>()
@@ -2519,45 +2796,66 @@ app.post('/discovery', async (c) => {
   }
 
   const id = makeUniqueId('dsc')
-  const assetId = `ast-${cleanSn.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+  const assetId = await resolveUniqueRowId(c.env.DB, 'scanner_assets', 'ast', cleanSn)
 
-  // ค้นหาหรือสร้าง Branch Work Order
-  let workOrder = await c.env.DB.prepare("SELECT id FROM branch_work_orders WHERE branch_id = ? AND status != 'completed'").bind(branch_id).first<{ id: string }>()
+  // ค้นหาหรือสร้าง Branch Work Order (ป้องกัน Race Duplicate WO)
+  let workOrder = await c.env.DB.prepare(
+    "SELECT id FROM branch_work_orders WHERE branch_id = ? AND status != 'completed' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+  ).bind(branch_id).first<{ id: string }>()
   if (!workOrder) {
     const woId = makeUniqueId(`wo-${branch_id}`)
     const woCode = makeUniqueId('WO').toUpperCase()
-    await c.env.DB.prepare(`
+    const woInsert = await c.env.DB.prepare(`
       INSERT INTO branch_work_orders (id, branch_id, work_order_code, status, created_by)
-      VALUES (?, ?, ?, 'in_progress', ?)
-    `).bind(woId, branch_id, woCode, user.email).run()
-    workOrder = { id: woId }
+      SELECT ?, ?, ?, 'in_progress', ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM branch_work_orders WHERE branch_id = ? AND status != 'completed'
+      )
+    `).bind(woId, branch_id, woCode, user.email, branch_id).run()
+    if ((woInsert.meta?.changes || 0) > 0) {
+      workOrder = { id: woId }
+    } else {
+      workOrder = await c.env.DB.prepare(
+        "SELECT id FROM branch_work_orders WHERE branch_id = ? AND status != 'completed' ORDER BY created_at DESC, rowid DESC LIMIT 1"
+      ).bind(branch_id).first<{ id: string }>()
+    }
+    if (!workOrder) {
+      return c.json({ error: 'ไม่สามารถเปิดใบงานสาขาได้ กรุณาลองใหม่อีกครั้ง' }, 409)
+    }
   }
 
   const taskId = `tsk-${assetId}`
 
   // ดำเนินการเพิ่ม Asset, เปิด Replacement Task, และบันทึก Audit Discovery Report แบบ Atomic Batch
-  await c.env.DB.batch([
-    // 1. เพิ่มเครื่องเข้าทะเบียนทรัพย์สินของสาขานี้ทันที
-    c.env.DB.prepare(`
-      INSERT INTO scanner_assets (id, branch_id, model_name, com_sn, hw_name, brand)
-      VALUES (?, ?, ?, ?, 'Scan Barcode USB', 'Unregistered Discovery')
-    `).bind(assetId, branch_id, observed_model?.trim() || 'Scan Barcode USB', cleanSn),
+  try {
+    await c.env.DB.batch([
+      // 1. เพิ่มเครื่องเข้าทะเบียนทรัพย์สินของสาขานี้ทันที
+      c.env.DB.prepare(`
+        INSERT INTO scanner_assets (id, branch_id, model_name, com_sn, hw_name, brand)
+        VALUES (?, ?, ?, ?, 'Scan Barcode USB', 'Unregistered Discovery')
+      `).bind(assetId, branch_id, cleanModel || 'Scan Barcode USB', cleanSn),
 
-    // 2. สร้าง Replacement Task ในสถานะ in_progress ให้ช่างเริ่มงานได้ทันที
-    c.env.DB.prepare(`
-      INSERT INTO replacement_tasks (
-        id, branch_work_order_id, scanner_asset_id, status, outcome, 
-        started_at, started_by, version
-      ) VALUES (?, ?, ?, 'in_progress', 'replaced', datetime('now'), ?, 1)
-    `).bind(taskId, workOrder.id, assetId, user.email),
+      // 2. สร้าง Replacement Task ในสถานะ in_progress ให้ช่างเริ่มงานได้ทันที
+      c.env.DB.prepare(`
+        INSERT INTO replacement_tasks (
+          id, branch_work_order_id, scanner_asset_id, status, outcome,
+          started_at, started_by, version
+        ) VALUES (?, ?, ?, 'in_progress', 'replaced', datetime('now'), ?, 1)
+      `).bind(taskId, workOrder.id, assetId, user.email),
 
-    // 3. บันทึก Discovery Report พร้อมสถานะ approved อัตโนมัติ เพื่อเป็น Audit Trail สำหรับ Admin
-    c.env.DB.prepare(`
-      INSERT INTO scanner_discovery_reports (
-        id, branch_id, serial_number, observed_model, notes, status, reported_by, reviewed_by, review_note, reviewed_at
-      ) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, 'ช่างเพิ่มหน้างานและเปิดใบงานทันที (Self-Service Onsite)', datetime('now'))
-    `).bind(id, branch_id, cleanSn, observed_model?.trim() || null, notes?.trim() || null, user.email, user.email)
-  ])
+      // 3. บันทึก Discovery Report พร้อมสถานะ approved อัตโนมัติ เพื่อเป็น Audit Trail สำหรับ Admin
+      c.env.DB.prepare(`
+        INSERT INTO scanner_discovery_reports (
+          id, branch_id, serial_number, observed_model, notes, status, reported_by, reviewed_by, review_note, reviewed_at
+        ) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?, 'ช่างเพิ่มหน้างานและเปิดใบงานทันที (Self-Service Onsite)', datetime('now'))
+      `).bind(id, branch_id, cleanSn, cleanModel || null, cleanNotes || null, user.email, user.email)
+    ])
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      return c.json({ error: 'Serial Number นี้ถูกเพิ่มเข้าสาขาจากหน้าจออื่นแล้ว กรุณารีเฟรชรายการ' }, 409)
+    }
+    throw err
+  }
 
   return c.json({
     success: true,
@@ -2618,35 +2916,55 @@ app.post('/discovery/:id/review', async (c) => {
   if (!['approve', 'reject'].includes(decision)) {
     return c.json({ error: 'ผลการพิจารณาไม่ถูกต้อง (ต้องเป็น approve หรือ reject)' }, 400)
   }
+  if (cleanReviewNote && cleanReviewNote.length > 1000) {
+    return c.json({ error: 'หมายเหตุการพิจารณาต้องไม่เกิน 1,000 ตัวอักษร' }, 400)
+  }
 
   const report = await c.env.DB.prepare('SELECT * FROM scanner_discovery_reports WHERE id = ?').bind(id).first<any>()
   if (!report) return c.json({ error: 'ไม่พบรายการรายงานนี้' }, 404)
   if (report.status === 'approved') {
     return c.json({ success: true, status: 'approved', message: 'รายการนี้ได้รับการอนุมัติเข้าทะเบียนแล้ว' })
   }
+  if (report.status === 'rejected') {
+    return c.json({ error: 'รายการนี้ถูกปฏิเสธไปแล้ว' }, 409)
+  }
 
   if (decision === 'approve') {
     const dup = await c.env.DB.prepare('SELECT id FROM scanner_assets WHERE com_sn = ?').bind(report.serial_number).first()
     if (dup) return c.json({ error: 'Serial นี้มีอยู่ในระบบแล้ว ไม่สามารถอนุมัติซ้ำได้' }, 409)
 
-    const assetId = `ast-${report.serial_number.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-    await c.env.DB.batch([
-      c.env.DB.prepare(`
-        INSERT INTO scanner_assets (id, branch_id, model_name, com_sn, hw_name, brand)
-        VALUES (?, ?, ?, ?, 'Scan Barcode USB', 'Unregistered Discovery')
-      `).bind(assetId, report.branch_id, report.observed_model || 'Unknown', report.serial_number),
-      c.env.DB.prepare(`
-        UPDATE scanner_discovery_reports
-        SET status = 'approved', reviewed_by = ?, review_note = ?, reviewed_at = datetime('now')
-        WHERE id = ?
-      `).bind(user.email, cleanReviewNote, id)
-    ])
+    const assetId = await resolveUniqueRowId(c.env.DB, 'scanner_assets', 'ast', String(report.serial_number))
+    try {
+      const results = await c.env.DB.batch([
+        c.env.DB.prepare(`
+          INSERT INTO scanner_assets (id, branch_id, model_name, com_sn, hw_name, brand)
+          SELECT ?, ?, ?, ?, 'Scan Barcode USB', 'Unregistered Discovery'
+          WHERE EXISTS (SELECT 1 FROM scanner_discovery_reports WHERE id = ? AND status = 'pending')
+        `).bind(assetId, report.branch_id, report.observed_model || 'Unknown', report.serial_number, id),
+        c.env.DB.prepare(`
+          UPDATE scanner_discovery_reports
+          SET status = 'approved', reviewed_by = ?, review_note = ?, reviewed_at = datetime('now')
+          WHERE id = ? AND status = 'pending'
+        `).bind(user.email, cleanReviewNote, id)
+      ])
+      if ((results[1]?.meta?.changes || 0) === 0) {
+        return c.json({ error: 'รายการนี้ถูกพิจารณาไปก่อนหน้าแล้ว' }, 409)
+      }
+    } catch (err) {
+      if (isUniqueConstraintError(err)) {
+        return c.json({ error: 'Serial นี้มีอยู่ในระบบแล้ว ไม่สามารถอนุมัติซ้ำได้' }, 409)
+      }
+      throw err
+    }
   } else {
-    await c.env.DB.prepare(`
+    const rejectRes = await c.env.DB.prepare(`
       UPDATE scanner_discovery_reports
       SET status = 'rejected', reviewed_by = ?, review_note = ?, reviewed_at = datetime('now')
-      WHERE id = ?
+      WHERE id = ? AND status = 'pending'
     `).bind(user.email, cleanReviewNote, id).run()
+    if ((rejectRes.meta?.changes || 0) === 0) {
+      return c.json({ error: 'รายการนี้ถูกพิจารณาไปก่อนหน้าแล้ว' }, 409)
+    }
   }
 
   return c.json({ success: true, status: decision === 'approve' ? 'approved' : 'rejected' })
@@ -2654,21 +2972,37 @@ app.post('/discovery/:id/review', async (c) => {
 
 // 17. ประวัติการตรวจรับของใบงาน (Task Review Audit Trail)
 app.get('/tasks/:id/reviews', async (c) => {
+  const user = c.get('user')
   const taskId = c.req.param('id')
   const rows = await c.env.DB.prepare(`
     SELECT id, task_id, stage, decision, reason, reviewer_email, created_at
     FROM task_reviews
     WHERE task_id = ?
     ORDER BY created_at ASC, rowid ASC
-  `).bind(taskId).all()
+  `).bind(taskId).all<{
+    id: string
+    task_id: string
+    stage: string
+    decision: string
+    reason: string | null
+    reviewer_email: string | null
+    created_at: string
+  }>()
 
-  return c.json({ reviews: rows.results || [] })
+  const shouldRedactSymReviewer = user.role === 'customer_reviewer' || user.role === 'viewer'
+  const reviews = (rows.results || []).map(r => (
+    shouldRedactSymReviewer && r.stage === 'sym'
+      ? { ...r, reviewer_email: null }
+      : r
+  ))
+
+  return c.json({ reviews })
 })
 
-// 18. รายชื่อผู้ใช้งานใน Allowlist (สำหรับ Admin)
+// 18. รายชื่อผู้ใช้งานใน Allowlist (เฉพาะ Admin เท่านั้น ป้องกัน Privilege Escalation)
 app.get('/allowlist', async (c) => {
   const user = c.get('user')
-  if (!['admin', 'data_manager'].includes(user.role)) {
+  if (user.role !== 'admin') {
     return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถดูรายชื่อผู้ใช้งานได้' }, 403)
   }
 
@@ -2681,10 +3015,10 @@ app.get('/allowlist', async (c) => {
   return c.json({ users: rows.results || [] })
 })
 
-// 19. เพิ่ม/แก้ไขผู้ใช้งานใน Allowlist (สำหรับ Admin)
+// 19. เพิ่ม/แก้ไขผู้ใช้งานใน Allowlist (เฉพาะ Admin เท่านั้น)
 app.post('/allowlist', async (c) => {
   const user = c.get('user')
-  if (!['admin', 'data_manager'].includes(user.role)) {
+  if (user.role !== 'admin') {
     return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถจัดการรายชื่อผู้ใช้งานได้' }, 403)
   }
 
@@ -2697,32 +3031,47 @@ app.post('/allowlist', async (c) => {
   const role = typeof body.role === 'string' ? body.role.trim() : ''
   const fullName = typeof body.full_name === 'string' ? body.full_name.trim() || null : null
 
-  if (!email || !email.includes('@')) {
-    return c.json({ error: 'กรุณากรอกอีเมลที่ถูกต้อง' }, 400)
+  if (!email || !email.includes('@') || /\s/.test(email) || email.length > 160) {
+    return c.json({ error: 'กรุณากรอกอีเมลที่ถูกต้อง (ไม่เกิน 160 ตัวอักษร)' }, 400)
+  }
+  if (fullName && fullName.length > 160) {
+    return c.json({ error: 'ชื่อ-นามสกุลต้องไม่เกิน 160 ตัวอักษร' }, 400)
   }
 
-  const allowedRoles = ['admin', 'field_technician', 'customer_reviewer', 'viewer']
+  const allowedRoles = ['admin', 'data_manager', 'field_technician', 'customer_reviewer', 'viewer']
   if (!role || !allowedRoles.includes(role)) {
-    return c.json({ error: 'บทบาทไม่ถูกต้อง (ต้องเป็น admin, field_technician, customer_reviewer หรือ viewer)' }, 400)
+    return c.json({ error: 'บทบาทไม่ถูกต้อง (ต้องเป็น admin, data_manager, field_technician, customer_reviewer หรือ viewer)' }, 400)
   }
 
-  const id = `usr-${email.replace(/[^a-zA-Z0-9_-]/g, '_')}`
-  await c.env.DB.prepare(`
-    INSERT INTO google_signin_allowlist (id, email, role, full_name, is_active, created_at)
-    VALUES (?, ?, ?, ?, 1, datetime('now'))
-    ON CONFLICT(email) DO UPDATE SET
-      role = excluded.role,
-      full_name = COALESCE(excluded.full_name, google_signin_allowlist.full_name),
-      is_active = 1
-  `).bind(id, email, role, fullName).run()
+  if (email === user.email && role !== user.role) {
+    return c.json({ error: 'ไม่อนุญาตให้เปลี่ยนบทบาทบัญชีของตนเอง' }, 400)
+  }
+
+  const existingUser = await c.env.DB.prepare(
+    'SELECT id FROM google_signin_allowlist WHERE email = ?'
+  ).bind(email).first<{ id: string }>()
+
+  if (existingUser) {
+    await c.env.DB.prepare(`
+      UPDATE google_signin_allowlist
+      SET role = ?, full_name = COALESCE(?, full_name), is_active = 1
+      WHERE id = ?
+    `).bind(role, fullName, existingUser.id).run()
+  } else {
+    const id = await resolveUniqueRowId(c.env.DB, 'google_signin_allowlist', 'usr', email)
+    await c.env.DB.prepare(`
+      INSERT INTO google_signin_allowlist (id, email, role, full_name, is_active, created_at)
+      VALUES (?, ?, ?, ?, 1, datetime('now'))
+    `).bind(id, email, role, fullName).run()
+  }
 
   return c.json({ success: true, message: `เพิ่ม/อัปเดตสิทธิ์ ${email} สำเร็จ` })
 })
 
-// 20. เปิด/ปิดการใช้งานผู้ใช้งาน (Toggle Active State)
+// 20. เปิด/ปิดการใช้งานผู้ใช้งาน (Toggle Active State — เฉพาะ Admin เท่านั้น)
 app.post('/allowlist/:id/toggle', async (c) => {
   const user = c.get('user')
-  if (!['admin', 'data_manager'].includes(user.role)) {
+  if (user.role !== 'admin') {
     return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถจัดการสิทธิ์ผู้ใช้งานได้' }, 403)
   }
 

@@ -3891,7 +3891,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
                         </Badge>
                       </div>
                       <div className="text-xs text-slate-500">
-                        ผู้ตรวจ: {rev.reviewer_email} · เมื่อ {formatDate(rev.created_at)}
+                        ผู้ตรวจ: {rev.reviewer_email || (isSym ? 'SYM Admin' : 'G-Able Customer')} · เมื่อ {formatDate(rev.created_at)}
                       </div>
                       {rev.reason && (
                         <div className="mt-1.5 text-xs text-red-700">
@@ -4359,6 +4359,7 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
 
   const roleLabels: Record<string, { label: string; tone: string }> = {
     admin: { label: 'Admin Office', tone: 'ready' },
+    data_manager: { label: 'Data Manager', tone: 'ready' },
     field_technician: { label: 'ช่าง Onsite', tone: 'done' },
     customer_reviewer: { label: 'G-Able Reviewer', tone: 'progress' },
     viewer: { label: 'Viewer', tone: 'neutral' },
@@ -4527,6 +4528,7 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
                   className="h-10 rounded-lg border border-slate-300 bg-white px-3 text-[13px] text-slate-900 focus:border-emerald-600 focus:outline-none"
                 >
                   <option value="field_technician">ช่าง Onsite (Field Technician)</option>
+                  <option value="data_manager">Data Manager (จัดการข้อมูลและคลัง)</option>
                   <option value="admin">Admin ประจำ Office</option>
                   <option value="customer_reviewer">G-Able Customer Reviewer</option>
                   <option value="viewer">Viewer (ดูได้อย่างเดียว)</option>

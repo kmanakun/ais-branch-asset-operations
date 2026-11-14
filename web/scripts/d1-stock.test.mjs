@@ -51,28 +51,48 @@ function createMemoryD1(initialSql = `${schemaSql}\n${seedSql}`) {
     }
   }
 
+  let batchQueue = Promise.resolve()
+
   return {
     raw: db,
     prepare(sql) {
       return makeStatement(sql)
     },
-    async batch(stmts) {
-      const results = []
-      db.exec('BEGIN IMMEDIATE;')
-      try {
-        for (const stmt of stmts) {
-          if (/^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(stmt.sql)) {
-            results.push(await stmt.all())
-          } else {
-            results.push(await stmt.run())
+    batch(stmts) {
+      const execBatch = async () => {
+        const results = []
+        db.exec('BEGIN IMMEDIATE;')
+        try {
+          for (const stmt of stmts) {
+            const prepared = db.prepare(stmt.sql)
+            if (/^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i.test(stmt.sql)) {
+              const rows = prepared.all(...stmt.params)
+              results.push({
+                success: true,
+                results: rows.map(row => ({ ...row })),
+                meta: { changes: 0 },
+              })
+            } else {
+              const res = prepared.run(...stmt.params)
+              results.push({
+                success: true,
+                meta: {
+                  changes: Number(res.changes || 0),
+                  last_row_id: Number(res.lastInsertRowid || 0),
+                },
+              })
+            }
           }
+          db.exec('COMMIT;')
+          return results
+        } catch (err) {
+          db.exec('ROLLBACK;')
+          throw err
         }
-        db.exec('COMMIT;')
-        return results
-      } catch (err) {
-        db.exec('ROLLBACK;')
-        throw err
       }
+      const next = batchQueue.then(execBatch, execBatch)
+      batchQueue = next.catch(() => {})
+      return next
     },
   }
 }
@@ -87,13 +107,21 @@ function createMemoryR2() {
         : ArrayBuffer.isView(value)
           ? new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength))
           : new Uint8Array(Buffer.from(String(value)))
-      store.set(key, { bytes, httpMetadata: opts.httpMetadata || {} })
+      store.set(key, { bytes, httpMetadata: opts.httpMetadata || {}, httpEtag: `etag-${store.size + 1}` })
     },
     async get(key) {
       const entry = store.get(key)
       if (!entry) return null
       return {
         httpMetadata: entry.httpMetadata,
+        httpEtag: entry.httpEtag,
+        size: entry.bytes.byteLength,
+        body: entry.bytes.slice(),
+        writeHttpMetadata(headers) {
+          if (entry.httpMetadata?.contentType) {
+            headers.set('content-type', entry.httpMetadata.contentType)
+          }
+        },
         async arrayBuffer() {
           return entry.bytes.slice().buffer
         },
@@ -704,4 +732,170 @@ test('Stock DOA -> ADJ resolve restores defective unit into warehouse inventory 
     body: { serial_numbers: ['SN-DOA-RES-001'], dispatch_area: 'ทีมภาคเหนือ' },
   })
   assert.equal(reDispatch.status, 200)
+})
+
+test('Concurrency TOCTOU guards: simultaneous stock batch actions never emit phantom docs/movements and closeout vs dispatch stays atomic', async () => {
+  const env = createTestEnv()
+  const scanners = await seedBranchesAndScanners(env, 2)
+
+  await apiReq(env, '/api/stock/import/commit', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      defaults: { brand: 'Zebra', model_name: 'DS9308', lot_no: 'PO-CONC', dispatch_mode: 'in_warehouse' },
+      rows: [
+        { source_row: 2, serial_number: 'SN-CONC-1' },
+        { source_row: 3, serial_number: 'SN-CONC-2' },
+      ],
+    },
+  })
+
+  // 1. Concurrent /stock/dispatch on the same SN: exactly one 200 and one 409, zero phantom docs or duplicate movements
+  const [d1, d2] = await Promise.all([
+    apiReq(env, '/api/stock/dispatch', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['SN-CONC-1'], dispatch_area: 'ทีม A' },
+    }),
+    apiReq(env, '/api/stock/dispatch', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['SN-CONC-1'], dispatch_area: 'ทีม B' },
+    }),
+  ])
+  assert.deepEqual([d1.status, d2.status].sort((a, b) => a - b), [200, 409])
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM stock_documents WHERE doc_type = 'dispatch'").get().c,
+    1
+  )
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM stock_movements WHERE action = 'dispatched'").get().c,
+    1
+  )
+
+  // Concurrent /stock/recall on the same dispatched SN
+  const [r1, r2] = await Promise.all([
+    apiReq(env, '/api/stock/recall', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['SN-CONC-1'], note: 'recall 1' },
+    }),
+    apiReq(env, '/api/stock/recall', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['SN-CONC-1'], note: 'recall 2' },
+    }),
+  ])
+  assert.deepEqual([r1.status, r2.status].sort((a, b) => a - b), [200, 409])
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM stock_documents WHERE doc_type = 'adjustment'").get().c,
+    1
+  )
+
+  // Concurrent /stock/doa + /stock/doa/resolve
+  const [doa1, doa2] = await Promise.all([
+    apiReq(env, '/api/stock/doa', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['SN-CONC-1'], note: 'faulty 1' },
+    }),
+    apiReq(env, '/api/stock/doa', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['SN-CONC-1'], note: 'faulty 2' },
+    }),
+  ])
+  assert.deepEqual([doa1.status, doa2.status].sort((a, b) => a - b), [200, 409])
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM stock_documents WHERE doc_type = 'doa_claim'").get().c,
+    1
+  )
+
+  // 2. Race closeout on SN-CONC-2 vs concurrent /stock/dispatch on SN-CONC-2
+  const started = await apiReq(env, '/api/tasks/start', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { scanner_id: scanners.get('OLD-SN-001').id },
+  })
+  const taskId = started.json.task_id
+
+  // Deterministic TOCTOU test: inject a concurrent /stock/dispatch right before closeout executes DB.batch
+  let intercepted = false
+  const origBatch = env.DB.batch.bind(env.DB)
+  const interceptEnv = {
+    ...env,
+    DB: {
+      ...env.DB,
+      batch(stmts) {
+        if (!intercepted && stmts.some(s => String(s.sql).includes('UPDATE replacement_tasks SET'))) {
+          intercepted = true
+          // Simulate concurrent /stock/dispatch committed between prepareCloseoutStockPlan and DB.batch
+          return origBatch([
+            env.DB.prepare(
+              "UPDATE stock_items SET status = 'dispatched', version = version + 1 WHERE serial_number = 'SN-CONC-2' AND version = 1"
+            ),
+          ]).then(() => origBatch(stmts))
+        }
+        return origBatch(stmts)
+      },
+    },
+  }
+
+  const tornCloseRes = await apiReq(interceptEnv, `/api/tasks/${taskId}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'replaced', new_serial_number: 'SN-CONC-2', new_model_name: 'DS9308', version: 1 },
+  })
+  assert.equal(tornCloseRes.status, 409)
+  const taskAfterRace = env.DB.raw.prepare('SELECT status, new_serial_number FROM replacement_tasks WHERE id = ?').get(taskId)
+  const stockAfterRace = env.DB.raw.prepare('SELECT status, linked_task_id, version FROM stock_items WHERE serial_number = ?').get('SN-CONC-2')
+  assert.equal(taskAfterRace.status, 'in_progress')
+  assert.equal(taskAfterRace.new_serial_number, null)
+  assert.equal(stockAfterRace.status, 'dispatched')
+  assert.equal(stockAfterRace.linked_task_id, null)
+  assert.equal(stockAfterRace.version, 2)
+
+  // Now complete legitimate closeout -> SYM pass -> G-Able accept, then test concurrent /old-returns/receive + /handover
+  const okClose = await apiReq(env, `/api/tasks/${taskId}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'replaced', new_serial_number: 'SN-CONC-2', new_model_name: 'DS9308', version: 1 },
+  })
+  assert.equal(okClose.status, 200)
+
+  const [ret1, ret2] = await Promise.all([
+    apiReq(env, '/api/stock/old-returns/receive', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['OLD-SN-001'], note: 'ret 1' },
+    }),
+    apiReq(env, '/api/stock/old-returns/receive', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['OLD-SN-001'], note: 'ret 2' },
+    }),
+  ])
+  assert.deepEqual([ret1.status, ret2.status].sort((a, b) => a - b), [200, 409])
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM stock_documents WHERE doc_type = 'return_in'").get().c,
+    1
+  )
+
+  const [hov1, hov2] = await Promise.all([
+    apiReq(env, '/api/stock/old-returns/handover', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['OLD-SN-001'], recipient_name: 'AIS Rep A' },
+    }),
+    apiReq(env, '/api/stock/old-returns/handover', {
+      method: 'POST',
+      email: 'admin@sym.co.th',
+      body: { serial_numbers: ['OLD-SN-001'], recipient_name: 'AIS Rep B' },
+    }),
+  ])
+  assert.deepEqual([hov1.status, hov2.status].sort((a, b) => a - b), [200, 409])
+  assert.equal(
+    env.DB.raw.prepare("SELECT COUNT(*) as c FROM stock_documents WHERE doc_type = 'handover_out'").get().c,
+    1
+  )
 })

@@ -50,4 +50,4 @@ The commit RPC is deliberately bootstrap-only: it refuses to commit if the branc
 
 ## What “not using Excel” means
 
-The workbook is the one-time source file for checking and importing the existing records. It is not the long-term place to operate the system: once a validated import flow exists, the records will live in Supabase and staff will view or update them in the web application. This review has not imported the workbook or changed its contents.
+The workbook is the one-time source file for checking and importing the existing records. It is not the long-term place to operate the system: once a validated import flow exists, the records will live in Cloudflare D1 and staff will view or update them in the web application. This review has not imported the workbook or changed its contents.
