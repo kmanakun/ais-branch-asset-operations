@@ -8,7 +8,7 @@ export const STOCK_STATUS_META: Record<string, { label: string; tone: StockBadge
   allocated_to_task: { label: 'จองใช้งานหน้างาน', tone: 'warning' },
   installed: { label: 'ติดตั้งตรวจรับแล้ว', tone: 'done' },
   doa_defective: { label: 'แจ้งเสีย (DOA)', tone: 'destructive' },
-  void_hybrid: { label: 'ยกเลิก Hybrid', tone: 'neutral' },
+  void_hybrid: { label: 'ยกเลิกรายการล่วงหน้า', tone: 'neutral' },
   removed_onsite: { label: 'ถอดหน้างาน (รอส่งคืน)', tone: 'warning' },
   returned_to_warehouse: { label: 'รับซากเข้าคลังแล้ว', tone: 'progress' },
   handed_over_to_customer: { label: 'ส่งมอบซากคืนลูกค้าแล้ว', tone: 'done' },
@@ -17,7 +17,7 @@ export const STOCK_STATUS_META: Record<string, { label: string; tone: StockBadge
 
 export const STOCK_SOURCE_MODE_LABELS: Record<string, string> = {
   registered_stock: 'รับเข้าคลังจาก Supplier',
-  hybrid_unregistered: 'Hybrid (รอนำเข้า Supplier)',
+  hybrid_unregistered: 'ปิดงานล่วงหน้า (รอรับเข้า Supplier)',
   onsite_removal: 'ถอดจากสาขาหน้างาน',
 }
 
@@ -32,14 +32,14 @@ export const STOCK_DOC_TYPE_META: Record<string, { label: string; prefix: string
 
 export const STOCK_ACTION_LABELS: Record<string, string> = {
   received: 'รับเข้าคลัง',
-  reconciled_hybrid: 'จับคู่ Hybrid กับไฟล์ Supplier',
+  reconciled_hybrid: 'จับคู่เครื่องกับใบรับเข้า Supplier',
   dispatched: 'เบิกกระจายออกพื้นที่',
   allocated_to_task: 'จองใช้งานกับใบงาน',
   installed: 'ตรวจรับติดตั้งสำเร็จ',
   review_rejected: 'ถูกปฏิเสธงาน (คงจอง SN เดิม)',
   released_from_task: 'ปล่อยคืนจากใบงาน (สลับเครื่อง)',
   marked_doa: 'แจ้งเครื่องใหม่เสีย (DOA)',
-  voided_hybrid: 'ยกเลิก Hybrid (ป้องกัน Ghost Stock)',
+  voided_hybrid: 'ยกเลิกรายการล่วงหน้า (ป้องกันสต็อกค้าง)',
   removed_onsite: 'ถอดเครื่องเดิมออกจากสาขา',
   returned_to_warehouse: 'รับซากเข้าคลัง SYM',
   handed_over_to_customer: 'ส่งมอบซากคืนลูกค้า AIS / G-Able',

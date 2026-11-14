@@ -194,7 +194,7 @@ export function StockLookupBadge({
       )}
       <div className="min-w-0 flex-1">
         <AlertTitle className="flex flex-wrap items-center gap-1.5 text-xs font-bold">
-          <span>{isGreen ? 'พร้อมตัดสต็อกใช้งาน' : 'Hybrid Mode — ปิดงานได้ทันที'}</span>
+          <span>{isGreen ? 'พร้อมตัดสต็อกใช้งาน' : 'ปิดงานได้ทันที (รอรับเข้าภายหลัง)'}</span>
           {item?.model_name && <Badge variant="outline">{item.model_name}</Badge>}
           {item?.lot_no && <Badge variant="neutral">Lot {item.lot_no}</Badge>}
         </AlertTitle>
@@ -257,7 +257,7 @@ export function HybridReconcileCard({
             จับคู่รับเข้า Supplier สำเร็จ ({doneDocCode})
           </AlertTitle>
           <AlertDescription>
-            อัปเกรด SN <span className="font-mono font-semibold">{serial.trim().toUpperCase()}</span> จาก Hybrid เป็นรับเข้าคลังแล้ว
+            อัปเกรด SN <span className="font-mono font-semibold">{serial.trim().toUpperCase()}</span> เข้าระบบสต็อกทางการเรียบร้อย
           </AlertDescription>
         </div>
       </Alert>
@@ -288,7 +288,7 @@ export function HybridReconcileCard({
             brand: cleanBrand || undefined,
             model_name: cleanModel || undefined,
             lot_no: cleanLot,
-            note: cleanNote || 'จับคู่รับเข้า Supplier จากรายการ Hybrid',
+            note: cleanNote || 'จับคู่รับเข้าจาก Supplier สำหรับรายการปิดงานล่วงหน้า',
           },
         ],
         defaults: {
@@ -319,7 +319,7 @@ export function HybridReconcileCard({
           <FileCheck2 size={15} className="shrink-0 text-amber-700" />
           <div className="min-w-0">
             <strong className="block text-xs font-bold text-amber-950">
-              Hybrid Mode — รอจับคู่รับเข้า Supplier (RCV)
+              รอจับคู่ใบรับเข้า Supplier (RCV)
             </strong>
             <span className="text-[11.5px] text-amber-800">
               บันทึกเลข Lot / PO ยี่ห้อและรุ่น เพื่ออัปเกรดเข้าเอกสารสต็อกทางการโดยไม่เปลี่ยนสถานะงาน

@@ -40,6 +40,22 @@ export function setDevEmail(email: string): void {
   }
 }
 
+/**
+ * Resolves a human-readable display name for an actor without leaking full email addresses
+ * or `@domain` suffixes in technician/admin-facing UI fields.
+ */
+export function formatDisplayActorName(name: unknown, email?: unknown): string {
+  const cleanName = typeof name === 'string' ? name.trim() : ''
+  if (cleanName) {
+    const at = cleanName.indexOf('@')
+    return at > 0 ? cleanName.slice(0, at) : cleanName
+  }
+  const cleanEmail = typeof email === 'string' ? email.trim() : ''
+  if (!cleanEmail) return ''
+  const at = cleanEmail.indexOf('@')
+  return at > 0 ? cleanEmail.slice(0, at) : cleanEmail
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {})
   headers.set('Content-Type', 'application/json')

@@ -391,7 +391,7 @@ function StockSummarySection({
       onClick: () => onFilterSelect({ unitType: 'new_unit', status: 'installed' }),
     },
     {
-      label: 'รอนำเข้า Hybrid Mode',
+      label: 'รอรับเข้า Supplier',
       value: n ? n.hybrid_unregistered : 0,
       sub: 'ปิดงานแล้ว รอจับคู่ไฟล์ Supplier',
       tone: 'text-amber-700',
@@ -443,7 +443,7 @@ function StockSummarySection({
           {summary.by_dispatch_area.length > 0 && (
             <Card className="min-w-0 p-3.5">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">พื้นที่/ทีมที่เบิกกระจาย (Model B)</span>
+                <span className="text-xs font-bold text-slate-700">พื้นที่/ทีมที่เบิกกระจาย</span>
                 <span className="text-[11px] text-slate-500">คลิกเพื่อกรอง</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -659,7 +659,7 @@ function StockInventorySection({
           <div className="min-w-0">
             <CardTitle>ทะเบียนสต็อกเครื่องสแกนเนอร์ราย Serial</CardTitle>
             <CardDescription>
-              ค้นหา ตรวจสถานะเครื่องใหม่/ซากเครื่องเดิม กรองตามพื้นที่ Model B และติดตาม Movement ย้อนหลัง
+              ค้นหา ตรวจสถานะเครื่องใหม่/ซากเครื่องเดิม กรองตามพื้นที่ และติดตามประวัติความเคลื่อนไหวย้อนหลัง
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -727,15 +727,15 @@ function StockInventorySection({
           >
             <option value="">ทุกสถานะที่ใช้งานอยู่</option>
             <option value="in_warehouse,dispatched">พร้อมเบิก/ใช้งาน (คลัง+พื้นที่)</option>
-            <option value="in_warehouse">อยู่ในคลังกลาง (in_warehouse)</option>
-            <option value="dispatched">เบิกออกพื้นที่ (dispatched)</option>
-            <option value="allocated_to_task">จองใช้งานหน้างาน (allocated)</option>
-            <option value="installed">ติดตั้งตรวจรับแล้ว (installed)</option>
-            <option value="doa_defective">แจ้งเสีย DOA</option>
+            <option value="in_warehouse">อยู่ในคลังกลาง</option>
+            <option value="dispatched">เบิกออกพื้นที่</option>
+            <option value="allocated_to_task">จองใช้งานหน้างาน</option>
+            <option value="installed">ติดตั้งตรวจรับแล้ว</option>
+            <option value="doa_defective">แจ้งเสีย (DOA)</option>
             <option value="removed_onsite">ซากถอดหน้างาน (รอส่งคืน)</option>
             <option value="returned_to_warehouse">รับซากเข้าคลังแล้ว</option>
             <option value="handed_over_to_customer">ส่งมอบซากคืนลูกค้าแล้ว</option>
-            <option value="void_hybrid">ยกเลิก Hybrid</option>
+            <option value="void_hybrid">ยกเลิกรายการล่วงหน้า</option>
             <option value="cancelled_restored">ยกเลิกงาน/คืนสถานะ</option>
           </select>
 
@@ -747,7 +747,7 @@ function StockInventorySection({
           >
             <option value="">ทุกแหล่งที่มา</option>
             <option value="registered_stock">รับเข้าจาก Supplier ปกติ</option>
-            <option value="hybrid_unregistered">Hybrid (รอนำเข้า Supplier)</option>
+            <option value="hybrid_unregistered">ปิดงานล่วงหน้า (รอนำเข้า Supplier)</option>
             <option value="onsite_removal">ถอดจากสาขาหน้างาน</option>
           </select>
 
@@ -773,7 +773,7 @@ function StockInventorySection({
                 checked={includeVoid}
                 onChange={e => setIncludeVoid(e.target.checked)}
               />
-              <span>แสดงรายการที่ยกเลิก (Void Hybrid / Cancelled)</span>
+              <span>แสดงรายการที่ถูกยกเลิก</span>
             </label>
           </div>
           {(search || status || area || unitType || sourceMode) && (
@@ -1167,7 +1167,7 @@ function StockImportSection({
           <div>
             <CardTitle>นำเข้าสต็อกเครื่องใหม่จาก Supplier (.xlsx)</CardTitle>
             <CardDescription>
-              รองรับไฟล์ที่มีเฉพาะคอลัมน์ Serial Number หรือไฟล์ที่มีคอลัมน์เสริม พร้อมตรวจเลขเพี้ยน (2.3E+14 / .0) และจับคู่ Hybrid Mode อัตโนมัติ
+              รองรับไฟล์ที่มีเฉพาะคอลัมน์ Serial Number หรือไฟล์ที่มีคอลัมน์เสริม พร้อมตรวจเลขเพี้ยน (2.3E+14 / .0) และจับคู่เครื่องที่ปิดงานล่วงหน้าอัตโนมัติ
             </CardDescription>
           </div>
           <Button type="button" size="sm" variant="outline" onClick={() => void handleDownloadTemplate()}>
@@ -1263,7 +1263,7 @@ function StockImportSection({
               />
             </label>
             <label className="text-xs font-medium text-slate-700">
-              สถานะปลายทางเมื่อรับเข้า (Model B)
+              สถานะปลายทางเมื่อรับเข้า
               <select
                 value={defaults.dispatch_mode || 'in_warehouse'}
                 onChange={e => {
@@ -1272,8 +1272,8 @@ function StockImportSection({
                 }}
                 className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs text-slate-800"
               >
-                <option value="in_warehouse">รับเข้าคลังกลาง SYM (in_warehouse)</option>
-                <option value="dispatched">รับเข้าพร้อมเบิกกระจายทันที (dispatched)</option>
+                <option value="in_warehouse">รับเข้าคลังกลาง SYM</option>
+                <option value="dispatched">รับเข้าพร้อมเบิกกระจายทันที</option>
                 <option value="auto_by_column">อ้างอิงตามคอลัมน์ พื้นที่ ในไฟล์</option>
               </select>
             </label>
@@ -1338,7 +1338,7 @@ function StockImportSection({
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <span className="font-bold text-slate-800">ผลตรวจ Preview ({preview.summary.total.toLocaleString('th-TH')} แถว):</span>
                 <Badge variant="done">รับเข้าใหม่ {preview.summary.create_new}</Badge>
-                <Badge variant="progress">จับคู่ Hybrid {preview.summary.reconcile_hybrid}</Badge>
+                <Badge variant="progress">จับคู่ปิดงานล่วงหน้า {preview.summary.reconcile_hybrid}</Badge>
                 {preview.summary.reactivate > 0 && <Badge variant="warning">เปิดใช้ซ้ำ {preview.summary.reactivate}</Badge>}
                 {preview.summary.errors > 0 && <Badge variant="destructive">ผิดพลาด {preview.summary.errors}</Badge>}
               </div>
@@ -1362,7 +1362,7 @@ function StockImportSection({
                 const actionLabel = row.action === 'create_new'
                   ? 'รับเข้าใหม่'
                   : row.action === 'reconcile_hybrid'
-                    ? 'จับคู่ Hybrid'
+                    ? 'จับคู่ปิดงานล่วงหน้า'
                     : row.action === 'reactivate'
                       ? 'เปิดใช้ซ้ำ'
                       : 'ผิดพลาด'
@@ -1385,8 +1385,8 @@ function StockImportSection({
                       {row.reason
                         ? <span className="text-red-700">{row.reason}</span>
                         : row.action === 'reconcile_hybrid'
-                          ? <span className="text-sky-700">จับคู่กับ SN ที่ช่างปิดงานไปแล้ว ({row.existing_status})</span>
-                          : <span className="text-emerald-700">พร้อมนำเข้าเป็น {row.target_status}</span>}
+                          ? <span className="text-sky-700">จับคู่กับ SN ที่ช่างปิดงานไปแล้ว ({getStockStatusMeta(row.existing_status).label})</span>
+                          : <span className="text-emerald-700">พร้อมนำเข้าเป็น {getStockStatusMeta(row.target_status).label}</span>}
                     </div>
                   </div>
                 )
@@ -1424,7 +1424,7 @@ function StockImportSection({
                           {row.action === 'create_new'
                             ? 'รับเข้าใหม่'
                             : row.action === 'reconcile_hybrid'
-                              ? 'จับคู่ Hybrid'
+                              ? 'จับคู่ปิดงานล่วงหน้า'
                               : row.action === 'reactivate'
                                 ? 'เปิดใช้ซ้ำ'
                                 : 'ผิดพลาด'}
@@ -1439,8 +1439,8 @@ function StockImportSection({
                         {row.reason
                           ? <span className="text-red-700">{row.reason}</span>
                           : row.action === 'reconcile_hybrid'
-                            ? <span className="text-sky-700">จับคู่กับ SN ที่ช่างปิดงานไปแล้ว ({row.existing_status})</span>
-                            : <span className="text-emerald-700">พร้อมนำเข้าเป็น {row.target_status}</span>}
+                            ? <span className="text-sky-700">จับคู่กับ SN ที่ช่างปิดงานไปแล้ว ({getStockStatusMeta(row.existing_status).label})</span>
+                            : <span className="text-emerald-700">พร้อมนำเข้าเป็น {getStockStatusMeta(row.target_status).label}</span>}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -1562,7 +1562,7 @@ function StockOperationsSection({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>จัดการสต็อกคลังกลาง & พื้นที่ (Model B)</CardTitle>
+        <CardTitle>จัดการสต็อกคลังกลาง & เบิกกระจายพื้นที่</CardTitle>
         <CardDescription>
           เบิกกระจายเครื่องใหม่ออกพื้นที่/ทีม, ดึงเครื่องที่ยังไม่ใช้กลับคลังกลาง, แจ้งเครื่องใหม่เสีย (DOA) หรือรับคืนเครื่องเคลมกลับคลังกลาง
         </CardDescription>
@@ -2388,7 +2388,7 @@ function StockSerialTimelineModal({
 }
 
 const STOCK_DOC_SUBTITLES: Record<StockDocumentRecord['doc_type'], string> = {
-  receive: 'เอกสารบันทึกการตรวจรับเครื่องสแกนใหม่เข้าคลังจาก Supplier (หรือจับคู่ Hybrid Mode)',
+  receive: 'เอกสารบันทึกการตรวจรับเครื่องสแกนใหม่เข้าคลังจาก Supplier (รวมจับคู่รายการปิดงานล่วงหน้า)',
   dispatch: 'ใบเบิกจ่ายและกระจายเครื่องสแกนใหม่ไปยังพื้นที่ปฏิบัติงาน / ทีมช่างภาคสนาม',
   return_in: 'ใบรับคืนซากเครื่องสแกนเก่าที่ถอดจากสาขาเข้าสู่คลังกลาง SYM (Reverse Logistics ขาเข้า)',
   handover_out: 'ใบส่งมอบซากเครื่องสแกนเก่าคืนให้ลูกค้า AIS / G-Able (Reverse Logistics ขาออก)',

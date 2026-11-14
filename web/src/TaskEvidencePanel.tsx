@@ -726,7 +726,7 @@ export default function TaskEvidencePanel({ taskId, canEdit, canView, previewOnl
         />)}
       </div>
     </div>
-    {isTechnicianEditing && <p className="evidence-storage-note">ระบบจะย่อรูปเป็น JPEG อัตโนมัติ (สูงสุด 90 KB ต่อรูป และ 32 KB ต่อลายเซ็น) เพื่อความรวดเร็วในการอัปโหลดบนมือถือ หากอ่านเลข SN ไม่ชัด ให้ครอปเฉพาะฉลากแล้วถ่ายใหม่</p>}
+    {isTechnicianEditing && <p className="evidence-storage-note">ระบบจะปรับขนาดรูปอัตโนมัติเพื่อความรวดเร็วในการส่งข้อมูลบนมือถือ หากอ่านเลข SN ไม่ชัด กรุณาถ่ายใกล้หรือครอปให้เห็นฉลากชัดเจน</p>}
     {showActionNotice && actionNotice && (
       <p
         className={`task-evidence-message${actionNotice.tone === 'error' ? ' is-error' : ''}`}

@@ -39,7 +39,7 @@ import TaskEvidencePanel, { requiredEvidenceSlotsForOutcome, type EvidenceSlot, 
 import { groupRowsByBranch } from './province'
 import { ScannerDiscoveryDialog, ScannerDiscoveryQueue, type BranchReference } from './ScannerDiscovery'
 import { lockBodyScroll, useDialogControls } from './dialog'
-import { ApiError, type AuthConfigResponse, d1Api, getDevEmail, setDevAuthHeadersEnabled, setDevEmail, type StockItemRecord } from './d1-client'
+import { ApiError, type AuthConfigResponse, d1Api, formatDisplayActorName, getDevEmail, setDevAuthHeadersEnabled, setDevEmail, type StockItemRecord } from './d1-client'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
 import { HybridReconcileCard, StockLookupBadge } from './StockLookupBadge'
 import { StockManagementPanel } from './StockManagementPanel'
@@ -89,12 +89,12 @@ const pageCopy: Record<MenuKey, { title: string; shortTitle: string; subtitle: s
   overview: { title: 'ภาพรวมการปฏิบัติงาน', shortTitle: 'ภาพรวม', subtitle: 'สถานะสาขา อุปกรณ์ และใบงานเปลี่ยน Scanner' },
   work_orders: { title: 'ใบงานเปลี่ยน Scanner', shortTitle: 'ใบงาน', subtitle: 'เปิดดูงานทุกใบและรายละเอียด Scanner ที่ต้องดำเนินการ' },
   assets: { title: 'ทะเบียนอุปกรณ์', shortTitle: 'ทะเบียนอุปกรณ์', subtitle: 'ดูข้อมูลสาขาและเครื่องสแกนที่ผูกกับแต่ละ LocationCode' },
-  stock: { title: 'คลังสต็อกเครื่องสแกนเนอร์', shortTitle: 'สต็อกเครื่อง', subtitle: 'รับเข้า Supplier · เบิกกระจายพื้นที่ · Hybrid Mode · รับซากส่งคืน' },
+  stock: { title: 'คลังสต็อกเครื่องสแกนเนอร์', shortTitle: 'สต็อกเครื่อง', subtitle: 'รับเข้า Supplier · เบิกกระจายพื้นที่ · ปิดงานล่วงหน้า · รับซากส่งคืน' },
   pending: { title: 'รายการ Pending รอตรวจ', shortTitle: 'รอตรวจรับ', subtitle: 'ตรวจผลหน้างาน รูปภาพ และลายเซ็นที่ช่างส่งมา' },
   completed: { title: 'ใบงานที่เสร็จแล้ว', shortTitle: 'เสร็จแล้ว', subtitle: 'ดูงานที่ส่งมอบหรือปิดผลแล้ว พร้อมเปิดหลักฐานและประวัติย้อนหลัง' },
   discovery: { title: 'เครื่องนอกทะเบียน', shortTitle: 'นอกทะเบียน', subtitle: 'ตรวจรายการที่ช่างพบเพิ่ม โดยไม่ปะปนกับทะเบียนอุปกรณ์หลัก' },
   imports: { title: 'นำเข้าข้อมูล', shortTitle: 'นำเข้าข้อมูล', subtitle: 'ตรวจสอบไฟล์ทะเบียนก่อนบันทึกเป็นชุดข้อมูลเดียว' },
-  people: { title: 'สิทธิ์ผู้ใช้งาน', shortTitle: 'สิทธิ์ผู้ใช้งาน', subtitle: 'จัดการบัญชี Google และบทบาทผู้มีสิทธิ์เข้าใช้งานระบบ (Allowlist)' },
+  people: { title: 'สิทธิ์ผู้ใช้งาน', shortTitle: 'สิทธิ์ผู้ใช้งาน', subtitle: 'จัดการบัญชี Google และบทบาทผู้มีสิทธิ์เข้าใช้งานระบบ' },
 }
 
 const ACTIVE_MENU_STORAGE_KEY = 'ais-branch-asset-operations:active-menu'
@@ -194,18 +194,6 @@ function formatDate(value: unknown) {
     ? { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Bangkok' }
     : { dateStyle: 'medium', timeZone: 'Asia/Bangkok' }
   return new Intl.DateTimeFormat('th-TH', options).format(date)
-}
-
-function formatDisplayActorName(name: unknown, email?: unknown): string {
-  const cleanName = typeof name === 'string' ? name.trim() : ''
-  if (cleanName) {
-    const at = cleanName.indexOf('@')
-    return at > 0 ? cleanName.slice(0, at) : cleanName
-  }
-  const cleanEmail = typeof email === 'string' ? email.trim() : ''
-  if (!cleanEmail) return ''
-  const at = cleanEmail.indexOf('@')
-  return at > 0 ? cleanEmail.slice(0, at) : cleanEmail
 }
 
 function StatusPill({ label, tone = 'neutral' }: { label: string; tone?: string }) {
@@ -476,13 +464,13 @@ function App() {
     if (!authError && !oauthError && !errorCode && !errorDescription) return
 
     const authErrorMessages: Record<string, string> = {
-      not_allowlisted: 'เข้าสู่ระบบ Google สำเร็จ แต่บัญชีอีเมลนี้ยังไม่อยู่ในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) กรุณาติดต่อเจ้าของระบบหรือลองบัญชี Google อื่น',
+      not_allowlisted: 'เข้าสู่ระบบ Google สำเร็จ แต่บัญชีอีเมลนี้ยังไม่ได้รับอนุมัติสิทธิ์เข้าใช้งาน กรุณาติดต่อผู้ดูแลระบบหรือลองบัญชี Google อื่น',
       unverified_email: 'บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล จึงไม่สามารถเข้าใช้งานระบบได้',
       access_denied: 'ยกเลิกการเข้าสู่ระบบด้วย Google',
       invalid_state: 'ลิงก์ยืนยันตัวตนหมดอายุหรือไม่ถูกต้อง กรุณากดเข้าสู่ระบบด้วย Google ใหม่อีกครั้ง',
-      oauth_misconfigured: 'การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อเจ้าของระบบ',
-      oauth_not_configured: 'ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / SESSION_SECRET บน Cloudflare Pages',
-      oauth_failed: 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อเจ้าของระบบ',
+      oauth_misconfigured: 'ระบบเข้าสู่ระบบด้วย Google ยังตั้งค่าไม่สมบูรณ์ กรุณาติดต่อผู้ดูแลระบบ',
+      oauth_not_configured: 'ระบบเข้าสู่ระบบด้วย Google ยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ',
+      oauth_failed: 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อผู้ดูแลระบบ',
     }
 
     setLoginError(
@@ -512,7 +500,7 @@ function App() {
         setDevAuthHeadersEnabled(cfg.dev_auth_enabled)
 
         if (cfg.mode === 'misconfigured') {
-          setLoginError('การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบ (ต้องระบุ GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET และ SESSION_SECRET)')
+          setLoginError('ระบบเข้าสู่ระบบด้วย Google ยังตั้งค่าไม่สมบูรณ์ กรุณาติดต่อผู้ดูแลระบบ')
           return
         }
 
@@ -764,7 +752,7 @@ function App() {
       return
     }
     if (authConfig.mode === 'misconfigured') {
-      setLoginError('การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อเจ้าของระบบ')
+      setLoginError('ระบบเข้าสู่ระบบด้วย Google ยังตั้งค่าไม่สมบูรณ์ กรุณาติดต่อผู้ดูแลระบบ')
       return
     }
     setLoginError('ระบบกำลังทำงานในโหมดทดสอบ (รอเปิดใช้งาน Google OAuth) กรุณาเลือกสิทธิ์ผู้ใช้งานจากแถบด้านบน (Dev Auth Bar)')
@@ -1183,12 +1171,12 @@ function LoginPage({ onGoogleSignIn, onDemo, error, configured, submitting }: {
         </button>
         <div className="login-separator"><span>หรือ</span></div>
         <button className="demo-button" type="button" onClick={onDemo}><Activity size={17} /> ดูตัวอย่างระบบด้วยข้อมูลจำลอง</button>
-        <div className="privacy-note"><ShieldCheck size={15} className="shrink-0" /> <span>อนุญาตเฉพาะบัญชีใน Allowlist · โหมดตัวอย่างใช้ข้อมูลจำลอง</span></div>
+        <div className="privacy-note"><ShieldCheck size={15} className="shrink-0" /> <span>เข้าใช้งานได้เฉพาะบัญชีที่ได้รับอนุมัติ · โหมดตัวอย่างใช้ข้อมูลจำลอง</span></div>
       </div>
-      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={() => setHelpOpen(open => !open)} aria-expanded={helpOpen} aria-controls="login-help-note">ติดต่อเจ้าของระบบ</button></div>
+      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={() => setHelpOpen(open => !open)} aria-expanded={helpOpen} aria-controls="login-help-note">ติดต่อผู้ดูแลระบบ</button></div>
       {helpOpen && (
         <div id="login-help-note" className="login-help-note w-full max-w-[400px]" role="status">
-          <span>ใช้บัญชี Google ที่ได้รับอนุมัติในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) หากยังเข้าไม่ได้ให้แจ้งอีเมล Google ของคุณกับเจ้าของระบบทาง LINE เพื่อเพิ่มสิทธิ์</span>
+          <span>ใช้บัญชี Google ที่ได้รับอนุมัติสิทธิ์จากผู้ดูแลระบบ หากยังเข้าใช้งานไม่ได้ กรุณาแจ้งอีเมล Google ของคุณทาง LINE เพื่อขอเพิ่มสิทธิ์</span>
         </div>
       )}
       <div className="login-footer-copyright">© 2026 AIS Branch &amp; Asset Operations · ระบบภายใน</div>
@@ -1386,7 +1374,7 @@ function Assets({ role, currentEmail, demo, items, loading, error, onRetry, onTa
           <div className="stat-icon violet"><MapPin size={16} /></div>
         </div>
         <strong>{provinceCount.toLocaleString('th-TH')}</strong>
-        <small>ไม่ตัดแบ่งสาขาเดียวกันข้ามหน้า</small>
+        <small>ตามเงื่อนไขตัวกรองปัจจุบัน</small>
       </div>
       <div className="asset-summary-card">
         <div className="asset-summary-top">
@@ -2358,7 +2346,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                         />
                         {task.outcome !== 'different_device_found' && Boolean(task.new_serial_number) && (
                           task.stock_source_mode === 'hybrid_unregistered' ? (
-                            <Badge variant="warning">Hybrid · รอรับเข้า Supplier</Badge>
+                            <Badge variant="warning">รอลงบัญชีรับเข้า Supplier</Badge>
                           ) : task.stock_source_mode === 'registered_stock' ? (
                             <Badge variant="green">
                               ตัดสต็อกคลัง{task.stock_lot_no ? ` · Lot ${String(task.stock_lot_no)}` : ''}
@@ -3532,7 +3520,7 @@ function StockPickerModal({
           ) : items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 bg-white px-4 py-10 text-center text-xs text-slate-500">
               <strong className="mb-1 block text-sm text-slate-700">ไม่พบเครื่องพร้อมใช้งานที่ตรงกับตัวกรอง</strong>
-              <span>สามารถล้างคำค้นหา หรือกรอก Serial Number หน้างานโดยตรงเพื่อใช้ Hybrid Mode ได้</span>
+              <span>สามารถล้างคำค้นหา หรือกรอก Serial Number ที่พบหน้างานโดยตรงเพื่อปิดงานได้</span>
             </div>
           ) : (
             <>
@@ -3879,7 +3867,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
           <section className="detail-section work-order-section--original"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
           <section className="detail-section work-order-serial-section"><h3>Serial เครื่องเก่าและเครื่องใหม่</h3><div className="work-order-serial-comparison"><div className="work-order-serial-old"><span>SN เครื่องเดิม</span><strong>{String(serial)}</strong>{!demo && role !== 'viewer' && outcome === 'replaced' && !['open', 'in_progress'].includes(stage) && Boolean(serial) && <StockLookupBadge serial={String(serial)} taskId={taskId} enabled={true} mode="review" />}</div><span className="work-order-serial-arrow" aria-hidden="true"><ArrowRight size={15} /></span>{canAct && stage === 'in_progress' && isReplacement ? <div className="work-order-new-serial-input"><div className="mb-1 flex flex-wrap items-center justify-between gap-2"><span>SN เครื่องใหม่ *</span><div className="flex flex-wrap items-center gap-1.5">{!demo && role !== 'viewer' && <Button type="button" variant="outline" size="sm" className="h-7 border-emerald-200 bg-emerald-50/70 px-2.5 text-xs text-emerald-700 hover:bg-emerald-100" onClick={() => setShowStockPicker(true)}><Package size={13} /> เลือกจากสต็อก</Button>}<Button type="button" variant="outline" size="sm" className="h-7 border-slate-300 bg-white px-2.5 text-xs text-slate-700 hover:bg-slate-50" onClick={() => setShowNewSnScanner(true)}><ScanBarcode size={13} /> สแกนบาร์โค้ด</Button></div></div><Input ref={newSerialInputRef} aria-label="SN เครื่องใหม่" value={newSerialInput} onChange={event => { setNewSerialInput(event.target.value); setActionError('') }} maxLength={100} required autoComplete="off" placeholder="กรอก Serial ใหม่ หรือกดปุ่มสแกน" /><StockLookupBadge serial={newSerialInput} taskId={taskId} enabled={!demo && role !== 'viewer'} mode="closeout" onAvailabilityChange={(allowed, reason) => { setStockLookupAllowed(allowed); setStockLookupBlockedReason(allowed ? '' : reason) }} /></div> : <div className="work-order-serial-new"><span>SN เครื่องใหม่</span><strong>{newSerial ? String(newSerial) : 'ยังไม่มีข้อมูล'}</strong>{!demo && role !== 'viewer' && Boolean(newSerial) && <StockLookupBadge serial={String(newSerial)} taskId={taskId} enabled={true} mode="review" />}</div>}</div>{outcome === 'different_device_found' && <div className="work-order-observed-serial"><span>SN อุปกรณ์ที่พบ</span><strong>{observedSerial ? String(observedSerial) : 'ยังไม่มีข้อมูล'}</strong></div>}</section>
           {(status === 'blocked' || isPendingStage) && Boolean(task.blocked_reason || exceptionReason) && <section className="detail-section work-order-exception-panel"><h3>เหตุผลที่ Pending</h3><p className="task-blocked-reason">{String(task.blocked_reason || exceptionReason)}</p></section>}
-          <section className="detail-section work-order-section--result"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField className="detail-field--actor" label="ผู้ปฏิบัติงานที่ส่งผล" value={formatDisplayActorName(task.closeout_submitted_by_name || task.performed_by_name, task.closeout_submitted_by || task.started_by) || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} />{(Boolean(observedSerial) || outcome === 'different_device_found') && <DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} />}<DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || '—'} /></div><p className="detail-empty-result">ผู้ปฏิบัติงานและเวลาอ้างอิงจากบัญชีที่ส่งผลและเวลาที่บันทึกจริง</p></section>
+          <section className="detail-section work-order-section--result"><h3>ผลการเปลี่ยน/ตรวจสอบ</h3><div className="detail-grid"><DetailField label="ผลใบงาน" value={outcome ? getStatusPresentation(outcome).label : 'ยังไม่ส่งผลปฏิบัติงาน'} /><DetailField className="detail-field--actor" label="ผู้ปฏิบัติงานที่ส่งผล" value={formatDisplayActorName(task.closeout_submitted_by_name || task.performed_by_name, task.closeout_submitted_by || task.started_by) || 'ยังไม่มีผู้ส่งผลปฏิบัติงาน'} /><DetailField label="วันและเวลาปฏิบัติงาน" value={formatDate(task.performed_at) || 'ยังไม่มีเวลาบันทึก'} /><DetailField label="SN เดิมตามทะเบียน" value={task.old_serial_snapshot || serial} />{(Boolean(observedSerial) || outcome === 'different_device_found') && <DetailField label={outcome === 'different_device_found' ? 'SN เครื่องที่พบ' : 'Serial อุปกรณ์ที่พบ'} value={observedSerial || 'ยังไม่มีข้อมูล'} />}<DetailField label="เหตุผล/หมายเหตุ" value={exceptionReason || task.old_scanner_note || '—'} /></div></section>
           {reviews.length > 0 && (
             <section className="detail-section">
               <h3>ประวัติการตรวจรับ (Governance Audit Trail)</h3>
@@ -4270,7 +4258,7 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
         <div className="import-actions"><button className="secondary-button" disabled={busy || commitUncertain} onClick={resetImport}>ยกเลิกชุดนี้</button><button className="primary-button" disabled={busy || preview.issue_count > 0} onClick={() => void commitImport()}>{busy ? 'กำลังบันทึก…' : commitUncertain ? 'ตรวจสอบผลนำเข้า' : `บันทึก ${preview.row_count.toLocaleString('th-TH')} รายการเข้าระบบ`}</button></div>
       </section>}
       {result && <div className="import-success" role="status"><CheckCircle2 size={18} /><span>นำเข้าสำเร็จ: เพิ่ม {result.inserted.toLocaleString('th-TH')} เครื่อง · อัปเดต {result.updated.toLocaleString('th-TH')} เครื่อง</span><button className="secondary-button" onClick={resetImport}>ปิดผลลัพธ์</button></div>}
-      <div className="file-rules"><h3>กติกาตรวจสอบก่อนบันทึก</h3><div className="rule"><CheckCircle2 size={16} /><span><strong>comSN</strong> เป็นกุญแจจับคู่; ค่าเดิมอัปเดตเฉพาะช่องที่อนุญาตและไม่ว่าง</span></div><div className="rule"><CheckCircle2 size={16} /><span>Serial ใหม่เพิ่มรายการ; Serial ซ้ำในไฟล์หรืออยู่คนละสาขาจะปฏิเสธทั้งชุด</span></div><div className="rule"><CheckCircle2 size={16} /><span>สาขาต้องตรงกับ LocationCode และชื่อที่ปรับช่องว่างแล้ว; ไม่ย้ายเครื่องข้ามสาขา</span></div><div className="rule"><CheckCircle2 size={16} /><span>ไฟล์ที่มีแถวผิดจะบันทึกไม่ได้ และการนำเข้าไม่เปลี่ยนประวัติงาน</span></div></div>
+      <div className="file-rules"><h3>กติกาตรวจสอบก่อนบันทึก</h3><div className="rule"><CheckCircle2 size={16} /><span>อ้างอิงเลข <strong>comSN</strong> เพื่อจับคู่ข้อมูลเดิม และอัปเดตเฉพาะช่องที่อนุญาต</span></div><div className="rule"><CheckCircle2 size={16} /><span>Serial ใหม่จะถูกเพิ่มเข้าระบบ ส่วน Serial ซ้ำหรืออยู่คนละสาขาจะไม่ถูกบันทึก</span></div><div className="rule"><CheckCircle2 size={16} /><span>รหัสสาขา (LocationCode) และชื่อสาขาต้องตรงกัน โดยไม่ย้ายเครื่องข้ามสาขาอัตโนมัติ</span></div><div className="rule"><CheckCircle2 size={16} /><span>หากพบรายการผิดพลาด ระบบจะไม่อนุญาตให้บันทึก และข้อมูลประวัติงานเดิมจะไม่เปลี่ยนแปลง</span></div></div>
       <section className="import-history-panel"><div className="import-preview-heading"><div><h3>ประวัติการนำเข้าล่าสุด</h3><p>แสดงไม่เกิน 50 ชุด โดยไม่แสดงชื่อไฟล์หรือข้อมูลรายแถว</p></div><button type="button" className="secondary-button" disabled={historyLoading || !canImport} onClick={() => setHistoryReloadKey(key => key + 1)}>รีเฟรช</button></div>
         {historyLoading ? <EmptyState compact loading /> : historyError ? <EmptyState compact title="โหลดประวัติไม่สำเร็จ" detail={historyError} onRetry={() => setHistoryReloadKey(key => key + 1)} /> : history.length ? <div className="import-history-list">{history.map(entry => {
           const modeLabel = entry.import_mode === 'incremental' ? 'อัปเดตทะเบียน' : 'นำเข้าครั้งแรก'
@@ -4281,7 +4269,7 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
         })}</div> : <EmptyState compact title="ยังไม่มีประวัติการนำเข้า" detail="ชุดข้อมูลที่ตรวจสอบแล้วจะแสดงที่นี่" />}
       </section>
     </section>
-    <aside className="panel import-side"><div className="panel-heading"><div><h2>ขั้นตอนนำเข้า</h2><p>บันทึกเป็นชุดเพื่อทวนสอบย้อนหลัง</p></div></div><div className="step-list"><div className="import-step active"><span>1</span><div><strong>เลือกไฟล์</strong><small>อ่านเฉพาะชีต Detail1</small></div></div><div className="step-line" /><div className="import-step"><span>2</span><div><strong>ตรวจสอบข้อมูล</strong><small>ตรวจบนฐานข้อมูลก่อนบันทึก</small></div></div><div className="step-line" /><div className="import-step"><span>3</span><div><strong>บันทึกทั้งชุด</strong><small>ฐานข้อมูลยกเลิกทั้งหมดเมื่อผิดพลาด</small></div></div></div><div className="warning-box"><ShieldCheck size={17} /><span>ระบบบันทึกทะเบียนสาขาและเครื่องสแกน พร้อมจัดเก็บหมายเหตุการแยกที่อยู่และเบอร์ติดต่อเข้าฐานข้อมูลกลาง</span></div></aside>
+    <aside className="panel import-side"><div className="panel-heading"><div><h2>ขั้นตอนนำเข้า</h2><p>ตรวจสอบให้ครบก่อนยืนยันบันทึก</p></div></div><div className="step-list"><div className="import-step active"><span>1</span><div><strong>เลือกไฟล์</strong><small>อ่านข้อมูลจากชีต Detail1</small></div></div><div className="step-line" /><div className="import-step"><span>2</span><div><strong>ตรวจสอบข้อมูล</strong><small>ตรวจความถูกต้องก่อนบันทึกจริง</small></div></div><div className="step-line" /><div className="import-step"><span>3</span><div><strong>ยืนยันบันทึก</strong><small>บันทึกเฉพาะชุดที่ผ่านการตรวจทั้งหมด</small></div></div></div><div className="warning-box"><ShieldCheck size={17} /><span>ระบบจะปรับปรุงทะเบียนสาขาและเครื่องสแกน รวมถึงที่อยู่และเบอร์ติดต่อให้เป็นปัจจุบัน</span></div></aside>
   </div>
 }
 
@@ -4382,8 +4370,8 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
       <section className="panel allowlist-panel">
         <div className="panel-heading">
           <div>
-            <h2>รายชื่อผู้มีสิทธิ์ใช้งานระบบ (Google Sign-In Allowlist)</h2>
-            <p>ควบคุมการเข้าถึงระบบผ่าน Google OAuth 2.0 และบัญชีรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist)</p>
+            <h2>รายชื่อผู้มีสิทธิ์ใช้งานระบบ</h2>
+            <p>จัดการบัญชี Google และกำหนดบทบาทของผู้มีสิทธิ์เข้าใช้งานระบบ</p>
           </div>
           <button type="button" className="text-button" disabled={!isAdmin || loading} onClick={() => setReload(r => r + 1)}>
             รีเฟรช
@@ -4502,7 +4490,7 @@ function People({ currentEmail, role }: { currentEmail?: string; role?: string }
         {/* ฟอร์มเพิ่มผู้ใช้งาน (สำหรับ Admin) */}
         {isAdmin && (
           <Card className="mt-4 bg-slate-50 p-4 shadow-none">
-            <h3 className="m-0 mb-3 text-sm font-bold text-slate-900">เพิ่มผู้ใช้งานใหม่เข้า Allowlist</h3>
+            <h3 className="m-0 mb-3 text-sm font-bold text-slate-900">เพิ่มผู้ใช้งานใหม่เข้าระบบ</h3>
             {formError && <div className="form-error mb-3" role="alert">{formError}</div>}
             {formSuccess && <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] font-medium text-emerald-700">{formSuccess}</div>}
             <form onSubmit={handleAddUser} className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] items-end gap-3">

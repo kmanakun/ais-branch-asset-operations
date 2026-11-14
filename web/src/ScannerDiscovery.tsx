@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Check, ChevronLeft, ChevronRight, Plus, ScanBarcode, X } from 'lucide-react'
-import { d1Api } from './d1-client'
+import { d1Api, formatDisplayActorName } from './d1-client'
 import { getTopmostActiveDialog, isTopmostActiveDialog, lockBodyScroll, registerActiveDialog } from './dialog'
 import { BarcodeScannerModal } from './BarcodeScannerModal'
 import { Button } from '@/components/ui/button'
@@ -225,7 +225,7 @@ export function ScannerDiscoveryQueue({ onUpdated }: { onUpdated: (action: strin
             </div>
             <span>{String(report.observed_model || 'ไม่ทราบรุ่น')}</span>
             <small>{String(report.branch_name || 'สาขา')} · {String(report.location_code || '—')} · {String(report.province || '—')}</small>
-            <small>รายงานโดย {String(report.reported_by || 'ผู้ใช้')} · {formatDate(report.created_at)}</small>
+            <small>รายงานโดย {formatDisplayActorName(report.reported_by_name, report.reported_by) || 'ผู้ปฏิบัติงาน'} · {formatDate(report.created_at)}</small>
             {Boolean(report.notes) && <p>{String(report.notes)}</p>}
           </div>
           <div className="scanner-discovery-actions">

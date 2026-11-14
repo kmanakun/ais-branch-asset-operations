@@ -812,7 +812,7 @@ export async function prepareCloseoutStockPlan(
           fromStatus: prevStatus,
           toStatus: 'allocated_to_task',
           actorEmail,
-          note: 'Hybrid Mode: เปิดใช้งาน SN เข้าใบงาน',
+          note: 'เปิดใช้งาน SN เข้าใบงาน (ใช้เครื่องก่อนรับเข้าคลัง)',
         })
       )
     }
@@ -827,7 +827,7 @@ export async function prepareCloseoutStockPlan(
           allocated_at, note, created_by, updated_by
         )
         SELECT ?, ?, 'new_unit', 'allocated_to_task', NULL, 'hybrid_unregistered',
-               ?, ?, ?, ?, datetime('now'), 'Hybrid Mode: ช่างปิดงานก่อนนำเข้าไฟล์ Supplier', ?, ?
+               ?, ?, ?, ?, datetime('now'), 'ช่างปิดงานก่อนนำเข้าไฟล์รับเข้าจาก Supplier', ?, ?
         WHERE ${taskGuard.whereFragment}
           AND NOT EXISTS (SELECT 1 FROM stock_items si2 WHERE si2.serial_number = ?)
       `).bind(
@@ -852,7 +852,7 @@ export async function prepareCloseoutStockPlan(
         fromStatus: null,
         toStatus: 'allocated_to_task',
         actorEmail,
-        note: 'Hybrid Mode: ช่างปิดงานก่อนรับเข้าคลังในระบบ',
+        note: 'ช่างปิดงานก่อนรับเข้าคลังในระบบ',
       })
     )
   }
@@ -1326,7 +1326,7 @@ export async function validateStockImportBatch(
           dispatch_area: dispatchArea,
           received_date: receivedDate,
           note,
-          reason: `จับคู่อัปเกรดรายการ Hybrid ที่ช่างปิดงานไปแล้ว (${existingStock.status})`,
+          reason: `จับคู่อัปเกรดเครื่องที่ปิดงานล่วงหน้า (${existingStock.status === 'installed' ? 'ติดตั้งตรวจรับแล้ว' : existingStock.status === 'allocated_to_task' ? 'จองใช้งานหน้างาน' : existingStock.status})`,
         })
         return
       }
@@ -1736,7 +1736,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       } else if (['void_hybrid', 'cancelled_restored'].includes(item.status)) {
         availableForCloseout = true
         availabilityCode = 'HYBRID_REACTIVATABLE'
-        availabilityMessage = 'SN นี้อยู่ในสถานะยกเลิกเดิม สามารถใช้งานใหม่แบบ Hybrid Mode ได้'
+        availabilityMessage = 'SN นี้อยู่ในสถานะยกเลิกเดิม สามารถนำกลับมาบันทึกปิดงานใหม่ได้'
       }
 
       return c.json({
@@ -1779,7 +1779,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
       availability: {
         available_for_closeout: true,
         code: 'HYBRID_UNREGISTERED',
-        message: 'ยังไม่พบ SN นี้ในสต็อกคลัง — สามารถปิดงานได้ทันทีด้วย Hybrid Mode และรอนำเข้าไฟล์ Supplier จับคู่ภายหลัง',
+        message: 'ยังไม่พบ SN นี้ในสต็อกคลัง — สามารถปิดงานได้ทันที และนำเข้าไฟล์ Supplier เพื่อจับคู่ภายหลัง',
       },
       item: null,
       movements: [],
@@ -1926,7 +1926,7 @@ export function createStockRouter(): Hono<StockRouterEnv> {
             fromStatus: item.existing_status,
             toStatus: item.existing_status || 'allocated_to_task',
             actorEmail: user.email,
-            note: `จับคู่ไฟล์ Supplier (${receiveDocCode}) กับงาน Hybrid เดิม`,
+            note: `จับคู่ไฟล์ Supplier (${receiveDocCode}) กับรายการที่ปิดงานล่วงหน้า`,
           })
         )
         continue
