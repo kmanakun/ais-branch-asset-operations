@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "dev:d1": "wrangler pages dev dist --d1=DB=local-ais-scanner-db",
+    "dev:d1": "wrangler pages dev dist --ip 127.0.0.1 --port 8788",
     "build": "tsc -b && vite build && node scripts/configure-csp-headers.mjs && node scripts/clean-stale-build-assets.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc -b --pretty",

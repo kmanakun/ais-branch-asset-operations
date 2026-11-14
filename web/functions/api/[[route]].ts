@@ -433,7 +433,7 @@ app.get('/dashboard/summary', async (c) => {
         COUNT(s.id) as scanner_count,
         SUM(CASE WHEN t.status = 'delivered' THEN 1 ELSE 0 END) as delivered_count,
         SUM(CASE WHEN t.status IN ('in_progress', 'blocked', 'awaiting_admin_acceptance', 'awaiting_customer_acceptance', 'pending_exception') THEN 1 ELSE 0 END) as on_process_count,
-        SUM(CASE WHEN t.status = 'awaiting_admin_acceptance' THEN 1 ELSE 0 END) as awaiting_admin_count,
+        SUM(CASE WHEN t.status IN ('awaiting_admin_acceptance', 'pending_exception') THEN 1 ELSE 0 END) as awaiting_admin_count,
         SUM(CASE WHEN t.status = 'awaiting_customer_acceptance' THEN 1 ELSE 0 END) as awaiting_customer_count,
         SUM(CASE WHEN t.status IS NULL OR t.status = 'open' OR t.status = 'cancelled' THEN 1 ELSE 0 END) as open_count
       FROM branches b
@@ -979,8 +979,8 @@ app.post('/register/import', async (c) => {
     return c.json({ error: 'ไม่พบข้อมูลแถวสำหรับนำเข้า' }, 400)
   }
 
-  const statements: D1PreparedStatement[] = []
   const branchMap = new Map<string, string>()
+  const usedBranchIds = new Set<string>()
   const uniqueCodes = Array.from(new Set(rows.map(r => String(r.location_code || '').trim()).filter(Boolean)))
   for (let i = 0; i < uniqueCodes.length; i += 50) {
     const chunkCodes = uniqueCodes.slice(i, i + 50)
@@ -990,12 +990,58 @@ app.post('/register/import', async (c) => {
     ).bind(...chunkCodes).all<{ id: string; location_code: string }>()
     for (const eb of (existingBranches.results || [])) {
       branchMap.set(eb.location_code, eb.id)
+      usedBranchIds.add(eb.id)
+    }
+  }
+
+  const existingAssetMap = new Map<string, string>()
+  const usedAssetIds = new Set<string>()
+  const uniqueSerials = Array.from(new Set(rows.map(r => String(r.com_sn || '').trim()).filter(Boolean)))
+  for (let i = 0; i < uniqueSerials.length; i += 50) {
+    const chunkSerials = uniqueSerials.slice(i, i + 50)
+    const placeholders = chunkSerials.map(() => '?').join(', ')
+    const existingAssets = await c.env.DB.prepare(
+      `SELECT id, com_sn FROM scanner_assets WHERE com_sn IN (${placeholders})`
+    ).bind(...chunkSerials).all<{ id: string; com_sn: string }>()
+    for (const ea of (existingAssets.results || [])) {
+      existingAssetMap.set(ea.com_sn, ea.id)
+      usedAssetIds.add(ea.id)
     }
   }
 
   let warningsCount = 0
   let validRowsCount = 0
   let skippedCount = 0
+  let insertedCount = 0
+  let updatedCount = 0
+
+  const branchRecords = new Map<string, {
+    id: string
+    locationCode: string
+    subs_zn: string | null
+    loc_bld: string
+    address: string | null
+    province: string
+    district: string | null
+    subdistrict: string | null
+    postal_code: string | null
+    ro: string | null
+    high_level_location: string | null
+    phone: string | null
+    install_type: string | null
+    address_note: string | null
+  }>()
+  const assetRecords = new Map<string, {
+    id: string
+    branchId: string
+    hw_name: string | null
+    brand: string | null
+    model_name: string | null
+    com_id: string | null
+    com_sn: string
+    model_id: string | null
+    com_years: string | null
+  }>()
 
   for (const r of rows) {
     const locationCode = String(r.location_code || '').trim()
@@ -1016,14 +1062,74 @@ app.post('/register/import', async (c) => {
 
     let branchId = branchMap.get(locationCode)
     if (!branchId) {
-      branchId = `brn-${locationCode.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+      const candidateBranchId = `brn-${locationCode.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+      branchId = candidateBranchId.length > 4 && !usedBranchIds.has(candidateBranchId)
+        ? candidateBranchId
+        : makeUniqueId('brn')
       branchMap.set(locationCode, branchId)
+      usedBranchIds.add(branchId)
     }
+
+    const prevBranch = branchRecords.get(locationCode)
+    branchRecords.set(locationCode, {
+      id: branchId,
+      locationCode,
+      subs_zn: r.subs_zn || prevBranch?.subs_zn || null,
+      loc_bld: locBld,
+      address: r.address || prevBranch?.address || null,
+      province: province || prevBranch?.province || 'ไม่ระบุ',
+      district: r.district || prevBranch?.district || null,
+      subdistrict: r.subdistrict || prevBranch?.subdistrict || null,
+      postal_code: r.postal_code || prevBranch?.postal_code || null,
+      ro: r.ro || prevBranch?.ro || null,
+      high_level_location: r.high_level_location || prevBranch?.high_level_location || null,
+      phone: r.phone || prevBranch?.phone || null,
+      install_type: r.install_type || prevBranch?.install_type || null,
+      address_note: addressNote,
+    })
+
+    if (!assetRecords.has(comSn)) {
+      if (existingAssetMap.has(comSn)) {
+        updatedCount++
+      } else {
+        insertedCount++
+      }
+    }
+
+    let assetId = existingAssetMap.get(comSn) || assetRecords.get(comSn)?.id
+    if (!assetId) {
+      const candidateAssetId = `ast-${comSn.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+      assetId = candidateAssetId.length > 4 && !usedAssetIds.has(candidateAssetId)
+        ? candidateAssetId
+        : makeUniqueId('ast')
+      usedAssetIds.add(assetId)
+    }
+
+    const prevAsset = assetRecords.get(comSn)
+    assetRecords.set(comSn, {
+      id: assetId,
+      branchId,
+      hw_name: r.hw_name || prevAsset?.hw_name || null,
+      brand: r.brand || prevAsset?.brand || null,
+      model_name: r.model_name || prevAsset?.model_name || null,
+      com_id: r.com_id || prevAsset?.com_id || null,
+      com_sn: comSn,
+      model_id: r.model_id || prevAsset?.model_id || null,
+      com_years: r.com_years || prevAsset?.com_years || null,
+    })
+  }
+
+  if (validRowsCount === 0) {
+    return c.json({ error: 'ไม่พบแถวข้อมูลที่มี LocationCode, ชื่อสาขา และ ComSN ครบถ้วน' }, 400)
+  }
+
+  const statements: D1PreparedStatement[] = []
+  for (const b of branchRecords.values()) {
     statements.push(
       c.env.DB.prepare(`
         INSERT INTO branches (
-          id, location_code, subs_zn, loc_bld, address, province, 
-          district, subdistrict, postal_code, ro, high_level_location, 
+          id, location_code, subs_zn, loc_bld, address, province,
+          district, subdistrict, postal_code, ro, high_level_location,
           phone, install_type, address_note, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(location_code) DO UPDATE SET
@@ -1038,31 +1144,32 @@ app.post('/register/import', async (c) => {
           high_level_location = COALESCE(excluded.high_level_location, branches.high_level_location),
           phone = COALESCE(excluded.phone, branches.phone),
           install_type = COALESCE(excluded.install_type, branches.install_type),
-          address_note = excluded.address_note, -- ล้างป้ายเตือนหากค่านำเข้าใหม่เป็นค่าว่าง
+          address_note = excluded.address_note,
           updated_at = datetime('now')
       `).bind(
-        branchId,
-        locationCode,
-        r.subs_zn || null,
-        locBld,
-        r.address || null,
-        province || 'ไม่ระบุ',
-        r.district || null,
-        r.subdistrict || null,
-        r.postal_code || null,
-        r.ro || null,
-        r.high_level_location || null,
-        r.phone || null,
-        r.install_type || null,
-        addressNote
+        b.id,
+        b.locationCode,
+        b.subs_zn,
+        b.loc_bld,
+        b.address,
+        b.province,
+        b.district,
+        b.subdistrict,
+        b.postal_code,
+        b.ro,
+        b.high_level_location,
+        b.phone,
+        b.install_type,
+        b.address_note,
       )
     )
+  }
 
-    const assetId = `ast-${comSn.replace(/[^a-zA-Z0-9_-]/g, '_')}`
+  for (const a of assetRecords.values()) {
     statements.push(
       c.env.DB.prepare(`
         INSERT INTO scanner_assets (
-          id, branch_id, hw_name, brand, model_name, com_id, com_sn, 
+          id, branch_id, hw_name, brand, model_name, com_id, com_sn,
           model_id, com_years, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
         ON CONFLICT(com_sn) DO UPDATE SET
@@ -1075,24 +1182,20 @@ app.post('/register/import', async (c) => {
           com_years = COALESCE(excluded.com_years, scanner_assets.com_years),
           updated_at = datetime('now')
       `).bind(
-        assetId,
-        branchId,
-        r.hw_name || null,
-        r.brand || null,
-        r.model_name || null,
-        r.com_id || null,
-        comSn,
-        r.model_id || null,
-        r.com_years || null
+        a.id,
+        a.branchId,
+        a.hw_name,
+        a.brand,
+        a.model_name,
+        a.com_id,
+        a.com_sn,
+        a.model_id,
+        a.com_years,
       )
     )
   }
 
-  if (validRowsCount === 0) {
-    return c.json({ error: 'ไม่พบแถวข้อมูลที่มี LocationCode, ชื่อสาขา และ ComSN ครบถ้วน' }, 400)
-  }
-
-  const chunkSize = 50
+  const chunkSize = 200
   for (let i = 0; i < statements.length; i += chunkSize) {
     const chunk = statements.slice(i, i + chunkSize)
     await c.env.DB.batch(chunk)
@@ -1106,7 +1209,13 @@ app.post('/register/import', async (c) => {
     batchId,
     body.source_name || 'Detail1.xlsx',
     validRowsCount,
-    JSON.stringify({ branches: branchMap.size, warnings: warningsCount, skipped: skippedCount }),
+    JSON.stringify({
+      branches: branchMap.size,
+      inserted: insertedCount,
+      updated: updatedCount,
+      warnings: warningsCount,
+      skipped: skippedCount,
+    }),
     user.email
   ).run()
 
@@ -1114,6 +1223,8 @@ app.post('/register/import', async (c) => {
     success: true,
     message: `นำเข้าข้อมูลสำเร็จ: ${validRowsCount} เครื่อง (${branchMap.size} สาขา)`,
     imported_count: validRowsCount,
+    inserted: insertedCount,
+    updated: updatedCount,
     skipped_count: skippedCount,
     branches_count: branchMap.size,
     warnings_count: warningsCount
@@ -1130,7 +1241,7 @@ app.get('/register/import/history', async (c) => {
   const batches = await c.env.DB.prepare(`
     SELECT id, source_name, row_count, result_counts, created_by, created_at
     FROM import_batches
-    ORDER BY created_at DESC
+    ORDER BY created_at DESC, rowid DESC
     LIMIT 50
   `).all()
 
@@ -1149,7 +1260,13 @@ app.get('/register/import/history', async (c) => {
       issue_count: counts?.warnings || 0,
       created_at: b.created_at,
       committed_at: b.created_at,
-      result_counts: counts ? { branches: counts.branches, inserted: b.row_count } : null,
+      result_counts: counts
+        ? {
+            branches: counts.branches,
+            inserted: typeof counts.inserted === 'number' ? counts.inserted : b.row_count,
+            updated: typeof counts.updated === 'number' ? counts.updated : 0,
+          }
+        : null,
     }
   })
 
@@ -1336,7 +1453,7 @@ app.get('/tasks/:id/evidence', async (c) => {
       SELECT id, replacement_task_id, evidence_type, storage_path, byte_size, mime_type, role_assigned, created_at
       FROM replacement_task_evidence
       WHERE replacement_task_id = ?
-      ORDER BY created_at ASC
+      ORDER BY created_at ASC, rowid ASC
     `).bind(taskId).all(),
     c.env.DB.prepare(`
       SELECT status, customer_accepted_at, customer_accepted_by
@@ -1445,7 +1562,7 @@ app.get('/evidence/:key{.*}', async (c) => {
       SELECT data_base64, mime_type, byte_size
       FROM replacement_task_evidence
       WHERE storage_path = ? OR id = ? OR (replacement_task_id = ? AND evidence_type IN (${placeholders}))
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `).bind(key, key, matchedTaskId, ...sigConfig.keys).first()
   } else if (matchedTaskId && slotBase) {
@@ -1453,7 +1570,7 @@ app.get('/evidence/:key{.*}', async (c) => {
       SELECT data_base64, mime_type, byte_size
       FROM replacement_task_evidence
       WHERE storage_path = ? OR id = ? OR (replacement_task_id = ? AND evidence_type = ?)
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `).bind(key, key, matchedTaskId, slotBase).first()
   } else {
@@ -1767,11 +1884,12 @@ app.post('/review/sym-verify', async (c) => {
     return c.json({ error: 'ต้องมีสิทธิ์ Admin จึงจะสามารถตรวจสอบงานขั้นนี้ได้' }, 403)
   }
 
-  const { task_id, decision, reason, version } = await c.req.json<{
+  const { task_id, decision, reason, version, register_observed_serial } = await c.req.json<{
     task_id: string
     decision: 'pass' | 'reject'
     reason?: string
     version: number
+    register_observed_serial?: boolean
   }>()
 
   if (!['pass', 'reject'].includes(decision)) {
@@ -1783,9 +1901,27 @@ app.post('/review/sym-verify', async (c) => {
   }
 
   // ตรวจสอบหลักการ 4-Eyes: ห้ามผู้อนุมัติเป็นคนเดียวกับผู้ปิดงานหรือผู้เริ่มงาน
-  const currentTask = await c.env.DB.prepare(
-    'SELECT started_by, closeout_submitted_by, status FROM replacement_tasks WHERE id = ?'
-  ).bind(task_id).first<{ started_by?: string; closeout_submitted_by?: string; status: string }>()
+  const currentTask = await c.env.DB.prepare(`
+    SELECT
+      t.started_by,
+      t.closeout_submitted_by,
+      t.status,
+      t.outcome,
+      t.observed_serial,
+      s.branch_id,
+      s.brand
+    FROM replacement_tasks t
+    JOIN scanner_assets s ON s.id = t.scanner_asset_id
+    WHERE t.id = ?
+  `).bind(task_id).first<{
+    started_by?: string
+    closeout_submitted_by?: string
+    status: string
+    outcome?: string | null
+    observed_serial?: string | null
+    branch_id: string
+    brand?: string | null
+  }>()
 
   if (!currentTask) {
     return c.json({ error: 'ไม่พบใบงาน' }, 404)
@@ -1797,6 +1933,28 @@ app.post('/review/sym-verify', async (c) => {
     const startedBy = String(currentTask.started_by || '').trim().toLowerCase()
     if ((submittedBy && submittedBy === reviewerEmail) || (startedBy && startedBy === reviewerEmail)) {
       return c.json({ error: 'ตามหลักการตรวจสอบ 4-Eyes ผู้ปิดงานหรือเริ่มงานไม่สามารถเซ็นตรวจรับงานของตนเองได้ (Separation of Duties)' }, 403)
+    }
+  }
+
+  const cleanObservedSn = String(currentTask.observed_serial || '').trim()
+  const shouldRegisterObserved =
+    decision === 'pass' &&
+    register_observed_serial === true &&
+    currentTask.outcome === 'different_device_found'
+
+  let existingObservedAsset: { id: string; branch_id: string } | null = null
+  if (shouldRegisterObserved) {
+    if (!cleanObservedSn || cleanObservedSn.length > 100) {
+      return c.json({ error: 'ไม่พบ Serial ของเครื่องที่พบสำหรับเพิ่มเข้าทะเบียนสาขา' }, 400)
+    }
+    existingObservedAsset = await c.env.DB.prepare(
+      'SELECT id, branch_id FROM scanner_assets WHERE com_sn = ?'
+    ).bind(cleanObservedSn).first<{ id: string; branch_id: string }>()
+
+    if (existingObservedAsset && existingObservedAsset.branch_id !== currentTask.branch_id) {
+      return c.json({
+        error: `Serial ${cleanObservedSn} มีอยู่ในทะเบียนสาขาอื่นแล้ว ระบบไม่อนุญาตให้ย้ายข้ามสาขาอัตโนมัติ`
+      }, 409)
     }
   }
 
@@ -1823,6 +1981,25 @@ app.post('/review/sym-verify', async (c) => {
     return c.json({ error: 'ไม่สามารถอัปเดตงานได้ ข้อมูลอาจถูกเปลี่ยนไปก่อนหน้า' }, 409)
   }
 
+  let observedRegistered = false
+  if (shouldRegisterObserved && !existingObservedAsset && cleanObservedSn) {
+    const newAssetId = makeUniqueId('ast')
+    await c.env.DB.prepare(`
+      INSERT INTO scanner_assets (
+        id, branch_id, hw_name, brand, model_name, com_sn, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(com_sn) DO NOTHING
+    `).bind(
+      newAssetId,
+      currentTask.branch_id,
+      'Barcode Scanner',
+      currentTask.brand || null,
+      'Found Onsite',
+      cleanObservedSn,
+    ).run()
+    observedRegistered = true
+  }
+
   // บันทึกประวัติ Task Reviews
   const reviewId = makeUniqueId('rev')
   await c.env.DB.prepare(`
@@ -1832,7 +2009,8 @@ app.post('/review/sym-verify', async (c) => {
 
   return c.json({
     success: true,
-    status: nextStatus
+    status: nextStatus,
+    observed_registered: observedRegistered,
   })
 })
 
@@ -2177,7 +2355,7 @@ app.get('/discovery/queue', async (c) => {
       b.loc_bld as branch_name, b.location_code, b.province
     FROM scanner_discovery_reports d
     JOIN branches b ON b.id = d.branch_id
-    ORDER BY d.created_at DESC
+    ORDER BY d.created_at DESC, d.rowid DESC
     LIMIT ? OFFSET ?
   `).bind(limit, offset).all()
 
@@ -2242,7 +2420,7 @@ app.get('/tasks/:id/reviews', async (c) => {
     SELECT id, task_id, stage, decision, reason, reviewer_email, created_at
     FROM task_reviews
     WHERE task_id = ?
-    ORDER BY created_at ASC
+    ORDER BY created_at ASC, rowid ASC
   `).bind(taskId).all()
 
   return c.json({ reviews: rows.results || [] })
@@ -2258,7 +2436,7 @@ app.get('/allowlist', async (c) => {
   const rows = await c.env.DB.prepare(`
     SELECT id, email, role, full_name, is_active, created_at
     FROM google_signin_allowlist
-    ORDER BY created_at DESC
+    ORDER BY created_at DESC, rowid DESC
   `).all()
 
   return c.json({ users: rows.results || [] })

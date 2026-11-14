@@ -27,11 +27,13 @@ if (-not $Force) {
   Write-Host "`n[WARNING] This action will permanently wipe all test data from:" -ForegroundColor Red
   Write-Host "  - branches" -ForegroundColor Gray
   Write-Host "  - scanner_assets" -ForegroundColor Gray
+  Write-Host "  - branch_work_orders" -ForegroundColor Gray
   Write-Host "  - replacement_tasks" -ForegroundColor Gray
   Write-Host "  - replacement_task_evidence" -ForegroundColor Gray
   Write-Host "  - task_reviews" -ForegroundColor Gray
   Write-Host "  - scanner_discovery_reports" -ForegroundColor Gray
-  Write-Host "  - register_imports" -ForegroundColor Gray
+  Write-Host "  - import_batches" -ForegroundColor Gray
+  Write-Host "  - audit_events" -ForegroundColor Gray
   Write-Host "`n[SAFEGUARD] google_signin_allowlist WILL BE PRESERVED (Admins will NOT be locked out).`n" -ForegroundColor Green
 
   $confirmation = Read-Host "Type 'YES' to create encrypted backup and switch to Production"
@@ -66,9 +68,11 @@ DELETE FROM replacement_task_evidence;
 DELETE FROM task_reviews;
 DELETE FROM scanner_discovery_reports;
 DELETE FROM replacement_tasks;
+DELETE FROM branch_work_orders;
 DELETE FROM scanner_assets;
 DELETE FROM branches;
-DELETE FROM register_imports;
+DELETE FROM import_batches;
+DELETE FROM audit_events;
 VACUUM;
 "@
 
@@ -93,7 +97,7 @@ Write-Host "`n[Step 3/3] Verifying database integrity..." -ForegroundColor Cyan
 
 Push-Location $webRoot
 try {
-  $verifyResult = & npx wrangler d1 execute ais-scanner-db --remote --command="SELECT (SELECT count(*) FROM branches) as branches, (SELECT count(*) FROM scanner_assets) as scanners, (SELECT count(*) FROM replacement_tasks) as tasks, (SELECT count(*) FROM google_signin_allowlist) as allowlist_users;" --json
+  $verifyResult = & npx wrangler d1 execute ais-scanner-db --remote --command="SELECT (SELECT count(*) FROM branches) as branches, (SELECT count(*) FROM scanner_assets) as scanners, (SELECT count(*) FROM branch_work_orders) as work_orders, (SELECT count(*) FROM replacement_tasks) as tasks, (SELECT count(*) FROM import_batches) as import_batches, (SELECT count(*) FROM google_signin_allowlist) as allowlist_users;" --json
   Write-Host "  Table counts after wipe:" -ForegroundColor Gray
   Write-Host "  $verifyResult" -ForegroundColor Gray
 } finally {

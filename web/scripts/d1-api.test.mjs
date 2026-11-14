@@ -615,3 +615,181 @@ test('HTTP runtime: Google Sign-In OAuth PKCE flow issues signed HttpOnly cookie
     clearGoogleJwksCache()
   }
 })
+
+test('HTTP runtime: /register/import scales to 1,992 devices across 580 branches and tracks inserted/updated history counts accurately', async () => {
+  const env = createTestEnv()
+  const rows = []
+  for (let i = 0; i < 1992; i++) {
+    const branchIdx = i % 580
+    rows.push({
+      location_code: `LOC-${String(branchIdx).padStart(4, '0')}`,
+      loc_bld: `AIS Shop ${branchIdx}`,
+      province: branchIdx % 2 === 0 ? 'กรุงเทพมหานคร' : 'เชียงใหม่',
+      com_sn: `SN-SCALE-${String(i).padStart(5, '0')}`,
+      brand: 'Zebra',
+      model_name: 'DS9308',
+    })
+  }
+
+  const firstImport = await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { source_name: 'Scale_1992.xlsx', rows },
+  })
+  assert.equal(firstImport.status, 200)
+  assert.equal(firstImport.json.imported_count, 1992)
+  assert.equal(firstImport.json.inserted, 1992)
+  assert.equal(firstImport.json.updated, 0)
+  assert.equal(firstImport.json.branches_count, 580)
+
+  // Re-import mixing 100 existing scanners + 10 brand new scanners
+  const deltaRows = [
+    ...rows.slice(0, 100).map(r => ({ ...r, model_name: 'DS9308-V2' })),
+    ...Array.from({ length: 10 }, (_, j) => ({
+      location_code: 'LOC-0000',
+      loc_bld: 'AIS Shop 0',
+      province: 'กรุงเทพมหานคร',
+      com_sn: `SN-DELTA-${j}`,
+      brand: 'Honeywell',
+      model_name: 'HF680',
+    })),
+  ]
+  const secondImport = await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { source_name: 'Delta.xlsx', rows: deltaRows },
+  })
+  assert.equal(secondImport.status, 200)
+  assert.equal(secondImport.json.imported_count, 110)
+  assert.equal(secondImport.json.inserted, 10)
+  assert.equal(secondImport.json.updated, 100)
+
+  const hist = await apiReq(env, '/api/register/import/history', { email: 'admin@sym.co.th' })
+  assert.equal(hist.status, 200)
+  const latest = hist.json.rows[0]
+  assert.equal(latest.result_counts.inserted, 10)
+  assert.equal(latest.result_counts.updated, 100)
+})
+
+test('HTTP runtime: /review/sym-verify registers different_device_found SN only within branch and blocks cross-branch move', async () => {
+  const env = createTestEnv()
+  await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'DiffDevice.xlsx',
+      rows: [
+        { location_code: 'BR-A', loc_bld: 'AIS A', com_sn: 'SN-A-1', province: 'กรุงเทพมหานคร', brand: 'Zebra' },
+        { location_code: 'BR-A', loc_bld: 'AIS A', com_sn: 'SN-A-2', province: 'กรุงเทพมหานคร', brand: 'Zebra' },
+        { location_code: 'BR-B', loc_bld: 'AIS B', com_sn: 'SN-B-EXISTING', province: 'นนทบุรี', brand: 'Zebra' },
+      ],
+    },
+  })
+
+  const list = await apiReq(env, '/api/scanners?search=SN-A-', { email: 'admin@sym.co.th' })
+  const snA1 = list.json.rows.find(r => r.com_sn === 'SN-A-1')
+  const snA2 = list.json.rows.find(r => r.com_sn === 'SN-A-2')
+
+  // Case 1: observed serial belongs to BR-B -> must reject 409 without moving branch or approving task
+  const start1 = await apiReq(env, '/api/tasks/start', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { scanner_id: snA1.id },
+  })
+  await apiReq(env, `/api/tasks/${start1.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'different_device_found', observed_serial: 'SN-B-EXISTING', notes: 'พบ SN ของอีกสาขา', version: 1 },
+  })
+  const dashWhilePending = await apiReq(env, '/api/dashboard/summary', { email: 'admin@sym.co.th' })
+  assert.equal(dashWhilePending.status, 200)
+  assert.equal(dashWhilePending.json.summary.awaiting_admin, 1)
+  assert.equal(dashWhilePending.json.summary.awaiting_review, 1)
+  const blockedCrossBranch = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: start1.json.task_id, decision: 'pass', version: 2, register_observed_serial: true },
+  })
+  assert.equal(blockedCrossBranch.status, 409)
+  const snBCheck = env.DB.raw.prepare('SELECT b.location_code FROM scanner_assets s JOIN branches b ON b.id = s.branch_id WHERE s.com_sn = ?').get('SN-B-EXISTING')
+  assert.equal(snBCheck.location_code, 'BR-B')
+
+  // Case 2: brand new observed serial -> registers in BR-A and approves task to awaiting_customer_acceptance
+  const start2 = await apiReq(env, '/api/tasks/start', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { scanner_id: snA2.id },
+  })
+  await apiReq(env, `/api/tasks/${start2.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'different_device_found', observed_serial: 'SN-A-NEW-FOUND', notes: 'เครื่องจริงหน้าร้านต่างจากทะเบียน', version: 1 },
+  })
+  const okPass = await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: start2.json.task_id, decision: 'pass', version: 2, register_observed_serial: true },
+  })
+  assert.equal(okPass.status, 200)
+  assert.equal(okPass.json.status, 'awaiting_customer_acceptance')
+  assert.equal(okPass.json.observed_registered, true)
+  const newAsset = env.DB.raw.prepare('SELECT b.location_code FROM scanner_assets s JOIN branches b ON b.id = s.branch_id WHERE s.com_sn = ?').get('SN-A-NEW-FOUND')
+  assert.equal(newAsset.location_code, 'BR-A')
+})
+
+test('Production wipe SQL in switch-to-production.ps1 obeys FK constraints and preserves allowlist', async () => {
+  const env = createTestEnv()
+  await apiReq(env, '/api/register/import', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: {
+      source_name: 'WipeCheck.xlsx',
+      rows: [{ location_code: 'WIPE-1', loc_bld: 'AIS Wipe Shop', com_sn: 'SN-WIPE-1', province: 'กรุงเทพมหานคร' }],
+    },
+  })
+  const list = await apiReq(env, '/api/scanners?search=SN-WIPE-1', { email: 'admin@sym.co.th' })
+  const scanner = list.json.rows[0]
+  const start = await apiReq(env, '/api/tasks/start', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { scanner_id: scanner.id },
+  })
+  await apiReq(env, `/api/tasks/${start.json.task_id}/closeout`, {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { outcome: 'replaced', new_serial_number: 'SN-WIPE-NEW', version: 1 },
+  })
+  await apiReq(env, '/api/review/sym-verify', {
+    method: 'POST',
+    email: 'admin@sym.co.th',
+    body: { task_id: start.json.task_id, decision: 'pass', version: 2 },
+  })
+  await apiReq(env, '/api/discovery', {
+    method: 'POST',
+    email: 'tech1@sym.co.th',
+    body: { branch_id: scanner.branch_id, serial_number: 'SN-WIPE-DISC' },
+  })
+  env.DB.raw.prepare("INSERT INTO audit_events (id, entity_type, entity_id, action, actor_email) VALUES ('aud-1', 'task', 't1', 'test', 'admin@sym.co.th')").run()
+
+  const psScript = readFileSync('scripts/switch-to-production.ps1', 'utf-8')
+  const match = psScript.match(/\$wipeSql\s*=\s*@"([\s\S]*?)"@/)
+  assert.ok(match, 'switch-to-production.ps1 must define $wipeSql here-string')
+  env.DB.raw.exec(match[1])
+
+  for (const table of [
+    'replacement_task_evidence',
+    'task_reviews',
+    'scanner_discovery_reports',
+    'replacement_tasks',
+    'branch_work_orders',
+    'scanner_assets',
+    'branches',
+    'import_batches',
+    'audit_events',
+  ]) {
+    const row = env.DB.raw.prepare(`SELECT COUNT(*) as c FROM ${table}`).get()
+    assert.equal(row.c, 0, `Expected ${table} to be empty after wipe`)
+  }
+  const allowlist = env.DB.raw.prepare('SELECT COUNT(*) as c FROM google_signin_allowlist').get()
+  assert.ok(allowlist.c >= 6, 'Allowlist must be preserved across production wipe')
+})

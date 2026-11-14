@@ -1868,6 +1868,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
   const [evidenceList, setEvidenceList] = useState<any[]>([])
   const [evidenceLoading, setEvidenceLoading] = useState(false)
   const [selectedAdminTask, setSelectedAdminTask] = useState<Record<string, unknown> | null>(null)
+  const [registerObservedSerial, setRegisterObservedSerial] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState('')
   const [zoomedEvidenceIndex, setZoomedEvidenceIndex] = useState<number | null>(null)
@@ -2031,8 +2032,15 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
     setSubmitting(true)
     setActionError('')
     try {
-      await d1Api.symVerify(taskId, 'pass', undefined, Number(task.version || 1))
+      await d1Api.symVerify(
+        taskId,
+        'pass',
+        undefined,
+        Number(task.version || 1),
+        task.outcome === 'different_device_found' ? { register_observed_serial: registerObservedSerial } : undefined,
+      )
       setSelectedAdminTask(null)
+      setRegisterObservedSerial(false)
       setReload(r => r + 1)
       onUpdated('accept')
     } catch (err: any) {
@@ -2243,6 +2251,7 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                       type="button"
                       className="secondary-button"
                       onClick={() => {
+                        setRegisterObservedSerial(false)
                         setSelectedAdminTask(task)
                         void handleOpenEvidence(task)
                       }}
@@ -2504,8 +2513,16 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                           <span className="metric-sub">รุ่น {String(currentTask.model_name || currentTask.scanner_model || 'Honeywell')}</span>
                         </div>
                         <div className="review-metric-item is-highlight">
-                          <span className="metric-label">SN เครื่องใหม่</span>
-                          <strong className="metric-val font-mono">{String(currentTask.new_serial_number || '—')}</strong>
+                          <span className="metric-label">
+                            {currentTask.outcome === 'different_device_found' ? 'SN เครื่องที่พบหน้างาน' : 'SN เครื่องใหม่'}
+                          </span>
+                          <strong className="metric-val font-mono">
+                            {String(
+                              currentTask.outcome === 'different_device_found'
+                                ? currentTask.observed_serial || '—'
+                                : currentTask.new_serial_number || '—',
+                            )}
+                          </strong>
                           <span className="metric-sub">ผล: {getStatusPresentation(currentTask.outcome || 'replaced').label}</span>
                         </div>
                         <div className="review-metric-item">
@@ -2526,6 +2543,22 @@ function PendingReviews({ role, currentEmail, onUpdated, onOpenHandover }: { rol
                         <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs text-slate-600">
                           <strong className="text-slate-800">หมายเหตุจากหน้างาน:</strong> {String(currentTask.notes)}
                         </div>
+                      )}
+                      {selectedAdminTask && selectedAdminTask.outcome === 'different_device_found' && !isSelfActorForTask(selectedAdminTask) && (
+                        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3.5 py-2.5 text-xs text-slate-800">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={registerObservedSerial}
+                            onChange={e => setRegisterObservedSerial(e.target.checked)}
+                          />
+                          <span>
+                            <strong>เพิ่ม SN ที่พบ ({String(selectedAdminTask.observed_serial || '—')}) เข้าทะเบียนสาขานี้</strong>
+                            <span className="mt-0.5 block text-[11px] text-slate-500">
+                              ระบบจะตรวจซ้ำทุกสาขาให้อัตโนมัติ และจะปฏิเสธหาก SN นี้มีอยู่แล้วในสาขาอื่น
+                            </span>
+                          </span>
+                        </label>
                       )}
                     </div>
 
@@ -3220,6 +3253,7 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
     setNewSerialInput(String(task.new_serial_number || task.new_serial || ''))
     setObservedSerialInput(String(task.observed_serial || ''))
     setExceptionReasonInput(String(task.exception_reason || task.notes || ''))
+    setRegisterObservedSerial(false)
   }, [taskId])
   const closeIfIdle = useCallback(() => { if (!busy && !evidenceBusy) onClose() }, [busy, evidenceBusy, onClose])
   const dialogRef = useDialogControls(closeIfIdle)
@@ -3332,7 +3366,13 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
     if (!requiredEvidenceReady) { setActionError('ตรวจหลักฐานและลงลายเซ็นผู้ตรวจรับให้ครบก่อนปิดรายการ'); return }
     setBusy(true)
     try {
-      await d1Api.symVerify(taskId, 'pass', undefined, version)
+      await d1Api.symVerify(
+        taskId,
+        'pass',
+        undefined,
+        version,
+        outcome === 'different_device_found' ? { register_observed_serial: registerObservedSerial } : undefined,
+      )
       onUpdated(outcome === 'replaced' ? 'accept' : 'resolve_exception')
       onClose()
     } catch (err: any) {
@@ -3361,6 +3401,23 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
 
   const isReplacement = outcomeInput === 'replaced'
   const canEditEvidence = canEditTechnicianEvidence || canResolvePending
+  const latestReview = reviews.length > 0 ? reviews[reviews.length - 1] : null
+  const activeRejectNotice =
+    status === 'in_progress'
+      ? latestReview?.decision === 'reject'
+        ? {
+            source: latestReview.stage === 'customer' ? 'G-Able Customer' : 'SYM Admin',
+            reason: String(latestReview.reason || task.customer_reject_reason || ''),
+            by: latestReview.reviewer_email ? String(latestReview.reviewer_email) : '',
+          }
+        : !latestReview && task.customer_reject_reason
+          ? {
+              source: 'G-Able Customer',
+              reason: String(task.customer_reject_reason),
+              by: '',
+            }
+          : null
+      : null
   return <div className="detail-overlay work-order-overlay" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) closeIfIdle() }}>
     <section ref={dialogRef} className="detail-dialog work-order-dialog" role="dialog" aria-modal="true" aria-labelledby="work-order-title" tabIndex={-1}>
       <header className="detail-dialog-header"><button type="button" className="detail-back" aria-label="กลับไปรายการใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><ChevronLeft size={20} /></button><div><span className="detail-eyebrow">รายการ Scanner ในใบงาน</span><h2 id="work-order-title">รายละเอียดการเปลี่ยนเครื่อง</h2></div><button type="button" className="detail-close" aria-label="ปิดใบงาน" disabled={busy || evidenceBusy} onClick={closeIfIdle}><X size={18} /></button></header>
@@ -3369,6 +3426,19 @@ function WorkOrderDetailDialog({ task, role, currentEmail, demo, readOnly = fals
       <div className="work-order-steps" aria-label="ความคืบหน้าของรายการ Scanner">
         {['เปิดใบงาน', 'ปฏิบัติงาน', 'บันทึกผล', 'ปิดรายการ'].map((label, index) => <div className={'work-order-step' + (index < currentStep ? ' complete' : index === currentStep ? ' current' : '')} key={label}><span>{index < currentStep ? '✓' : index + 1}</span><small>{label}</small></div>)}
       </div>
+      {activeRejectNotice && (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-900" role="alert">
+          <div className="font-bold text-red-800">
+            งานถูกส่งกลับแก้ไขโดย {activeRejectNotice.source}
+            {activeRejectNotice.by ? ` (${activeRejectNotice.by})` : ''}
+          </div>
+          {activeRejectNotice.reason && (
+            <div className="mt-1 text-xs leading-relaxed text-red-700">
+              <strong>เหตุผลที่ต้องแก้ไข:</strong> {activeRejectNotice.reason}
+            </div>
+          )}
+        </div>
+      )}
       <div className="work-order-layout">
         <div className="work-order-main">
           <section className="detail-section"><h3>Scanner เครื่องเดิม</h3><div className="detail-grid"><DetailField label="Serial Number" value={serial} /><DetailField label="รุ่น" value={task.scanner_model || task.model} /><DetailField label="สาขา" value={task.branch_name || task.branch} /><DetailField label="จังหวัด" value={task.province} /><DetailField label="LocationCode" value={task.location_code || task.code} /></div></section>
@@ -3699,15 +3769,18 @@ function Imports({ role, onComplete }: { role?: string; onComplete: () => Promis
     try {
       const res = await d1Api.importRegister(rows, fileName)
       const importedCount = typeof res.imported_count === 'number' ? res.imported_count : rows.length
+      const insertedCount = typeof res.inserted === 'number' ? res.inserted : importedCount
+      const updatedCount = typeof res.updated === 'number' ? res.updated : Math.max(0, importedCount - insertedCount)
       setResult({
-        inserted: importedCount,
-        updated: 0,
+        inserted: insertedCount,
+        updated: updatedCount,
         unmodified: 0,
         status: 'committed'
       } as any)
       setPreview(null)
       setRows([])
       setCommitUncertain(false)
+      setHistoryReloadKey(key => key + 1)
       if (res.warnings_count > 0) {
         setError(`⚠️ นำเข้าสำเร็จ ${importedCount} เครื่อง แต่มี ${res.warnings_count} รายการที่มี "หมายเหตุการแยกที่อยู่" (ระบบติดป้ายเตือนในหน้าทะเบียนแล้ว)`)
       }

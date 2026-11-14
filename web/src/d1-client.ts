@@ -211,6 +211,8 @@ export const d1Api = {
     success: boolean
     message: string
     imported_count?: number
+    inserted?: number
+    updated?: number
     skipped_count?: number
     branches_count: number
     warnings_count: number
@@ -270,12 +272,25 @@ export const d1Api = {
   }),
 
   // 10. ด่านที่ 1: SYM Admin ตรวจสอบผลงาน Onsite
-  symVerify: (taskId: string, decision: 'pass' | 'reject', reason?: string, version = 1) => request<{
+  symVerify: (
+    taskId: string,
+    decision: 'pass' | 'reject',
+    reason?: string,
+    version = 1,
+    options?: { register_observed_serial?: boolean },
+  ) => request<{
     success: boolean
     status: string
+    observed_registered?: boolean
   }>('/api/review/sym-verify', {
     method: 'POST',
-    body: JSON.stringify({ task_id: taskId, decision, reason, version }),
+    body: JSON.stringify({
+      task_id: taskId,
+      decision,
+      reason,
+      version,
+      register_observed_serial: options?.register_observed_serial,
+    }),
   }),
 
   // 11. ด่านที่ 2: Gable Customer ตรวจรับงานแบบ Batch รวมต่อสาขา (1 ลายเซ็นรับทั้ง Shop)
