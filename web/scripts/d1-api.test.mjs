@@ -413,6 +413,15 @@ test('HTTP runtime: Google OAuth config resolves cleanly and fails closed on par
   assert.equal(devCfg.mode, 'dev_fallback')
   assert.equal(devCfg.dev_auth_enabled, true)
   assert.equal(devCfg.google_enabled, false)
+  assert.equal(devCfg.admin_contact_email, 'admin@sym.co.th')
+
+  const customContactRes = await app.request('/api/auth/config', {}, { ...env, ADMIN_CONTACT_EMAIL: 'helpdesk@sym.co.th' })
+  const customContactCfg = await customContactRes.json()
+  assert.equal(customContactCfg.admin_contact_email, 'helpdesk@sym.co.th')
+
+  const badContactRes = await app.request('/api/auth/config', {}, { ...env, ADMIN_CONTACT_EMAIL: 'javascript:alert(1)' })
+  const badContactCfg = await badContactRes.json()
+  assert.equal(badContactCfg.admin_contact_email, 'admin@sym.co.th')
 
   const partialEnv = { ...env, GOOGLE_CLIENT_ID: 'client-id-123.apps.googleusercontent.com' }
   const partialCfgRes = await app.request('/api/auth/config', {}, partialEnv)

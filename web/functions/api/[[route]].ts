@@ -28,6 +28,7 @@ type Bindings = {
   GOOGLE_CLIENT_ID?: string
   GOOGLE_CLIENT_SECRET?: string
   SESSION_SECRET?: string
+  ADMIN_CONTACT_EMAIL?: string
 }
 
 type Variables = {
@@ -228,12 +229,17 @@ app.get('/health', async (c) => {
 // 1.5 โหมดการยืนยันตัวตนของระบบ + Google Sign-In OAuth 2.0 Endpoints
 app.get('/auth/config', (c) => {
   const authConfig = resolveGoogleAuthConfig(c.env)
+  const rawAdminEmail = String(c.env.ADMIN_CONTACT_EMAIL || '').trim()
+  const adminContactEmail = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(rawAdminEmail)
+    ? rawAdminEmail
+    : 'admin@sym.co.th'
   c.header('Cache-Control', 'no-store')
   return c.json({
     auth_provider: 'google_oauth',
     mode: authConfig.mode,
     google_enabled: authConfig.googleEnabled,
     dev_auth_enabled: authConfig.devAuthEnabled,
+    admin_contact_email: adminContactEmail,
   })
 })
 
@@ -1840,7 +1846,7 @@ app.post('/review/sym-verify', async (c) => {
 app.post('/review/customer-batch-accept', async (c) => {
   const user = c.get('user')
   if (user.role !== 'customer_reviewer') {
-    return c.json({ error: 'ต้องมีสิทธิ์ Gable Customer Reviewer จึงจะสามารถเซ็นตรวจรับได้' }, 403)
+    return c.json({ error: 'ต้องมีสิทธิ์ G-Able Customer Reviewer จึงจะสามารถเซ็นตรวจรับได้' }, 403)
   }
 
   let payload: { branch_id?: string; task_ids?: string[]; signature_base64?: string }
@@ -1965,15 +1971,15 @@ app.post('/review/customer-batch-accept', async (c) => {
     success: true,
     status: 'delivered',
     count: eligibleTasks.length,
-    message: `Gable ตรวจรับงานสำเร็จจำนวน ${eligibleTasks.length} เครื่อง`
+    message: `G-Able ตรวจรับงานสำเร็จจำนวน ${eligibleTasks.length} เครื่อง`
   })
 })
 
-// 12. Gable ปฏิเสธงาน (Customer Reject) -> ส่งตรงกลับช่างพร้อมระบุเหตุผล
+// 12. G-Able ปฏิเสธงาน (Customer Reject) -> ส่งตรงกลับช่างพร้อมระบุเหตุผล
 app.post('/review/customer-reject', async (c) => {
   const user = c.get('user')
   if (user.role !== 'customer_reviewer') {
-    return c.json({ error: 'ต้องมีสิทธิ์ Gable Customer Reviewer จึงจะสามารถปฏิเสธงานได้' }, 403)
+    return c.json({ error: 'ต้องมีสิทธิ์ G-Able Customer Reviewer จึงจะสามารถปฏิเสธงานได้' }, 403)
   }
 
   const { task_id, reason } = await c.req.json<{ task_id: string; reason: string }>()
@@ -1994,7 +2000,7 @@ app.post('/review/customer-reject', async (c) => {
   `).bind(reason.trim(), task_id).run()
 
   if (res.meta.changes === 0) {
-    return c.json({ error: 'ใบงานนี้ไม่ได้อยู่ในสถานะรอ Gable ตรวจรับ หรือข้อมูลถูกแก้ไขไปแล้ว' }, 409)
+    return c.json({ error: 'ใบงานนี้ไม่ได้อยู่ในสถานะรอ G-Able ตรวจรับ หรือข้อมูลถูกแก้ไขไปแล้ว' }, 409)
   }
 
   const revId = makeUniqueId(`rev-grj-${task_id}`)

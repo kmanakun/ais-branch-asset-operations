@@ -3867,6 +3867,26 @@ tbody tr:hover td {
   border: 1px solid #fecaca;
 }
 
+.login-help-note {
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: var(--ais-green-soft);
+  color: var(--ais-green-deep);
+  border: 1px solid var(--ais-green-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.login-help-link {
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  word-break: break-word;
+}
+
 .login-separator {
   position: relative;
   text-align: center;
