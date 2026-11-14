@@ -9,7 +9,6 @@ export interface AuthConfigResponse {
   mode: 'google_oauth' | 'dev_fallback' | 'misconfigured'
   google_enabled: boolean
   dev_auth_enabled: boolean
-  admin_contact_email?: string
 }
 
 export class ApiError extends Error {

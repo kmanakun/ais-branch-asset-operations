@@ -230,12 +230,7 @@ function App() {
     mode: 'dev_fallback',
     google_enabled: false,
     dev_auth_enabled: false,
-    admin_contact_email: 'admin@sym.co.th',
   })
-  const rawAdminEmail = String(authConfig.admin_contact_email || '').trim()
-  const adminContactEmail = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(rawAdminEmail)
-    ? rawAdminEmail
-    : 'admin@sym.co.th'
   const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(null)
   const handleDevSwitch = (email: string) => {
     setDevEmail(email)
@@ -453,18 +448,18 @@ function App() {
     if (!authError && !oauthError && !errorCode && !errorDescription) return
 
     const authErrorMessages: Record<string, string> = {
-      not_allowlisted: 'เข้าสู่ระบบ Google สำเร็จ แต่บัญชีอีเมลนี้ยังไม่อยู่ในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) กรุณาติดต่อทีมผู้ดูแลระบบ (Admin) หรือลองบัญชี Google อื่น',
+      not_allowlisted: 'เข้าสู่ระบบ Google สำเร็จ แต่บัญชีอีเมลนี้ยังไม่อยู่ในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) กรุณาติดต่อเจ้าของระบบหรือลองบัญชี Google อื่น',
       unverified_email: 'บัญชี Google นี้ยังไม่ได้ยืนยันอีเมล จึงไม่สามารถเข้าใช้งานระบบได้',
       access_denied: 'ยกเลิกการเข้าสู่ระบบด้วย Google',
       invalid_state: 'ลิงก์ยืนยันตัวตนหมดอายุหรือไม่ถูกต้อง กรุณากดเข้าสู่ระบบด้วย Google ใหม่อีกครั้ง',
-      oauth_misconfigured: 'การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อทีมผู้ดูแลระบบ (Admin)',
+      oauth_misconfigured: 'การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อเจ้าของระบบ',
       oauth_not_configured: 'ยังไม่ได้ตั้งค่า GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / SESSION_SECRET บน Cloudflare Pages',
-      oauth_failed: 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อทีมผู้ดูแลระบบ (Admin)',
+      oauth_failed: 'เข้าสู่ระบบด้วย Google ไม่สำเร็จ โปรดลองอีกครั้งหรือติดต่อเจ้าของระบบ',
     }
 
     setLoginError(
       (authError && authErrorMessages[authError]) ||
-        'เข้าสู่ระบบด้วย Google ไม่สำเร็จ บัญชีอาจยังไม่ได้รับอนุญาต หรือการตั้งค่าการยืนยันตัวตนยังไม่ครบ โปรดติดต่อผู้ดูแลระบบ (Admin)',
+        'เข้าสู่ระบบด้วย Google ไม่สำเร็จ บัญชีอาจยังไม่ได้รับอนุญาต หรือการตั้งค่าการยืนยันตัวตนยังไม่ครบ โปรดติดต่อเจ้าของระบบ',
     )
     callbackUrl.searchParams.delete('auth_error')
     callbackUrl.searchParams.delete('error')
@@ -735,7 +730,7 @@ function App() {
       return
     }
     if (authConfig.mode === 'misconfigured') {
-      setLoginError('การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อผู้ดูแลระบบ')
+      setLoginError('การตั้งค่า Google OAuth บนเซิร์ฟเวอร์ยังไม่ครบถ้วน กรุณาติดต่อเจ้าของระบบ')
       return
     }
     setLoginError('ระบบกำลังทำงานในโหมดทดสอบ (รอเปิดใช้งาน Google OAuth) กรุณาเลือกสิทธิ์ผู้ใช้งานจากแถบด้านบน (Dev Auth Bar)')
@@ -880,7 +875,7 @@ function App() {
     return (
       <>
         {authConfig.dev_auth_enabled && <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />}
-        <NoAccess email={authConfig.dev_auth_enabled ? devEmail : ''} error={signOutError || accessDeniedMessage} adminContactEmail={adminContactEmail} onSignOut={() => void signOut()} />
+        <NoAccess email={authConfig.dev_auth_enabled ? devEmail : ''} error={signOutError || accessDeniedMessage} onSignOut={() => void signOut()} />
       </>
     )
   }
@@ -888,17 +883,17 @@ function App() {
     return (
       <>
         {authConfig.dev_auth_enabled && <DevAuthBar currentEmail={devEmail} onSwitch={handleDevSwitch} />}
-        <LoginPage onGoogleSignIn={() => void signInWithGoogle()} onDemo={() => setDemoMode(true)} adminContactEmail={adminContactEmail} error={loginError} configured={authConfig.mode !== 'misconfigured'} submitting={isSigningIn} />
+        <LoginPage onGoogleSignIn={() => void signInWithGoogle()} onDemo={() => setDemoMode(true)} error={loginError} configured={authConfig.mode !== 'misconfigured'} submitting={isSigningIn} />
       </>
     )
   }
   const hasContextForCurrentUser = Boolean(session?.user.id && userContext && contextOwnerUserId.current === session.user.id)
   if (session && contextStatus === 'loading' && !hasContextForCurrentUser && !demoMode) return <div className="loading-screen"><div className="spinner" /><span>กำลังตรวจสอบสิทธิ์การใช้งาน</span></div>
   if (session && contextStatus === 'error' && !hasContextForCurrentUser && !demoMode) {
-    return <NoAccess email={contextError} error={signOutError} adminContactEmail={adminContactEmail} onSignOut={signOut} onRetry={() => void loadContext()} retry />
+    return <NoAccess email={contextError} error={signOutError} onSignOut={signOut} onRetry={() => void loadContext()} retry />
   }
   if (session && !userContext && !demoMode) {
-    return <NoAccess email={session.user.email || ''} error={signOutError} adminContactEmail={adminContactEmail} onSignOut={signOut} />
+    return <NoAccess email={session.user.email || ''} error={signOutError} onSignOut={signOut} />
   }
 
   const role = demoMode ? 'viewer' : userContext?.role
@@ -1118,11 +1113,10 @@ function GoogleMark() {
   </svg>
 }
 
-function LoginPage({ onGoogleSignIn, onDemo, adminContactEmail, error, configured, submitting }: {
-  onGoogleSignIn: () => void; onDemo: () => void; adminContactEmail: string; error: string; configured: boolean; submitting: boolean
+function LoginPage({ onGoogleSignIn, onDemo, error, configured, submitting }: {
+  onGoogleSignIn: () => void; onDemo: () => void; error: string; configured: boolean; submitting: boolean
 }) {
   const [helpOpen, setHelpOpen] = useState(false)
-  const mailtoHref = `mailto:${adminContactEmail}?subject=${encodeURIComponent('ขอเพิ่มสิทธิ์เข้าใช้งานระบบ AIS Branch & Asset Operations')}`
   return <div className="login-page">
     <section className="login-panel">
       <div className="login-brand"><div className="brand-mark"><span>AIS</span></div><span>BRANCH & ASSET OPERATIONS</span></div>
@@ -1140,20 +1134,14 @@ function LoginPage({ onGoogleSignIn, onDemo, adminContactEmail, error, configure
       <div className="login-card">
         <div className="login-icon"><LockKeyhole size={21} /></div>
         <h2>เข้าสู่ระบบ</h2>
-        <p>ใช้บัญชี Google ที่ได้รับอนุมัติจากผู้ดูแลระบบ (Admin)</p>
-        {error && (
-          <div className="form-error" role="alert">
-            <div>{error}</div>
-            <div className="mt-1.5">ติดต่อทีม Admin: <a className="login-help-link" href={mailtoHref}>{adminContactEmail}</a></div>
-          </div>
-        )}
+        <p>ใช้บัญชี Google ที่ได้รับอนุมัติจากเจ้าของระบบ</p>
+        {error && <div className="form-error" role="alert">{error}</div>}
         {helpOpen && (
           <div className="login-help-note" role="status">
-            <span>ใช้บัญชี Google ที่ได้รับอนุมัติในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) หากยังไม่มีสิทธิ์กรุณาติดต่อทีม Admin:</span>
-            <a className="login-help-link" href={mailtoHref}>{adminContactEmail}</a>
+            <span>ใช้บัญชี Google ที่ได้รับอนุมัติในรายชื่อผู้มีสิทธิ์ใช้งาน (Allowlist) หากยังเข้าไม่ได้ให้แจ้งอีเมล Google ของคุณกับเจ้าของระบบทาง LINE เพื่อเพิ่มสิทธิ์</span>
           </div>
         )}
-        {!configured && <div className="config-note">ระบบยืนยันตัวตนยังไม่พร้อมใช้งาน กรุณาติดต่อผู้ดูแลระบบ (<a className="login-help-link" href={mailtoHref}>{adminContactEmail}</a>)</div>}
+        {!configured && <div className="config-note">ระบบยืนยันตัวตนยังไม่พร้อมใช้งาน กรุณาติดต่อเจ้าของระบบ</div>}
         <button className="google-sign-in-button" type="button" onClick={onGoogleSignIn} disabled={submitting || !configured}>
           <GoogleMark />
           <span>{submitting ? 'กำลังเชื่อมต่อ Google…' : 'เข้าสู่ระบบด้วย Google'}</span>
@@ -1162,15 +1150,14 @@ function LoginPage({ onGoogleSignIn, onDemo, adminContactEmail, error, configure
         <button className="demo-button" type="button" onClick={onDemo}><Activity size={17} /> ดูตัวอย่างระบบด้วยข้อมูลจำลอง</button>
         <div className="privacy-note"><ShieldCheck size={15} className="shrink-0" /> <span>อนุญาตเฉพาะบัญชีใน Allowlist · โหมดตัวอย่างใช้ข้อมูลจำลอง</span></div>
       </div>
-      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={() => setHelpOpen(open => !open)} aria-expanded={helpOpen}>ติดต่อทีม Admin ({adminContactEmail})</button></div>
+      <div className="login-bottom"><span>ติดปัญหาการเข้าใช้งาน?</span><button type="button" onClick={() => setHelpOpen(open => !open)} aria-expanded={helpOpen}>ติดต่อเจ้าของระบบ</button></div>
       <div className="login-mobile-copyright">© 2026 AIS Branch &amp; Asset Operations · ระบบภายใน</div>
     </section>
   </div>
 }
 
-function NoAccess({ email, error, adminContactEmail, onSignOut, onRetry, retry = false }: { email: string; error: string; adminContactEmail: string; onSignOut: () => void; onRetry?: () => void; retry?: boolean }) {
-  const mailtoHref = `mailto:${adminContactEmail}?subject=${encodeURIComponent('ขอเพิ่มสิทธิ์เข้าใช้งานระบบ AIS Branch & Asset Operations')}`
-  return <div className="no-access"><div className="no-access-card"><div className="login-icon"><ShieldCheck size={22} /></div><div className="eyebrow">AIS BRANCH & ASSET OPERATIONS</div><h1>{retry ? 'ตรวจสอบสิทธิ์ไม่ได้' : 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน'}</h1><p>{retry ? email : `เข้าสู่ระบบสำเร็จด้วย ${email || 'บัญชีของคุณ'} แต่ยังไม่มีบทบาทที่กำหนดไว้ กรุณาติดต่อทีมผู้ดูแลระบบ (Admin)`}</p><div className="login-help-note"><span>อีเมลกลางทีม Admin:</span><a className="login-help-link" href={mailtoHref}>{adminContactEmail}</a></div>{error && <div className="form-error" role="alert">{error}</div>}{retry && onRetry && <button type="button" className="primary-button" onClick={onRetry}>ลองตรวจสอบอีกครั้ง</button>}<button type="button" className="secondary-button" onClick={onSignOut}><LogOut size={16} /> ออกจากระบบ</button></div></div>
+function NoAccess({ email, error, onSignOut, onRetry, retry = false }: { email: string; error: string; onSignOut: () => void; onRetry?: () => void; retry?: boolean }) {
+  return <div className="no-access"><div className="no-access-card"><div className="login-icon"><ShieldCheck size={22} /></div><div className="eyebrow">AIS BRANCH & ASSET OPERATIONS</div><h1>{retry ? 'ตรวจสอบสิทธิ์ไม่ได้' : 'บัญชีนี้ยังไม่มีสิทธิ์ใช้งาน'}</h1><p>{retry ? email : `เข้าสู่ระบบสำเร็จด้วย ${email || 'บัญชีของคุณ'} แต่ยังไม่มีบทบาทที่กำหนดไว้ กรุณาติดต่อเจ้าของระบบทาง LINE เพื่อตรวจสอบสิทธิ์`}</p>{error && <div className="form-error" role="alert">{error}</div>}{retry && onRetry && <button type="button" className="primary-button" onClick={onRetry}>ลองตรวจสอบอีกครั้ง</button>}<button type="button" className="secondary-button" onClick={onSignOut}><LogOut size={16} /> ออกจากระบบ</button></div></div>
 }
 
 function Overview({ demo, dashboard, error, onNavigate, role }: { demo: boolean; dashboard: DashboardData | null; error: string; onNavigate: (key: MenuKey, search?: string) => void; role?: string }) {

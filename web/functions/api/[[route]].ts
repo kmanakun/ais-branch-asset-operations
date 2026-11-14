@@ -28,7 +28,6 @@ type Bindings = {
   GOOGLE_CLIENT_ID?: string
   GOOGLE_CLIENT_SECRET?: string
   SESSION_SECRET?: string
-  ADMIN_CONTACT_EMAIL?: string
 }
 
 type Variables = {
@@ -229,17 +228,12 @@ app.get('/health', async (c) => {
 // 1.5 โหมดการยืนยันตัวตนของระบบ + Google Sign-In OAuth 2.0 Endpoints
 app.get('/auth/config', (c) => {
   const authConfig = resolveGoogleAuthConfig(c.env)
-  const rawAdminEmail = String(c.env.ADMIN_CONTACT_EMAIL || '').trim()
-  const adminContactEmail = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(rawAdminEmail)
-    ? rawAdminEmail
-    : 'admin@sym.co.th'
   c.header('Cache-Control', 'no-store')
   return c.json({
     auth_provider: 'google_oauth',
     mode: authConfig.mode,
     google_enabled: authConfig.googleEnabled,
     dev_auth_enabled: authConfig.devAuthEnabled,
-    admin_contact_email: adminContactEmail,
   })
 })
 
